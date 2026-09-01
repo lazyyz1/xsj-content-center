@@ -1,0 +1,43 @@
+@import "tailwindcss";
+@source "../../../packages/ui/src";
+
+:root {
+  --background: #f4f5f7;
+  --surface: #ffffff;
+  --surface-elevated: #f7f8fa;
+  --border: #e2e5e9;
+  --text-primary: #17191c;
+  --text-secondary: #68707a;
+  --accent: #246bfd;
+  --danger: #d92d20;
+  --warning: #b54708;
+  --success: #087443;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgb(16 24 40 / 0.05), 0 8px 24px rgb(16 24 40 / 0.04);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  background: var(--background);
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--text-primary);
+  font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input {
+  font: inherit;
+}

@@ -1,0 +1,37 @@
+{
+  "name": "ai-content-center",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "postinstall": "pnpm db:generate",
+    "dev": "dotenv -e .env -- turbo dev",
+    "dev:web": "dotenv -e .env -- pnpm --filter @content-center/web dev",
+    "dev:worker": "dotenv -e .env -- pnpm --filter @content-center/worker dev",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "test": "dotenv -e .env -- turbo test --concurrency=1",
+    "test:e2e": "dotenv -e .env -- pnpm --filter @content-center/web test:e2e",
+    "build": "dotenv -e .env -- turbo build",
+    "db:generate": "pnpm --filter @content-center/db db:generate",
+    "db:migrate": "dotenv -e .env -- pnpm --filter @content-center/db db:migrate",
+    "db:studio": "dotenv -e .env -- pnpm --filter @content-center/db db:studio",
+    "infra:up": "docker compose -f docker-compose.dev.yml up -d",
+    "infra:down": "docker compose -f docker-compose.dev.yml down"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.62.1",
+    "@types/node": "26.4.0",
+    "dotenv-cli": "11.0.0",
+    "eslint": "10.9.1",
+    "tsx": "4.23.13",
+    "turbo": "2.10.12",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.69.0",
+    "vitest": "4.1.11"
+  }
+}
