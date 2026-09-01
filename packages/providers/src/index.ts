@@ -9,3 +9,4 @@ export * from "./source-providers";
 export * from "./types";
 export * from "./redfox/index";
 export * from "./doubao/index";
+export * from "./openai-compatible/index";

@@ -1,0 +1,135 @@
+import "server-only";
+
+import { db, type Prisma } from "@content-center/db";
+import { LLMError, type LLMProvider } from "@content-center/providers";
+import { saveBrief } from "../brief-service";
+import { createEvidence } from "../evidence-service";
+import { saveMotherContent } from "../mother-content-service";
+import { loadLLMRuntime, type LLMRuntime } from "./llm-runtime";
+import { ProjectContextBuilder } from "./project-context";
+import { renderPrompt, selectPromptTemplate } from "./prompt-service";
+import { anglesSchema, briefPreviewSchema, evidencePreviewSchema, isRewriteAction, motherContentPreviewSchema, outputInstruction, rewritePreviewSchema, schemaForAction, type AIAction } from "./schemas";
+
+export class AIServiceError extends Error {
+  constructor(readonly code: "AI_RUN_NOT_FOUND" | "AI_RESULT_ALREADY_RESOLVED" | "AI_RESULT_NOT_APPLICABLE" | "AI_SELECTION_STALE" | "AI_REPLACE_CONFIRMATION_REQUIRED" | "AI_INVALID_INPUT", message: string) {
+    super(message); this.name = "AIServiceError";
+  }
+}
+
+function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
+function publicError(error: unknown) { return error instanceof LLMError ? error : new LLMError("LLM_GENERATION_FAILED", "AI 生成失败，请重试。", false); }
+
+export async function runAIAction(input: { workspaceId: string; userId: string; projectId: string; action: AIAction; selectedText?: string; instruction?: string }, dependencies: { runtime?: LLMRuntime; contextBuilder?: ProjectContextBuilder } = {}) {
+  const selectedText = input.selectedText?.trim();
+  if (isRewriteAction(input.action) && !selectedText) throw new AIServiceError("AI_INVALID_INPUT", "请先选择需要处理的母稿文字。");
+  if (selectedText && selectedText.length > 20_000) throw new AIServiceError("AI_INVALID_INPUT", "选择的文字过长。");
+  const [built, template, runtime] = await Promise.all([
+    (dependencies.contextBuilder ?? new ProjectContextBuilder()).build(input),
+    selectPromptTemplate(input.workspaceId, input.action),
+    dependencies.runtime ? Promise.resolve(dependencies.runtime) : loadLLMRuntime(input.workspaceId),
+  ]);
+  const inputSummary = { ...built.inputSummary, selectedTextLength: selectedText?.length ?? 0, hasInstruction: Boolean(input.instruction?.trim()) };
+  const run = await db.$transaction(async (tx) => {
+    const created = await tx.aIRun.create({ data: { workspaceId: input.workspaceId, projectId: input.projectId, userId: input.userId, action: input.action, provider: runtime.providerName, model: runtime.model, promptTemplateId: template.id, promptVersion: template.version, status: "RUNNING", inputSummary: json(inputSummary), contextTruncated: built.contextTruncated } });
+    await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_started", resourceType: "ai_run", resourceId: created.id, metadata: { projectId: input.projectId, action: input.action, promptVersion: template.version, contextTruncated: built.contextTruncated } } });
+    return created;
+  });
+  const promptInput = isRewriteAction(input.action) ? { selectedText, instruction: input.instruction?.trim() || "" } : undefined;
+  const prompt = `${renderPrompt(template.template, built.context, promptInput)}${outputInstruction(input.action)}`;
+  try {
+    const result = await runtime.provider.generateStructured({ systemPrompt: template.systemPrompt, prompt }, schemaForAction(input.action));
+    const usage = result.data.usage;
+    await db.$transaction([
+      db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(result.data.value), providerRequestId: result.data.providerRequestId, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, finishedAt: new Date() } }),
+      db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: "LLM", operation: input.action, requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, metadata: json({ airRunId: run.id, promptVersion: template.version, contextTruncated: built.contextTruncated }) } }),
+      db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_succeeded", resourceType: "ai_run", resourceId: run.id, metadata: { projectId: input.projectId, action: input.action, promptVersion: template.version, contextTruncated: built.contextTruncated } } }),
+    ]);
+    return { id: run.id, action: input.action, status: "SUCCEEDED" as const, output: result.data.value, contextTruncated: built.contextTruncated, provider: runtime.providerName, model: result.data.model, usage };
+  } catch (error) {
+    const failure = publicError(error);
+    await db.$transaction([
+      db.aIRun.update({ where: { id: run.id }, data: { status: "FAILED", errorCode: failure.code, errorMessage: failure.message, finishedAt: new Date() } }),
+      db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: "LLM", operation: input.action, requestId: run.id, success: false, units: 1, cost: null, metadata: json({ airRunId: run.id, errorCode: failure.code, promptVersion: template.version, contextTruncated: built.contextTruncated }) } }),
+      db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_failed", resourceType: "ai_run", resourceId: run.id, metadata: { projectId: input.projectId, action: input.action, errorCode: failure.code } } }),
+    ]);
+    throw failure;
+  }
+}
+
+async function scopedRun(input: { workspaceId: string; userId: string; projectId: string; runId: string }) {
+  const run = await db.aIRun.findFirst({ where: { id: input.runId, workspaceId: input.workspaceId, projectId: input.projectId, userId: input.userId } });
+  if (!run || run.status !== "SUCCEEDED" || !run.outputJson) throw new AIServiceError("AI_RUN_NOT_FOUND", "AI 结果不存在或不可用。");
+  if (run.appliedAt || run.discardedAt) throw new AIServiceError("AI_RESULT_ALREADY_RESOLVED", "该 AI 结果已经处理。");
+  return run;
+}
+
+async function markApplied(input: { workspaceId: string; userId: string; projectId: string; runId: string; target: string; changedFields: string[] }) {
+  await db.$transaction([
+    db.aIRun.update({ where: { id: input.runId }, data: { appliedAt: new Date() } }),
+    db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.result_applied", resourceType: "ai_run", resourceId: input.runId, metadata: { projectId: input.projectId, target: input.target, changedFields: input.changedFields } } }),
+  ]);
+}
+
+export async function applyAIResult(input: { workspaceId: string; userId: string; projectId: string; runId: string; expectedVersion?: number; selectedIndex?: number; selectedIndexes?: number[]; confirmReplace?: boolean; selectionStart?: number; selectionEnd?: number; mode?: "REPLACE" | "INSERT_AFTER" }) {
+  const run = await scopedRun(input);
+  if (run.action === "EXTRACT_EVIDENCE") {
+    const output = evidencePreviewSchema.parse(run.outputJson);
+    const indexes = input.selectedIndexes ?? [];
+    if (!indexes.length) throw new AIServiceError("AI_INVALID_INPUT", "请选择要添加的 Evidence。");
+    for (const index of indexes) {
+      const item = output.items[index];
+      if (!item) throw new AIServiceError("AI_INVALID_INPUT", "Evidence 选择无效。");
+      await createEvidence({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, data: item });
+    }
+    await markApplied({ ...input, target: "evidence", changedFields: ["items"] });
+    return { applied: true, target: "evidence", count: indexes.length };
+  }
+  if (run.action === "GENERATE_ANGLES") {
+    const output = anglesSchema.parse(run.outputJson);
+    const selected = output.angles[input.selectedIndex ?? -1];
+    if (!selected) throw new AIServiceError("AI_INVALID_INPUT", "请选择要采用的创作角度。");
+    const existing = await db.creativeBrief.findFirst({ where: { workspaceId: input.workspaceId, projectId: input.projectId } });
+    await saveBrief({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, data: { topic: selected.title, angle: selected.angle, audience: selected.targetAudience || existing?.audience || "", coreMessage: selected.coreMessage, keyPoints: existing ? (Array.isArray(existing.keyPoints) ? existing.keyPoints.filter((item): item is string => typeof item === "string") : []) : [], structure: selected.recommendedStructure, tone: existing?.tone || "", risks: selected.risk ? [selected.risk] : [], expectedVersion: input.expectedVersion ?? 0 } });
+    await markApplied({ ...input, target: "creative_brief", changedFields: ["topic", "angle", "audience", "coreMessage", "structure", "risks"] });
+    return { applied: true, target: "creative_brief" };
+  }
+  if (run.action === "GENERATE_BRIEF") {
+    const output = briefPreviewSchema.parse(run.outputJson);
+    await saveBrief({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, data: { topic: output.topic, angle: output.angle, audience: output.audience, coreMessage: output.coreMessage, keyPoints: output.keyPoints, structure: output.structure, tone: output.tone, risks: output.risks, expectedVersion: input.expectedVersion ?? 0 } });
+    await markApplied({ ...input, target: "creative_brief", changedFields: ["topic", "angle", "audience", "coreMessage", "keyPoints", "structure", "tone", "risks"] });
+    return { applied: true, target: "creative_brief" };
+  }
+  if (run.action === "GENERATE_MOTHER_CONTENT") {
+    const output = motherContentPreviewSchema.parse(run.outputJson);
+    const existing = await db.motherContent.findFirst({ where: { workspaceId: input.workspaceId, projectId: input.projectId } });
+    if (existing?.body.trim() && !input.confirmReplace) throw new AIServiceError("AI_REPLACE_CONFIRMATION_REQUIRED", "当前母稿已有内容，请确认替换。");
+    const content = await saveMotherContent({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, data: { title: output.title, outline: output.outline, body: output.body, expectedVersion: input.expectedVersion ?? 0 } });
+    await markApplied({ ...input, target: "mother_content", changedFields: ["title", "outline", "body"] });
+    return { applied: true, target: "mother_content", motherContent: { title: content.title, body: content.body, outline: content.outline, version: content.version } };
+  }
+  if (isRewriteAction(run.action as AIAction)) {
+    const output = rewritePreviewSchema.parse(run.outputJson);
+    const existing = await db.motherContent.findFirst({ where: { workspaceId: input.workspaceId, projectId: input.projectId } });
+    if (!existing) throw new AIServiceError("AI_SELECTION_STALE", "当前母稿不存在。");
+    const start = input.selectionStart ?? -1; const end = input.selectionEnd ?? -1;
+    if (start < 0 || end <= start || existing.body.slice(start, end) !== output.original) throw new AIServiceError("AI_SELECTION_STALE", "母稿已变化，请重新选择文字。");
+    const replacement = input.mode === "INSERT_AFTER" ? `${output.original}\n${output.aiVersion}` : output.aiVersion;
+    const body = `${existing.body.slice(0, start)}${replacement}${existing.body.slice(end)}`;
+    const content = await saveMotherContent({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, data: { title: existing.title, outline: Array.isArray(existing.outline) ? existing.outline.filter((item): item is string => typeof item === "string") : [], body, expectedVersion: input.expectedVersion ?? existing.version } });
+    await markApplied({ ...input, target: "mother_content", changedFields: ["body"] });
+    return { applied: true, target: "mother_content", motherContent: { title: content.title, body: content.body, outline: content.outline, version: content.version } };
+  }
+  throw new AIServiceError("AI_RESULT_NOT_APPLICABLE", "该分析结果仅供查看，不能直接写入正式内容。");
+}
+
+export async function discardAIResult(input: { workspaceId: string; userId: string; projectId: string; runId: string }) {
+  const run = await scopedRun(input);
+  await db.aIRun.update({ where: { id: run.id }, data: { discardedAt: new Date() } });
+  return { discarded: true };
+}
+
+export function getRecentAIRuns(input: { workspaceId: string; userId: string; projectId: string }) {
+  return db.aIRun.findMany({ where: { workspaceId: input.workspaceId, projectId: input.projectId, userId: input.userId }, orderBy: { createdAt: "desc" }, take: 5, select: { id: true, action: true, status: true, outputJson: true, contextTruncated: true, errorCode: true, errorMessage: true, appliedAt: true, discardedAt: true, createdAt: true } });
+}
+
+export type { LLMProvider };

@@ -1,5 +1,8 @@
 import type {
   ProviderInput,
+  LLMGenerateInput,
+  LLMStructuredResult,
+  LLMTextResult,
   ProviderResult,
   PublishingTaskStatus,
   SourceMetadata,
@@ -10,6 +13,7 @@ import type {
   TranscriptResult,
 } from "./types";
 import type { Readable } from "node:stream";
+import type { ZodType } from "zod";
 
 export interface SourceProvider {
   supports(input: string): boolean;
@@ -28,6 +32,8 @@ export interface TranscriptionProvider {
 }
 
 export interface LLMProvider {
+  generateText(input: LLMGenerateInput): Promise<ProviderResult<LLMTextResult>>;
+  generateStructured<T>(input: LLMGenerateInput, schema: ZodType<T>): Promise<ProviderResult<LLMStructuredResult<T>>>;
   generate(input: ProviderInput): Promise<ProviderResult<{ text: string }>>;
   rewrite(input: ProviderInput): Promise<ProviderResult<{ text: string }>>;
   summarize(input: ProviderInput): Promise<ProviderResult<{ text: string }>>;

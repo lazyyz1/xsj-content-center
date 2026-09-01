@@ -7,6 +7,7 @@ import { requireWorkspace } from "@/server/access";
 export default async function SettingsPage() {
   const { role } = await requireWorkspace();
   const links = [
+    { href: "/settings/creator-profile", title: "个人创作画像", description: "设置定位、表达风格、常用观点和内容偏好。" },
     { href: "/settings/integrations", title: "集成状态", description: "查看 Provider 配置状态，不向浏览器返回密钥。" },
     ...(canManageWorkspace(role)
       ? [{ href: "/settings/members", title: "成员", description: "查看当前 Workspace 成员和角色。" }]

@@ -49,6 +49,27 @@ export type TranscriptionInput = {
 
 export type ProviderInput = { prompt: string };
 
+export type LLMGenerateInput = ProviderInput & {
+  systemPrompt?: string;
+  temperature?: number;
+};
+
+export type LLMTokenUsage = {
+  inputTokens?: number;
+  outputTokens?: number;
+};
+
+export type LLMTextResult = {
+  text: string;
+  model: string;
+  providerRequestId?: string;
+  usage?: LLMTokenUsage;
+};
+
+export type LLMStructuredResult<T> = LLMTextResult & {
+  value: T;
+};
+
 export type SourceIngestInput = {
   value: string;
   title?: string;

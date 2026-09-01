@@ -1,0 +1,34 @@
+import { z } from "zod";
+
+export const AI_ACTIONS = ["ANALYZE_SOURCES", "EXTRACT_EVIDENCE", "GENERATE_ANGLES", "GENERATE_BRIEF", "GENERATE_MOTHER_CONTENT", "REWRITE_SELECTION", "SHORTEN", "EXPAND", "ADD_PERSONAL_VIEW", "HUMANIZE"] as const;
+export type AIAction = (typeof AI_ACTIONS)[number];
+
+const ids = z.array(z.string().min(1)).max(100).default([]);
+const insight = z.object({ text: z.string().min(1).max(10_000), evidenceIds: ids, sourceItemIds: ids }).strict();
+export const analyzeSourcesSchema = z.object({ topics: z.array(z.string()).max(100), coreClaims: z.array(insight).max(100), facts: z.array(insight).max(100), cases: z.array(insight).max(100), questions: z.array(z.string()).max(100), hooks: z.array(z.string()).max(100), structures: z.array(z.string()).max(100), risks: z.array(z.string()).max(100), reusableInsights: z.array(insight).max(100) }).strict();
+export const evidencePreviewSchema = z.object({ items: z.array(z.object({ type: z.enum(["FACT", "VIEWPOINT", "CASE", "DATA", "QUOTE", "EXPERIENCE", "QUESTION", "OTHER"]), excerpt: z.string().max(20_000).default(""), claim: z.string().max(5_000).default(""), note: z.string().max(5_000).default(""), sourceItemId: z.string().nullable().default(null) }).strict()).min(1).max(50) }).strict();
+export const anglesSchema = z.object({ angles: z.array(z.object({ title: z.string().min(1).max(2_000), angle: z.string().min(1).max(5_000), coreMessage: z.string().min(1).max(10_000), whyItWorks: z.string().max(5_000), targetAudience: z.string().max(2_000), recommendedStructure: z.array(z.string()).max(50), risk: z.string().max(5_000), evidenceIds: ids, sourceItemIds: ids }).strict()).min(1).max(10) }).strict();
+export const briefPreviewSchema = z.object({ topic: z.string().min(1).max(2_000), angle: z.string().max(5_000), audience: z.string().max(2_000), coreMessage: z.string().min(1).max(10_000), keyPoints: z.array(z.string()).max(100), structure: z.array(z.string()).max(100), tone: z.string().max(2_000), risks: z.array(z.string()).max(100), evidenceIds: ids, sourceItemIds: ids }).strict();
+export const motherContentPreviewSchema = z.object({ title: z.string().max(2_000), outline: z.array(z.string()).max(200), body: z.string().min(1).max(1_000_000), evidenceIds: ids, sourceItemIds: ids }).strict();
+export const rewritePreviewSchema = z.object({ original: z.string().min(1).max(20_000), aiVersion: z.string().min(1).max(50_000) }).strict();
+
+export function schemaForAction(action: AIAction): z.ZodTypeAny {
+  if (action === "ANALYZE_SOURCES") return analyzeSourcesSchema;
+  if (action === "EXTRACT_EVIDENCE") return evidencePreviewSchema;
+  if (action === "GENERATE_ANGLES") return anglesSchema;
+  if (action === "GENERATE_BRIEF") return briefPreviewSchema;
+  if (action === "GENERATE_MOTHER_CONTENT") return motherContentPreviewSchema;
+  return rewritePreviewSchema;
+}
+
+const outputShapes: Record<AIAction, string> = {
+  ANALYZE_SOURCES: '{"topics":string[],"coreClaims":Insight[],"facts":Insight[],"cases":Insight[],"questions":string[],"hooks":string[],"structures":string[],"risks":string[],"reusableInsights":Insight[]}; Insight={"text":string,"evidenceIds":string[],"sourceItemIds":string[]}',
+  EXTRACT_EVIDENCE: '{"items":[{"type":"FACT|VIEWPOINT|CASE|DATA|QUOTE|EXPERIENCE|QUESTION|OTHER","excerpt":string,"claim":string,"note":string,"sourceItemId":string|null}]}',
+  GENERATE_ANGLES: '{"angles":[{"title":string,"angle":string,"coreMessage":string,"whyItWorks":string,"targetAudience":string,"recommendedStructure":string[],"risk":string,"evidenceIds":string[],"sourceItemIds":string[]}]}',
+  GENERATE_BRIEF: '{"topic":string,"angle":string,"audience":string,"coreMessage":string,"keyPoints":string[],"structure":string[],"tone":string,"risks":string[],"evidenceIds":string[],"sourceItemIds":string[]}',
+  GENERATE_MOTHER_CONTENT: '{"title":string,"outline":string[],"body":string,"evidenceIds":string[],"sourceItemIds":string[]}',
+  REWRITE_SELECTION: '{"original":string,"aiVersion":string}', SHORTEN: '{"original":string,"aiVersion":string}', EXPAND: '{"original":string,"aiVersion":string}', ADD_PERSONAL_VIEW: '{"original":string,"aiVersion":string}', HUMANIZE: '{"original":string,"aiVersion":string}',
+};
+
+export function outputInstruction(action: AIAction) { return `\nReturn exactly one JSON object matching this shape. Do not use markdown fences:\n${outputShapes[action]}`; }
+export function isRewriteAction(action: AIAction) { return ["REWRITE_SELECTION", "SHORTEN", "EXPAND", "ADD_PERSONAL_VIEW", "HUMANIZE"].includes(action); }

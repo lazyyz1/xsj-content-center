@@ -195,7 +195,7 @@ export function IntegrationCard({
       ) : null}
 
       {integration.managedBy === "WORKSPACE" ? (
-        <Button className="mt-3 w-full" variant="secondary" disabled>{integration.connectionTest === "LIVE_API_TEST_NOT_AVAILABLE" ? "配置格式有效 · 无轻量 Live Test" : "测试连接 — Provider 尚未接入"}</Button>
+        <Button className="mt-3 w-full" variant="secondary" disabled>{integration.connectionTest === "LIVE_API_TEST_NOT_AVAILABLE" ? (integration.provider === "LLM" ? "配置保存后由首次生成验证" : "配置格式有效 · 无轻量 Live Test") : "测试连接 — Provider 尚未接入"}</Button>
       ) : null}
       {error ? <p role="alert" className="mt-3 text-sm text-[var(--danger)]">{error}</p> : null}
     </Card>

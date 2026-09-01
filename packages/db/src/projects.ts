@@ -12,6 +12,7 @@ export function findProjectForUser(
     },
     include: {
       createdBy: { select: { id: true, name: true } },
+      creatorProfile: true,
       sources: {
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         include: { sourceItem: { include: { transcript: true } } },

@@ -82,12 +82,17 @@ export async function createProject(input: {
     ? await db.sourceItem.findFirst({ where: { id: input.sourceItemId, workspaceId: input.workspaceId }, select: { id: true } })
     : null;
   if (input.sourceItemId && !source) throw new ProjectServiceError("SOURCE_NOT_FOUND");
+  const creatorProfile = await db.creatorProfile.findUnique({
+    where: { workspaceId_userId: { workspaceId: input.workspaceId, userId: input.userId } },
+    select: { id: true },
+  });
 
   return db.$transaction(async (tx) => {
     const project = await tx.contentProject.create({
       data: {
         workspaceId: input.workspaceId,
         createdById: input.userId,
+        creatorProfileId: creatorProfile?.id,
         title: input.title.trim(),
         description: input.description?.trim() || null,
         goal: input.goal?.trim() || null,

@@ -1,0 +1,102 @@
+import { randomUUID } from "node:crypto";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+
+import { db } from "@content-center/db";
+import { MockLLMProvider } from "@content-center/providers";
+import { applyAIResult, discardAIResult, runAIAction } from "../server/ai/ai-run-service";
+import { ProjectContextBuilder } from "../server/ai/project-context";
+import { selectPromptTemplate } from "../server/ai/prompt-service";
+import { getCreatorProfile, saveCreatorProfile } from "../server/creator-profile-service";
+import { createProject } from "../server/project-service";
+
+describe("AI creation engine", () => {
+  const runId = randomUUID();
+  const userAId = `ai-a-${runId}`;
+  const userBId = `ai-b-${runId}`;
+  let workspaceAId = "";
+  let workspaceBId = "";
+  let projectId = "";
+  let projectBId = "";
+  let sourceId = "";
+
+  beforeAll(async () => {
+    await db.user.createMany({ data: [{ id: userAId, name: "AI User A", email: `${userAId}@example.test` }, { id: userBId, name: "AI User B", email: `${userBId}@example.test` }] });
+    const [workspaceA, workspaceB] = await Promise.all([
+      db.workspace.create({ data: { name: "AI A", slug: `ai-a-${runId}`, members: { create: { userId: userAId, role: "OWNER" } } } }),
+      db.workspace.create({ data: { name: "AI B", slug: `ai-b-${runId}`, members: { create: { userId: userBId, role: "OWNER" } } } }),
+    ]);
+    workspaceAId = workspaceA.id; workspaceBId = workspaceB.id;
+    await saveCreatorProfile({ workspaceId: workspaceAId, userId: userAId, data: { displayName: "Creator A", positioning: "Practical creator", targetAudience: "Teams", tone: "Direct", preferredStyle: "Concrete", forbiddenStyle: "Empty slogans", coreTopics: ["AI workflow"], personalViews: ["Evidence before opinion"], brandTerms: ["Content Center"], forbiddenTerms: ["guaranteed"], hookPreferences: ["Question"], structurePreferences: ["Problem-solution"], ctaPreferences: ["Ask for feedback"], examplePhrases: ["先看证据"], notes: "" } });
+    await saveCreatorProfile({ workspaceId: workspaceBId, userId: userBId, data: { displayName: "Creator B", positioning: "Private", targetAudience: "Private", tone: "Private", preferredStyle: "", forbiddenStyle: "", coreTopics: [], personalViews: [], brandTerms: [], forbiddenTerms: [], hookPreferences: [], structurePreferences: [], ctaPreferences: [], examplePhrases: [], notes: "" } });
+    sourceId = (await db.sourceItem.create({ data: { workspaceId: workspaceAId, createdById: userAId, sourceType: "TEXT", sourcePlatform: "GENERIC", status: "READY", title: "Long source", rawText: "A".repeat(200) } })).id;
+    projectId = (await createProject({ workspaceId: workspaceAId, userId: userAId, title: "AI Project", goal: "Create a grounded draft", sourceItemId: sourceId })).id;
+    projectBId = (await createProject({ workspaceId: workspaceBId, userId: userBId, title: "Private AI Project" })).id;
+  });
+
+  afterAll(async () => {
+    await db.workspace.deleteMany({ where: { id: { in: [workspaceAId, workspaceBId] } } });
+    await db.user.deleteMany({ where: { id: { in: [userAId, userBId] } } });
+    await db.$disconnect();
+  });
+
+  it("isolates creator profiles and binds a creator profile to new projects", async () => {
+    await expect(getCreatorProfile(workspaceAId, userAId)).resolves.toMatchObject({ displayName: "Creator A" });
+    await expect(getCreatorProfile(workspaceAId, userBId)).resolves.toBeNull();
+    await expect(db.contentProject.findUniqueOrThrow({ where: { id: projectId } })).resolves.toMatchObject({ creatorProfileId: expect.any(String) });
+  });
+
+  it("selects the newest Workspace prompt before the system default", async () => {
+    const system = await selectPromptTemplate(workspaceAId, "ANALYZE_SOURCES");
+    expect(system.workspaceId).toBeNull();
+    await db.promptTemplate.create({ data: { workspaceId: workspaceAId, name: "Workspace Analyze v2", type: "ANALYZE_SOURCES", version: 2, systemPrompt: "Workspace system", template: "Workspace {{context}}" } });
+    await expect(selectPromptTemplate(workspaceAId, "ANALYZE_SOURCES")).resolves.toMatchObject({ workspaceId: workspaceAId, version: 2 });
+  });
+
+  it("selects action-specific context and records truncation", async () => {
+    const builder = new ProjectContextBuilder({ perSourceChars: 20, totalSourceChars: 20, totalEvidenceChars: 20 });
+    const analyze = await builder.build({ workspaceId: workspaceAId, userId: userAId, projectId, action: "ANALYZE_SOURCES" });
+    expect(analyze.context.sources[0]?.text).toHaveLength(20);
+    expect(analyze.contextTruncated).toBe(true);
+    const rewrite = await builder.build({ workspaceId: workspaceAId, userId: userAId, projectId, action: "HUMANIZE" });
+    expect(rewrite.context.sources).toEqual([]);
+    expect(rewrite.context.evidence).toEqual([]);
+    await expect(builder.build({ workspaceId: workspaceAId, userId: userAId, projectId: projectBId, action: "ANALYZE_SOURCES" })).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
+  });
+
+  it("keeps AI output in preview until explicit apply or discard", async () => {
+    const fixture = (input: { prompt: string }) => {
+      if (input.prompt.includes("EXTRACT_EVIDENCE")) return { items: [{ type: "FACT", excerpt: "Supported excerpt", claim: "Supported claim", note: "", sourceItemId: sourceId }] };
+      if (input.prompt.includes("GENERATE_ANGLES")) return { angles: [{ title: "Evidence-first angle", angle: "Start from a failed shortcut", coreMessage: "Evidence improves originality", whyItWorks: "Concrete", targetAudience: "Teams", recommendedStructure: ["Failure", "Evidence", "Method"], risk: "Avoid absolutes", evidenceIds: [], sourceItemIds: [sourceId] }] };
+      if (input.prompt.includes("GENERATE_BRIEF")) return { topic: "AI content workflow", angle: "Evidence first", audience: "Teams", coreMessage: "Build from evidence", keyPoints: ["Collect", "Verify", "Write"], structure: ["Hook", "Method", "CTA"], tone: "Direct", risks: ["No invented facts"], evidenceIds: [], sourceItemIds: [sourceId] };
+      if (input.prompt.includes("GENERATE_MOTHER_CONTENT")) return { title: "Evidence before drafting", outline: ["Hook", "Method"], body: "Mother body", evidenceIds: [], sourceItemIds: [sourceId] };
+      if (input.prompt.includes("HUMANIZE")) return { original: "Mother body", aiVersion: "A more natural mother body" };
+      return { topics: ["AI workflow"], coreClaims: [], facts: [], cases: [], questions: [], hooks: [], structures: [], risks: [], reusableInsights: [] };
+    };
+    const runtime = { provider: new MockLLMProvider(fixture), providerName: "MOCK", model: "mock-llm" };
+    const evidenceRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "EXTRACT_EVIDENCE" }, { runtime });
+    await expect(db.evidenceItem.count({ where: { projectId } })).resolves.toBe(0);
+    await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: evidenceRun.id, selectedIndexes: [0] });
+    await expect(db.evidenceItem.count({ where: { projectId } })).resolves.toBe(1);
+    const angleRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "GENERATE_ANGLES" }, { runtime });
+    await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: angleRun.id, selectedIndex: 0, expectedVersion: 0 });
+    const briefRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "GENERATE_BRIEF" }, { runtime });
+    await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: briefRun.id, expectedVersion: 1 });
+    const motherRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "GENERATE_MOTHER_CONTENT" }, { runtime });
+    await expect(db.motherContent.findUnique({ where: { projectId } })).resolves.toBeNull();
+    await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: motherRun.id, expectedVersion: 0 });
+    const replacementRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "GENERATE_MOTHER_CONTENT" }, { runtime });
+    await expect(applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: replacementRun.id, expectedVersion: 1 })).rejects.toMatchObject({ code: "AI_REPLACE_CONFIRMATION_REQUIRED" });
+    await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: replacementRun.id, expectedVersion: 1, confirmReplace: true });
+    const rewriteRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "HUMANIZE", selectedText: "Mother body" }, { runtime });
+    await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: rewriteRun.id, expectedVersion: 2, selectionStart: 0, selectionEnd: 11, mode: "REPLACE" });
+    await expect(db.motherContent.findUniqueOrThrow({ where: { projectId } })).resolves.toMatchObject({ body: "A more natural mother body", version: 3 });
+    const analyzeRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "ANALYZE_SOURCES" }, { runtime });
+    await discardAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: analyzeRun.id });
+    await expect(db.aIRun.findUniqueOrThrow({ where: { id: analyzeRun.id } })).resolves.toMatchObject({ discardedAt: expect.any(Date) });
+    const audit = await db.auditLog.findMany({ where: { workspaceId: workspaceAId, action: { startsWith: "ai." } }, select: { action: true, metadata: true } });
+    expect(audit.map(({ action }) => action)).toEqual(expect.arrayContaining(["ai.run_started", "ai.run_succeeded", "ai.result_applied"]));
+    expect(JSON.stringify(audit)).not.toContain("A more natural mother body");
+  });
+});
