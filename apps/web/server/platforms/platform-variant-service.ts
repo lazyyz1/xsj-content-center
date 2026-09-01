@@ -100,7 +100,14 @@ export async function updatePlatformVariant(input: { workspaceId: string; userId
   if (!existing) throw new PlatformVariantError("PLATFORM_VARIANT_NOT_FOUND", "平台版本尚未生成。");
   if (!input.data.body.trim()) throw new PlatformVariantError("PLATFORM_OUTPUT_INVALID", "平台正文不能为空。");
   if (input.platform !== "WECHAT_MOMENTS" && !input.data.title?.trim()) throw new PlatformVariantError("PLATFORM_OUTPUT_INVALID", "该平台标题不能为空。");
-  const status = input.data.status ?? existing.status;
+  const changedContent = (input.data.title?.trim() || null) !== existing.title
+    || input.data.body !== existing.body
+    || (input.data.hook?.trim() || null) !== existing.hook
+    || (input.data.summary?.trim() || null) !== existing.summary
+    || JSON.stringify(input.data.hashtags) !== JSON.stringify(strings(existing.hashtags))
+    || (input.data.mediaPlan !== undefined && JSON.stringify(input.data.mediaPlan) !== JSON.stringify(existing.mediaPlan))
+    || (input.data.metadata !== undefined && JSON.stringify(input.data.metadata) !== JSON.stringify(existing.metadata));
+  const status = changedContent && (existing.status === "APPROVED" || existing.status === "IN_REVIEW") ? "DRAFT" : input.data.status ?? existing.status;
   const result = await db.$transaction(async (tx) => {
     const updated = await tx.platformVariant.updateMany({ where: { id: existing.id, version: input.expectedVersion }, data: { title: input.data.title?.trim() || null, body: input.data.body, hook: input.data.hook?.trim() || null, summary: input.data.summary?.trim() || null, hashtags: json(input.data.hashtags), ...(input.data.mediaPlan === undefined ? {} : { mediaPlan: json(input.data.mediaPlan) }), ...(input.data.metadata === undefined ? {} : { metadata: json(input.data.metadata) }), status, version: { increment: 1 } } });
     if (updated.count !== 1) throw new PlatformVariantError("PLATFORM_VERSION_CONFLICT", "平台版本已更新，请刷新后重试。");

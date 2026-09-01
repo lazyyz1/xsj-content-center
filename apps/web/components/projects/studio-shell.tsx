@@ -52,7 +52,7 @@ export function StudioShell({ project, availableSources, editable, ai }: {
   const staleCount = effectiveVariants.filter(({ isStale }) => isStale).length;
   const tabClass = (name: typeof tab) => `h-10 flex-1 rounded-[var(--radius)] text-sm font-medium ${tab === name ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`;
   function selectPlatform(platform: SupportedPlatform) { setActivePlatform(platform); setContentTab(platform); }
-  function platformStatus(platform: SupportedPlatform) { const variant = effectiveVariants.find((item) => item.platform === platform); return !variant ? "未生成" : variant.isStale ? "母稿已更新" : variant.status === "READY" ? "已生成" : "草稿"; }
+  function platformStatus(platform: SupportedPlatform) { const variant = effectiveVariants.find((item) => item.platform === platform); return !variant ? "未生成" : variant.isStale ? "母稿已更新" : variant.status === "IN_REVIEW" ? "待审核" : variant.status === "APPROVED" ? "已批准" : "草稿"; }
 
   return (
     <>

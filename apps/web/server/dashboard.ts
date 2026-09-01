@@ -4,7 +4,7 @@ export async function getDashboardCounts(workspaceId: string) {
   const [materials, projects, pendingReview] = await Promise.all([
     db.sourceItem.count({ where: { workspaceId, status: { not: "ARCHIVED" } } }),
     db.contentProject.count({ where: { workspaceId, status: { not: "ARCHIVED" } } }),
-    db.contentProject.count({ where: { workspaceId, status: "IN_REVIEW" } }),
+    db.platformVariant.count({ where: { workspaceId, status: "IN_REVIEW" } }),
   ]);
   return { materials, projects, pendingReview, pendingPublish: 0 };
 }

@@ -20,6 +20,7 @@ function mockFixture(prompt: string) {
     creatorContribution: { personalViews: [], personalExperiences: [], personalCases: [], professionalKnowledge: [], positions: [], preferredExpressions: [], brandPrinciples: [], forbiddenExpressions: [] },
     recommendedDirection: "使用反常识结构，交给高级主笔完成成稿。", risks: ["MOCK MODE"], needsConfirmation: [],
   };
+  if (prompt.includes("Action: REVIEW_PLATFORM_CONTENT")) return { summary: "MOCK MODE：内容整体可读，仍需人工确认。", issues: [{ code: "MOCK_REVIEW_NOTE", severity: "INFO", message: "这是显式开发模式的审核建议。", field: "body", suggestion: "请由人工完成最终审批。" }], suggestions: ["人工核对事实与表达。"] };
   if (prompt.includes("Action: ADAPT_PLATFORM") && prompt.includes("Target: DOUYIN")) return { hook: "MOCK MODE 开场", title: "MOCK MODE 抖音标题", body: "MOCK MODE：抖音口播稿。", hashtags: ["MOCKMODE"], mediaPlan: { duration: 60, shotSuggestions: ["固定机位口播"] } };
   if (prompt.includes("Action: ADAPT_PLATFORM") && prompt.includes("Target: XIAOHONGSHU")) return { titles: ["MOCK MODE 标题一", "MOCK MODE 标题二", "MOCK MODE 标题三"], body: "MOCK MODE：小红书正文。", hashtags: ["MOCKMODE"], coverTitles: ["MOCK MODE 封面"], mediaPlan: { imageIdeas: ["文字卡片"] } };
   if (prompt.includes("Action: ADAPT_PLATFORM") && prompt.includes("Target: WECHAT_MOMENTS")) return { variants: [{ type: "SHORT", body: "MOCK MODE：短版。" }, { type: "VIEWPOINT", body: "MOCK MODE：观点版。" }, { type: "STORY", body: "MOCK MODE：故事版。" }] };

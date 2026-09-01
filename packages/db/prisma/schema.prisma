@@ -132,6 +132,14 @@ enum PromptType {
   HUMANIZE
   ADAPT_PLATFORM
   GENERATE_DEEP_CONTENT_PACKAGE
+  REVIEW_PLATFORM_CONTENT
+}
+
+enum ReviewResult {
+  PENDING
+  CHANGES_REQUESTED
+  APPROVED
+  REJECTED
 }
 
 enum AIRunStatus {
@@ -196,6 +204,7 @@ model User {
   aiRuns                  AIRun[]              @relation("AIRunUser")
   createdPlatformVariants PlatformVariant[]    @relation("PlatformVariantCreatedBy")
   createdDeepPackages     DeepContentPackage[] @relation("DeepContentPackageCreatedBy")
+  reviewRecords           ReviewRecord[]       @relation("ReviewRecordReviewer")
 }
 
 model Session {
@@ -270,6 +279,7 @@ model Workspace {
   platformVariants    PlatformVariant[]
   deepContentPackages DeepContentPackage[]
   aiRuns              AIRun[]
+  reviewRecords       ReviewRecord[]
 }
 
 model WorkspaceMember {
@@ -518,6 +528,7 @@ model ContentProject {
   platformVariants    PlatformVariant[]
   deepContentPackages DeepContentPackage[]
   aiRuns              AIRun[]
+  reviewRecords       ReviewRecord[]
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
@@ -731,12 +742,38 @@ model PlatformVariant {
   project             ContentProject        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   motherContent       MotherContent         @relation(fields: [motherContentId], references: [id], onDelete: Cascade)
   createdBy           User                  @relation("PlatformVariantCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  reviewRecords       ReviewRecord[]
 
   @@unique([projectId, platform])
   @@index([workspaceId, projectId])
   @@index([workspaceId, platform, updatedAt])
   @@index([motherContentId])
   @@index([createdById])
+}
+
+model ReviewRecord {
+  id                String          @id @default(cuid())
+  workspaceId       String
+  projectId         String
+  platformVariantId String
+  reviewerId        String
+  result            ReviewResult    @default(PENDING)
+  issues            Json
+  comment           String?
+  aiReviewed        Boolean         @default(false)
+  aiRunId           String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  workspace         Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project           ContentProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  platformVariant   PlatformVariant @relation(fields: [platformVariantId], references: [id], onDelete: Cascade)
+  reviewer          User            @relation("ReviewRecordReviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
+  aiRun             AIRun?          @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, projectId, createdAt])
+  @@index([platformVariantId, createdAt])
+  @@index([reviewerId])
+  @@index([aiRunId])
 }
 
 model AIRun {
@@ -770,6 +807,7 @@ model AIRun {
   user               User              @relation("AIRunUser", fields: [userId], references: [id], onDelete: Restrict)
   promptTemplate     PromptTemplate?   @relation(fields: [promptTemplateId], references: [id], onDelete: Restrict)
   platformTemplate   PlatformTemplate? @relation(fields: [platformTemplateId], references: [id], onDelete: Restrict)
+  reviewRecords      ReviewRecord[]
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, projectId, createdAt])
