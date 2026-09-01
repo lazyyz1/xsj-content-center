@@ -8,3 +8,10 @@ export function getWorkspaceIntegrationConfig(
 ) {
   return integrationService.getDecryptedIntegrationConfig(workspaceId, provider);
 }
+
+export function getWorkspaceIntegrationStatus(
+  workspaceId: string,
+  provider: ConfigurableIntegrationProvider,
+) {
+  return integrationService.getIntegrationStatus(workspaceId, provider);
+}

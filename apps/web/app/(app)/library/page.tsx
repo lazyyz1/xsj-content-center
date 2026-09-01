@@ -1,5 +1,5 @@
 import { Badge, Card } from "@content-center/ui";
-import { LayoutGrid, List, Search } from "lucide-react";
+import { LayoutGrid, List, Music2, Search } from "lucide-react";
 import Link from "next/link";
 import { IngestDialog } from "@/components/library/ingest-dialog";
 import { LibraryPoller } from "@/components/library/library-poller";
@@ -33,7 +33,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
       <header className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">素材库</h1>
-          <p className="mt-2 text-sm text-[var(--text-secondary)]">收录文本和公开网页，并用标签与 Collection 组织个人素材。</p>
+          <p className="mt-2 text-sm text-[var(--text-secondary)]">收录文本、公开网页和抖音作品，并用标签与 Collection 组织个人素材。</p>
         </div>
         <IngestDialog />
       </header>
@@ -85,7 +85,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
             return (
               <Card key={item.id} className={listView ? "flex flex-col gap-4 p-4 sm:flex-row sm:items-center" : "overflow-hidden"}>
                 <div className={listView ? "h-16 w-24 shrink-0 rounded-lg bg-[var(--surface-elevated)]" : "h-32 bg-[var(--surface-elevated)]"}>
-                  {item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" className="h-full w-full rounded-[inherit] object-cover" /> : <div className="grid h-full place-items-center text-xs text-[var(--text-secondary)]">{item.sourceType}</div>}
+                  {item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" className="h-full w-full rounded-[inherit] object-cover" /> : <div className="grid h-full place-items-center text-xs text-[var(--text-secondary)]">{item.sourcePlatform === "DOUYIN" ? <span className="inline-flex items-center gap-1"><Music2 size={16} />抖音</span> : item.sourceType}</div>}
                 </div>
                 <div className={listView ? "min-w-0 flex-1" : "p-4"}>
                   <div className="mb-2 flex flex-wrap gap-1.5"><Badge>{item.sourcePlatform}</Badge><Badge>{item.sourceType}</Badge><Badge>{statusLabels[item.status]}</Badge>{isMock ? <Badge className="border-[var(--warning)] text-[var(--warning)]">MOCK</Badge> : null}</div>

@@ -15,6 +15,7 @@ export function findSourceForUser(
       ingestJobs: { orderBy: { createdAt: "desc" }, take: 10 },
       tags: { include: { tag: true }, orderBy: { createdAt: "asc" } },
       collections: { include: { collection: true }, orderBy: { createdAt: "asc" } },
+      assets: { orderBy: { createdAt: "asc" } },
     },
   });
 }
@@ -28,6 +29,20 @@ export function findIngestJobForUser(
       id: input.jobId,
       workspaceId: input.workspaceId,
       workspace: { members: { some: { userId: input.userId } } },
+    },
+  });
+}
+
+export function findSourceAssetForUser(
+  prisma: PrismaClient,
+  input: { userId: string; workspaceId: string; sourceAssetId: string },
+) {
+  return prisma.sourceAsset.findFirst({
+    where: {
+      id: input.sourceAssetId,
+      workspaceId: input.workspaceId,
+      workspace: { members: { some: { userId: input.userId } } },
+      sourceItem: { workspaceId: input.workspaceId },
     },
   });
 }

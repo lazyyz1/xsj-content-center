@@ -1,0 +1,117 @@
+import { createServer, type Server } from "node:http";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { RedFoxClient } from "./client";
+import { RedFoxError } from "./errors";
+import { RedFoxSourceProvider } from "./provider";
+
+let server: Server;
+let baseUrl: string;
+
+function payloadFor(url: string) {
+  const mediaBase = "https://media.example.com";
+  if (url.includes("photo")) return { code: 2000, data: { awemeType: "photo", platform: "douyin", title: "图文", imageUrls: [`${mediaBase}/1.jpg`, `${mediaBase}/2.jpg`] } };
+  if (url.includes("missing-video")) return { code: 200, data: { awemeType: "video", platform: "dy" } };
+  if (url.includes("empty-images")) return { code: 200, data: { awemeType: "photo", platform: "dy", imageUrls: [] } };
+  if (url.includes("unknown-type")) return { code: 200, data: { awemeType: "live", platform: "dy" } };
+  if (url.includes("other-platform")) return { code: 200, data: { awemeType: "video", platform: "xhs", videoUrl: `${mediaBase}/clip.mp4` } };
+  return { code: 200, data: { awemeType: "video", platform: "dy", title: "真实视频", videoUrl: `${mediaBase}/clip.mp4`, awemeId: "123" } };
+}
+
+beforeAll(async () => {
+  server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { url: string; source: string };
+    if (request.headers["x-api-key"] !== "ak_test" || body.source !== "AI内容生产中心") {
+      response.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ code: 400, msg: "bad fixture request" }));
+      return;
+    }
+    if (body.url.includes("timeout")) return;
+    if (body.url.includes("invalid-json")) {
+      response.writeHead(200, { "content-type": "application/json" }).end("not-json");
+      return;
+    }
+    if (body.url.includes("invalid-schema")) {
+      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ unexpected: true }));
+      return;
+    }
+    if (body.url.includes("empty-data")) {
+      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ code: 200, data: null }));
+      return;
+    }
+    const cases: Array<[string, number, unknown]> = [
+      ["3106", 200, { code: 3106, msg: "missing" }],
+      ["3107", 200, { code: 3107, msg: "expired" }],
+      ["bad-request", 200, { code: 400, msg: "bad" }],
+      ["rate-limit", 429, { code: 429, msg: "slow" }],
+      ["server-error", 500, { code: 500, msg: "down" }],
+      ["unknown-code", 200, { code: 4999, msg: "unknown" }],
+    ];
+    const matched = cases.find(([needle]) => body.url.includes(needle));
+    if (matched) {
+      response.writeHead(matched[1], { "content-type": "application/json", "x-request-id": "req-test" }).end(JSON.stringify(matched[2]));
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json", "x-request-id": "req-success" }).end(JSON.stringify(payloadFor(body.url)));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("fixture server did not bind");
+  baseUrl = `http://127.0.0.1:${address.port}`;
+});
+
+afterAll(async () => {
+  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+});
+
+function provider(timeoutMs = 500) {
+  return new RedFoxSourceProvider(new RedFoxClient({ apiKey: "ak_test", baseUrl, timeoutMs }));
+}
+
+async function expectCode(work: Promise<unknown>, code: string, retryable: boolean) {
+  await expect(work).rejects.toMatchObject({ code, retryable });
+}
+
+describe("RedFoxClient and RedFoxSourceProvider", () => {
+  it("normalizes a 200 video response", async () => {
+    const result = await provider().resolve("https://www.douyin.com/video/video");
+    expect(result).toMatchObject({ providerMode: "REAL", data: { sourceType: "VIDEO", sourcePlatform: "DOUYIN", title: "真实视频", media: [{ type: "VIDEO" }] } });
+  });
+
+  it("normalizes a 2000 photo response", async () => {
+    const result = await provider().resolve("https://www.douyin.com/note/photo");
+    expect(result.data.media).toHaveLength(2);
+    expect(result.data.sourceType).toBe("IMAGE");
+  });
+
+  it.each([
+    ["3106", "REDFOX_AUTH_FAILED", false],
+    ["3107", "REDFOX_AUTH_FAILED", false],
+    ["bad-request", "REDFOX_BAD_REQUEST", false],
+    ["rate-limit", "REDFOX_RATE_LIMITED", true],
+    ["server-error", "REDFOX_SERVER_ERROR", true],
+    ["invalid-json", "REDFOX_INVALID_RESPONSE", false],
+    ["invalid-schema", "REDFOX_INVALID_RESPONSE", false],
+    ["empty-data", "REDFOX_EMPTY_DATA", false],
+    ["unknown-code", "REDFOX_API_ERROR", false],
+  ])("maps %s to %s", async (slug, code, retryable) => {
+    await expectCode(provider().resolve(`https://www.douyin.com/video/${slug}`), code, retryable);
+  });
+
+  it("maps timeout as retryable", async () => {
+    await expectCode(provider(20).resolve("https://www.douyin.com/video/timeout"), "REDFOX_TIMEOUT", true);
+  });
+
+  it.each([
+    ["unknown-type", "REDFOX_UNSUPPORTED_CONTENT_TYPE"],
+    ["missing-video", "REDFOX_MEDIA_MISSING"],
+    ["empty-images", "REDFOX_MEDIA_MISSING"],
+    ["other-platform", "REDFOX_UNSUPPORTED_PLATFORM"],
+  ])("rejects normalized content case %s", async (slug, code) => {
+    await expectCode(provider().resolve(`https://www.douyin.com/video/${slug}`), code, false);
+  });
+
+  it("does not accept an empty key", () => {
+    expect(() => new RedFoxClient({ apiKey: "" })).toThrow(RedFoxError);
+  });
+});

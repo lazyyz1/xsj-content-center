@@ -4,12 +4,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
 import { listLibrarySources } from "@/server/library";
-import { createSourceAndJob } from "@/server/source-service";
+import { createSourceAndJob, SourceServiceError } from "@/server/source-service";
+import { extractDouyinShareUrl, RedFoxError } from "@content-center/providers";
 
 const createSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("TEXT"), title: z.string().trim().max(200).optional(), text: z.string().trim().min(1).max(500_000), notes: z.string().trim().max(2_000).optional() }),
   z.object({ kind: z.literal("URL"), url: z.string().trim().url().max(2_000) }),
-  z.object({ kind: z.literal("VIDEO_MOCK"), url: z.string().trim().regex(/^mock:\/\/video\/[a-z0-9-]+$/i) }),
+  z.object({ kind: z.literal("DOUYIN"), shareText: z.string().trim().min(1).max(10_000) }),
 ]);
 
 export async function GET(request: Request) {
@@ -35,10 +36,46 @@ export async function POST(request: Request) {
     const duplicate = await db.sourceItem.findFirst({ where: { workspaceId: context.workspace.id, canonicalUrl }, select: { id: true } });
     if (duplicate) return NextResponse.json({ error: "DUPLICATE_URL", sourceItemId: duplicate.id }, { status: 409 });
   }
+  if (parsed.data.kind === "DOUYIN") {
+    let canonicalUrl: string;
+    try {
+      canonicalUrl = normalizeSourceUrl(extractDouyinShareUrl(parsed.data.shareText));
+    } catch (error) {
+      if (error instanceof RedFoxError) return apiError(error.code, 400, error.message);
+      return apiError("INVALID_DOUYIN_URL", 400, "请输入有效的抖音作品分享链接。");
+    }
+    const duplicate = await db.sourceItem.findFirst({
+      where: { workspaceId: context.workspace.id, canonicalUrl },
+      select: { id: true, status: true },
+    });
+    if (duplicate) {
+      return NextResponse.json(
+        {
+          error: "DUPLICATE_SOURCE",
+          message: duplicate.status === "FAILED"
+            ? "素材库中已经存在，可进入素材详情重新解析。"
+            : "素材库中已经存在。",
+          sourceItemId: duplicate.id,
+          retryAllowed: duplicate.status === "FAILED",
+        },
+        { status: 409 },
+      );
+    }
+  }
   try {
     const created = await createSourceAndJob({ workspaceId: context.workspace.id, userId: context.session.user.id, source: parsed.data });
     return NextResponse.json({ sourceItemId: created.sourceItem.id, jobId: created.ingestJob.id, status: "QUEUED" }, { status: 202 });
   } catch (error) {
+    if (error instanceof SourceServiceError) {
+      return apiError(
+        error.code,
+        error.code === "REDFOX_DISABLED" ? 409 : 400,
+        error.code === "REDFOX_DISABLED"
+          ? "RedFox Integration 已禁用。"
+          : "请先在 设置 → Integrations 配置红狐 API。",
+      );
+    }
+    if (error instanceof RedFoxError) return apiError(error.code, 400, error.message);
     if (error instanceof Error && error.message === "QUEUE_UNAVAILABLE") return apiError("QUEUE_UNAVAILABLE", 503);
     return apiError("SOURCE_CREATE_FAILED", 409, "该内容可能已被当前 Workspace 收录。");
   }

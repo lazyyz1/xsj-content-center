@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-type Kind = "TEXT" | "URL" | "VIDEO_MOCK";
+type Kind = "TEXT" | "URL" | "DOUYIN";
 
 export function IngestDialog() {
   const router = useRouter();
@@ -15,19 +15,22 @@ export function IngestDialog() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [created, setCreated] = useState<{ sourceItemId: string } | null>(null);
+  const [existingSourceId, setExistingSourceId] = useState<string | null>(null);
 
   async function submit(formData: FormData) {
     setBusy(true);
     setError("");
+    setExistingSourceId(null);
     const payload = kind === "TEXT"
       ? { kind, title: formData.get("title"), text: formData.get("text"), notes: formData.get("notes") }
       : kind === "URL"
         ? { kind, url: formData.get("url") }
-        : { kind, url: "mock://video/demo-1" };
+        : { kind, shareText: formData.get("shareText") };
     const response = await fetch("/api/source-items", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
       setError(body.message || body.error || "收录失败，请检查输入。");
+      if (body.error === "DUPLICATE_SOURCE" && typeof body.sourceItemId === "string") setExistingSourceId(body.sourceItemId);
       setBusy(false);
       return;
     }
@@ -40,6 +43,7 @@ export function IngestDialog() {
     setOpen(false);
     setCreated(null);
     setError("");
+    setExistingSourceId(null);
     setKind("TEXT");
   }
 
@@ -62,7 +66,7 @@ export function IngestDialog() {
             ) : (
               <>
                 <div className="mt-5 grid grid-cols-3 gap-2 rounded-xl bg-[var(--surface-elevated)] p-1">
-                  {(["TEXT", "URL", "VIDEO_MOCK"] as const).map((value) => <button key={value} onClick={() => { setKind(value); setError(""); }} className={`rounded-lg px-3 py-2 text-sm ${kind === value ? "bg-[var(--surface)] font-medium shadow-sm" : "text-[var(--text-secondary)]"}`}>{value === "TEXT" ? "粘贴文本" : value === "URL" ? "网页链接" : "视频链接"}</button>)}
+                  {(["TEXT", "URL", "DOUYIN"] as const).map((value) => <button key={value} onClick={() => { setKind(value); setError(""); }} className={`rounded-lg px-3 py-2 text-sm ${kind === value ? "bg-[var(--surface)] font-medium shadow-sm" : "text-[var(--text-secondary)]"}`}>{value === "TEXT" ? "粘贴文本" : value === "URL" ? "网页链接" : "抖音视频"}</button>)}
                 </div>
                 <form action={submit} className="mt-5 grid gap-4">
                   {kind === "TEXT" ? <>
@@ -72,10 +76,10 @@ export function IngestDialog() {
                   </> : kind === "URL" ? (
                     <label className="grid gap-1.5 text-sm">网页链接<input name="url" type="url" required placeholder="https://example.com/article" className="h-10 rounded-[var(--radius)] border bg-transparent px-3" /></label>
                   ) : (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900"><strong>MOCK</strong><br />当前阶段仅支持 Mock 视频测试。真实视频解析将在 RedFox Provider 接入后开放。测试入口固定为 <code>mock://video/demo-1</code>。</div>
+                    <label className="grid gap-1.5 text-sm">抖音分享链接或分享文案<textarea name="shareText" required rows={5} maxLength={10000} placeholder={'3.21 复制打开抖音，看看这个作品…\nhttps://v.douyin.com/xxxx/'} className="rounded-[var(--radius)] border bg-transparent p-3 leading-6" /><span className="text-xs text-[var(--text-secondary)]">仅支持一个明确的抖音作品链接；需先在设置中配置 RedFox。</span></label>
                   )}
-                  {error ? <p role="alert" className="text-sm text-[var(--danger)]">{error}</p> : null}
-                  <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={close}>取消</Button><Button type="submit" disabled={busy}>{busy ? "提交中…" : kind === "VIDEO_MOCK" ? "运行 Mock 视频" : "提交收录"}</Button></div>
+                  {error ? <p role="alert" className="text-sm text-[var(--danger)]">{error}{existingSourceId ? <> <Link href={`/library/${existingSourceId}`} onClick={close} className="underline">查看已有素材</Link></> : null}</p> : null}
+                  <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={close}>取消</Button><Button type="submit" disabled={busy}>{busy ? "提交中…" : "提交收录"}</Button></div>
                 </form>
               </>
             )}

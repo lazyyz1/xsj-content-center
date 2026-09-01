@@ -4,6 +4,8 @@
 
 | Repository | Commit | Source file / 模块 | License | 参考价值 | 我们怎么实现 | copied / adapted / inspired | modifications | 后续集成方式 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| [redfox-community](https://github.com/redfox-data/redfox-community) | `82f35863d0eb42267eb7fb75024f4ecf88a2444c`（video-downloader 最近相关提交 `826071af4146a17d9399a9f9a010fc783790819d`） | `skills/video-downloader/SKILL.md`、`skills/video-downloader/assets/downloader.py` | 未声明 / NOASSERTION | 官方短视频解析协议、Douyin URL 变体、响应字段与错误码 | 依据公开协议独立实现 TypeScript RedFoxClient/Provider；使用 `POST /story/api/parseWork/parse`、`X-API-KEY`、`{url, source}`，成功码按 `2*` 判断 | inspired | 未复制 Python/CLI；新增 Zod 校验、Workspace 凭证、显式错误、ApiUsage、私有 Storage 和安全媒体下载 | 运行时通过 RedFox HTTPS REST API 连接 |
+| [redfox-python-sdk](https://github.com/redfox-data/redfox-python-sdk) | `a711fcbde85fe7632ab91ec6b3b018504bac7e43`（v0.4.0） | `redfox/client.py`、`redfox/endpoints/tools.py`、`redfox/exceptions.py` | README 声明 MIT；仓库未提供可识别 LICENSE 文件 | 官方 30 秒超时、429/5xx/网络异常重试建议与结构化异常；通用下载端点确认 | 沿用现有 BullMQ attempt/backoff 执行可重试错误，不引入 Python SDK | inspired | SDK 使用 `REDFOX_API_KEY` Header，而目标 video-downloader Skill 使用 `X-API-KEY`；阶段 3B 采用后者并记录差异 | 不嵌入 SDK；仅参考协议和运行建议 |
 | [Voxen](https://github.com/Yefclub/Voxen) | `27547cfd8e68` | `prisma/schema.prisma`、`apps/worker/src/storage.py`、`apps/worker/src/pipeline.py` | MIT | URL/媒体进入后台任务并产生结构化 transcript 的处理边界 | 阶段 2 采用“SourceItem → IngestJob → BullMQ Worker → 正文/Transcript”的流程边界 | inspired | 使用 TypeScript、BullMQ、Prisma、显式状态和 Workspace 作用域从零实现；未复制源码 | 无直接集成计划；必要时仅参考公开协议 |
 | [ContentFlow](https://github.com/dmamediai/contentflow) | `287b505e7839` | `apps/api/prisma/schema.prisma`、`apps/api/src/middleware/rbac.ts`、`apps/api/src/routes/teams.ts`、`apps/api/src/routes/media.ts`、`apps/api/src/mcp` | 未声明 / NOASSERTION | Team/RBAC、媒体路由、AI Studio、MCP 和内容复用流程 | 采用服务端成员关系查询和集中式角色判断；不复制其业务路由 | inspired | 将 Team 概念收敛为 Workspace，角色固定为 OWNER/ADMIN/EDITOR/VIEWER | 许可证明确前不复制或适配源码；如需能力，仅通过公开 API/MCP |
 | [OverSeek Socials / socaliseit](https://github.com/MerlinStacks/socaliseit) | `e4672b07a62e` | `app/prisma/schema.prisma`、`app/src/lib/bullmq/connection.ts`、`app/src/lib/bullmq/queues.ts`、`docker-compose.dev.yml` | MIT | Next.js + Prisma、队列连接、媒体库和 Docker Compose 的基础设施组织 | 采用 Web/Worker 分离、共享 Redis 队列名称与 Compose 健康检查 | inspired | 缩减为单一 `SYSTEM_HEALTH_CHECK` 队列，不引入媒体/发布 Worker | 当前不直接集成 |
@@ -26,6 +28,7 @@
 - 真实发布必须经过人工 `APPROVED`，批准后变更应使批准失效（后续发布阶段实现）。
 - 阶段 2 新增 `CONTENT_INGEST` 业务队列，Provider 请求与持久化只在 Worker 中执行。
 - 阶段 2 素材库只实现 PostgreSQL `ilike` 搜索、人工标签与一级 Collection，不引入独立搜索服务或目录树。
+- 阶段 3B 只开放 Douyin，RedFox 其它平台能力不进入 UI 或业务成功路径。
 
 ## 第三方 Packages
 

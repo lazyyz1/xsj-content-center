@@ -3,16 +3,18 @@ import type {
   ProviderResult,
   PublishingTaskStatus,
   SourceMetadata,
+  FetchedSourceMedia,
   SourceIngestInput,
   SourceIngestResult,
   TranscriptResult,
 } from "./types";
+import type { Readable } from "node:stream";
 
 export interface SourceProvider {
   supports(input: string): boolean;
   resolve(input: string): Promise<ProviderResult<SourceMetadata>>;
   fetchMetadata(input: string): Promise<ProviderResult<SourceMetadata>>;
-  fetchMedia(input: string): Promise<ProviderResult<{ body: Uint8Array; contentType?: string }>>;
+  fetchMedia(input: string): Promise<ProviderResult<FetchedSourceMedia>>;
 }
 
 export interface IngestSourceProvider extends SourceProvider {
@@ -39,7 +41,12 @@ export interface PublishingProvider {
 }
 
 export interface StorageProvider {
-  upload(input: { key: string; body: Uint8Array; contentType?: string }): Promise<ProviderResult<{ key: string }>>;
+  upload(input: {
+    key: string;
+    body: Uint8Array | Readable;
+    contentType?: string;
+    contentLength?: number;
+  }): Promise<ProviderResult<{ key: string }>>;
   delete(key: string): Promise<ProviderResult<{ key: string }>>;
   getSignedUrl(key: string, expiresInSeconds?: number): Promise<ProviderResult<{ url: string }>>;
 }

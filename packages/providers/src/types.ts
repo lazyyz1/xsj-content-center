@@ -17,6 +17,18 @@ export type SourceMetadata = {
   raw?: unknown;
 };
 
+export type SourceMediaReference = {
+  type: "VIDEO" | "IMAGE";
+  url: string;
+  index?: number;
+};
+
+export type FetchedSourceMedia = {
+  body?: Uint8Array;
+  contentType?: string;
+  media?: SourceMediaReference[];
+};
+
 export type TranscriptResult = {
   language?: string;
   durationMs?: number;

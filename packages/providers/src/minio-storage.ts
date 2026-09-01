@@ -41,13 +41,14 @@ export class MinioStorageProvider implements StorageProvider {
     }
   }
 
-  async upload(input: { key: string; body: Uint8Array; contentType?: string }) {
+  async upload(input: Parameters<StorageProvider["upload"]>[0]) {
     await this.ensureBucket();
     await this.client.send(new PutObjectCommand({
       Bucket: this.config.bucket,
       Key: input.key,
       Body: input.body,
       ContentType: input.contentType,
+      ContentLength: input.contentLength,
     }));
     return { providerMode: "REAL" as const, data: { key: input.key } };
   }

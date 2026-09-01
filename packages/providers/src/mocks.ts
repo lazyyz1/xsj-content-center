@@ -74,7 +74,7 @@ export class MockPublishingProvider implements PublishingProvider {
 }
 
 export class MockStorageProvider implements StorageProvider {
-  async upload(input: { key: string; body: Uint8Array; contentType?: string }) {
+  async upload(input: Parameters<StorageProvider["upload"]>[0]) {
     return mockResult("StorageProvider", { key: input.key });
   }
 

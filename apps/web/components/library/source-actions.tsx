@@ -79,7 +79,7 @@ export function SourceActions({
       <section className="flex flex-wrap gap-2 rounded-xl border p-4">
         {status === "FAILED" && failedJobId ? <Button disabled={busy} onClick={() => action(async () => { await call(`/api/ingest-jobs/${failedJobId}/retry`, "POST"); })}>重试采集</Button> : null}
         {status !== "ARCHIVED" ? <Button variant="secondary" disabled={busy} onClick={() => action(async () => { await call(`/api/source-items/${sourceId}`, "PATCH"); })}>归档</Button> : null}
-        <Button variant="secondary" disabled={busy} className="text-[var(--danger)]" onClick={() => { if (window.confirm("确定永久删除这条素材及其 Transcript、任务、标签和 Collection 关系吗？")) action(async () => { await call(`/api/source-items/${sourceId}`, "DELETE"); router.push("/library"); }); }}>删除</Button>
+        <Button variant="secondary" disabled={busy} className="text-[var(--danger)]" onClick={() => { if (window.confirm("确定永久删除这条素材、媒体文件、任务、标签和 Collection 关系吗？")) action(async () => { await call(`/api/source-items/${sourceId}`, "DELETE"); router.push("/library"); }); }}>删除</Button>
       </section>
       {error ? <p role="alert" className="text-sm text-[var(--danger)]">{error}</p> : null}
     </div>

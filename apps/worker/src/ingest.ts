@@ -9,6 +9,7 @@ import {
 } from "@content-center/providers";
 import { UnrecoverableError, type Job } from "bullmq";
 import type { ContentIngestPayload } from "./queue";
+import { processRedFoxIngestJob } from "./redfox-ingest";
 
 function providerFor(source: { sourceType: string; sourceUrl: string | null }): IngestSourceProvider {
   if (source.sourceType === "TEXT") return new ManualTextSourceProvider();
@@ -46,6 +47,10 @@ export async function processContentIngestJob(job: Job<ContentIngestPayload>) {
   if (record.status === "SUCCEEDED") return { status: "already-succeeded" as const };
   if (record.status === "CANCELLED" || record.sourceItem.status === "ARCHIVED") {
     throw new UnrecoverableError("Ingest job is no longer runnable");
+  }
+
+  if (record.sourceItem.sourcePlatform === "DOUYIN" && record.provider === "REDFOX") {
+    return processRedFoxIngestJob(record, job, startedAt);
   }
 
   const attempt = job.attemptsMade + 1;

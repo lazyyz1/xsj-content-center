@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { UnsupportedIntegrationTester } from "./tester";
 
 describe("IntegrationTester", () => {
-  it("reports the provider stage as unsupported without making a request", async () => {
+  it("does not invent a live RedFox health endpoint", async () => {
     await expect(new UnsupportedIntegrationTester().testConnection("REDFOX")).resolves.toEqual({
       supported: false,
-      status: "UNSUPPORTED_UNTIL_PROVIDER_STAGE",
-      message: "Provider 尚未接入",
+      status: "LIVE_API_TEST_NOT_AVAILABLE",
+      message: "配置格式可校验；RedFox 未公开无需作品链接的轻量连接测试。",
     });
   });
 });

@@ -6,6 +6,7 @@ process.env.INTEGRATION_ENCRYPTION_KEY ||= randomBytes(32).toString("base64");
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
+  workers: 1,
   retries: 0,
   reporter: "list",
   use: {

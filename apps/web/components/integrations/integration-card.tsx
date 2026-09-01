@@ -14,6 +14,7 @@ type Integration = {
   updatedAt: string | null;
   description: string;
   managedBy: "WORKSPACE" | "ENVIRONMENT";
+  connectionTest: "UNSUPPORTED_UNTIL_PROVIDER_STAGE" | "LIVE_API_TEST_NOT_AVAILABLE" | "NOT_APPLICABLE";
 };
 
 const statusLabel = {
@@ -173,7 +174,7 @@ export function IntegrationCard({
       ) : null}
 
       {integration.managedBy === "WORKSPACE" ? (
-        <Button className="mt-3 w-full" variant="secondary" disabled>测试连接 — Provider 尚未接入</Button>
+        <Button className="mt-3 w-full" variant="secondary" disabled>{integration.connectionTest === "LIVE_API_TEST_NOT_AVAILABLE" ? "配置格式有效 · 无轻量 Live Test" : "测试连接 — Provider 尚未接入"}</Button>
       ) : null}
       {error ? <p role="alert" className="mt-3 text-sm text-[var(--danger)]">{error}</p> : null}
     </Card>

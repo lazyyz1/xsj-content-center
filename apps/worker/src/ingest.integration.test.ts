@@ -1,25 +1,47 @@
 import { createServer, type Server } from "node:http";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { db } from "@content-center/db";
+import { IntegrationService } from "@content-center/integrations";
+import { minioStorageFromEnv } from "@content-center/providers";
 import { QueueEvents } from "bullmq";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONTENT_INGEST, CONTENT_INGEST_QUEUE, createContentIngestQueue, createContentIngestWorker } from "./queue";
 
 describe("CONTENT_INGEST integration", () => {
+  const originalEncryptionKey = process.env.INTEGRATION_ENCRYPTION_KEY;
   const runId = randomUUID();
   const userId = `ingest-${runId}`;
   let workspaceId = "";
   let fixture: Server | undefined;
   let fixtureOrigin = "";
   let transientRequests = 0;
+  let redfoxRequests = 0;
   const worker = createContentIngestWorker();
   const events = new QueueEvents(CONTENT_INGEST_QUEUE, { connection: { host: "localhost", port: 6379 } });
 
   beforeAll(async () => {
+    process.env.INTEGRATION_ENCRYPTION_KEY = randomBytes(32).toString("base64");
     await db.user.create({ data: { id: userId, name: "Ingest Test", email: `${userId}@example.test` } });
     const workspace = await db.workspace.create({ data: { name: "Ingest Test", slug: `ingest-${runId}`, members: { create: { userId, role: "OWNER" } } } });
     workspaceId = workspace.id;
-    const localFixture = createServer((request, response) => {
+    const localFixture = createServer(async (request, response) => {
+      if (request.url === "/story/api/parseWork/parse") {
+        redfoxRequests += 1;
+        expect(request.headers["x-api-key"]).toBe("ak_worker_fixture");
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { url: string };
+        expect(body.url).toBe("https://www.douyin.com/video/worker-fixture");
+        response.writeHead(200, { "content-type": "application/json", "x-request-id": "worker-redfox-request" });
+        response.end(JSON.stringify({ code: 200, data: { awemeType: "video", platform: "dy", title: "RedFox Worker Fixture", videoUrl: `${fixtureOrigin}/fixture.mp4` } }));
+        return;
+      }
+      if (request.url === "/fixture.mp4") {
+        const body = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112, 109, 112, 52, 50]);
+        response.writeHead(200, { "content-type": "video/mp4", "content-length": body.length });
+        response.end(body);
+        return;
+      }
       if (request.url === "/transient" && transientRequests++ === 0) {
         response.writeHead(503, { "content-type": "text/plain; charset=utf-8" });
         response.end("temporarily unavailable");
@@ -34,6 +56,12 @@ describe("CONTENT_INGEST integration", () => {
     if (!address || typeof address === "string") throw new Error("Fixture did not bind");
     fixtureOrigin = `http://127.0.0.1:${address.port}`;
     process.env.INGEST_TEST_FIXTURE_ORIGIN = fixtureOrigin;
+    await new IntegrationService().saveIntegrationConfig({
+      workspaceId,
+      userId,
+      provider: "REDFOX",
+      config: { baseUrl: fixtureOrigin, apiKey: "ak_worker_fixture" },
+    });
     await Promise.all([worker.waitUntilReady(), events.waitUntilReady()]);
   });
 
@@ -47,6 +75,8 @@ describe("CONTENT_INGEST integration", () => {
     await db.user.deleteMany({ where: { id: userId } });
     await db.$disconnect();
     delete process.env.INGEST_TEST_FIXTURE_ORIGIN;
+    if (originalEncryptionKey === undefined) delete process.env.INTEGRATION_ENCRYPTION_KEY;
+    else process.env.INTEGRATION_ENCRYPTION_KEY = originalEncryptionKey;
   });
 
   async function createAndRun(type: "TEXT" | "URL", value: string) {
@@ -94,5 +124,47 @@ describe("CONTENT_INGEST integration", () => {
       errorCode: null,
     });
     await expect(db.auditLog.count({ where: { resourceId: run.jobRecord.id, action: "ingest.retried" } })).resolves.toBe(1);
+  });
+
+  it("runs Douyin through the REAL RedFox path into MinIO and SourceAsset", async () => {
+    redfoxRequests = 0;
+    const source = await db.sourceItem.create({
+      data: {
+        workspaceId,
+        createdById: userId,
+        sourceType: "VIDEO",
+        sourcePlatform: "DOUYIN",
+        sourceUrl: "https://www.douyin.com/video/worker-fixture",
+        canonicalUrl: "https://www.douyin.com/video/worker-fixture",
+        status: "PENDING",
+      },
+    });
+    const jobRecord = await db.ingestJob.create({
+      data: {
+        workspaceId,
+        sourceItemId: source.id,
+        requestedById: userId,
+        jobType: "PROCESS_MEDIA",
+        provider: "REDFOX",
+        providerMode: "REAL",
+        maxAttempts: 3,
+      },
+    });
+    const queue = createContentIngestQueue();
+    const queueJob = await queue.add(CONTENT_INGEST, { jobId: jobRecord.id, workspaceId, sourceItemId: source.id, requestedById: userId }, { attempts: 3, removeOnComplete: true, removeOnFail: true });
+    await expect(queueJob.waitUntilFinished(events, 15_000)).resolves.toMatchObject({ status: "ok" });
+    await queue.close();
+
+    expect(redfoxRequests).toBe(1);
+    await expect(db.sourceItem.findUnique({ where: { id: source.id } })).resolves.toMatchObject({ status: "READY", sourceType: "VIDEO", sourcePlatform: "DOUYIN", title: "RedFox Worker Fixture" });
+    const asset = await db.sourceAsset.findFirstOrThrow({ where: { workspaceId, sourceItemId: source.id } });
+    expect(asset).toMatchObject({ status: "STORED", assetType: "VIDEO", sourceProvider: "REDFOX", mimeType: "video/mp4" });
+    expect(asset.storageKey).toMatch(new RegExp(`^workspaces/${workspaceId}/sources/${source.id}/assets/${asset.id}/original$`));
+    const signedUrl = await minioStorageFromEnv().getSignedUrl(asset.storageKey!);
+    const stored = await fetch(signedUrl.data.url);
+    expect(stored.status).toBe(200);
+    expect(Buffer.from(await stored.arrayBuffer())).toHaveLength(12);
+    await expect(db.transcript.findUnique({ where: { sourceItemId: source.id } })).resolves.toBeNull();
+    await expect(db.apiUsage.findFirst({ where: { workspaceId, provider: "REDFOX", operation: "PARSE_WORK" } })).resolves.toMatchObject({ success: true, units: 1, cost: null, providerRequestId: "worker-redfox-request" });
   });
 });

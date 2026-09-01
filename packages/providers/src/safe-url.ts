@@ -92,8 +92,12 @@ export async function resolvePublicAddress(
 const defaultTransport: SafeTransport = (url, address, options) =>
   new Promise((resolve, reject) => {
     const requester = url.protocol === "https:" ? httpsRequest : httpRequest;
-    const lookup: LookupFunction = (_hostname, _options, callback) => {
-      callback(null, address.address, address.family);
+    const lookup: LookupFunction = (_hostname, options, callback) => {
+      callback(
+        null,
+        options.all ? [{ address: address.address, family: address.family }] : address.address,
+        options.all ? undefined : address.family,
+      );
     };
     const request = requester(
       url,

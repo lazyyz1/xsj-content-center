@@ -78,6 +78,19 @@ enum ProviderMode {
   MOCK
 }
 
+enum AssetType {
+  VIDEO
+  IMAGE
+  AUDIO
+}
+
+enum AssetStatus {
+  REMOTE
+  DOWNLOADING
+  STORED
+  FAILED
+}
+
 model User {
   id                   String            @id @default(cuid())
   name                 String
@@ -93,6 +106,7 @@ model User {
   createdSources       SourceItem[]      @relation("SourceCreatedBy")
   requestedIngestJobs  IngestJob[]       @relation("IngestRequestedBy")
   createdCollections   Collection[]      @relation("CollectionCreatedBy")
+  apiUsages            ApiUsage[]
 }
 
 model Session {
@@ -155,6 +169,8 @@ model Workspace {
   transcripts  Transcript[]
   contentTags  ContentTag[]
   collections  Collection[]
+  sourceAssets SourceAsset[]
+  apiUsages    ApiUsage[]
 }
 
 model WorkspaceMember {
@@ -227,11 +243,56 @@ model SourceItem {
   transcript     Transcript?
   tags           SourceItemTag[]
   collections    CollectionItem[]
+  assets         SourceAsset[]
 
   @@unique([workspaceId, canonicalUrl])
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
   @@index([workspaceId, sourcePlatform])
+}
+
+model SourceAsset {
+  id             String      @id @default(cuid())
+  workspaceId    String
+  sourceItemId   String
+  assetType      AssetType
+  sourceProvider String
+  remoteUrl      String
+  storageKey     String?
+  mimeType       String?
+  sizeBytes      BigInt?
+  status         AssetStatus @default(REMOTE)
+  metadata       Json?
+  storedAt       DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  workspace      Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceItem     SourceItem  @relation(fields: [sourceItemId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, sourceItemId])
+  @@index([sourceItemId, status])
+}
+
+model ApiUsage {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  userId            String
+  provider          String
+  operation         String
+  requestId         String
+  providerRequestId String?
+  success           Boolean
+  units             Int       @default(1)
+  cost              Decimal?
+  metadata          Json?
+  createdAt         DateTime  @default(now())
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user              User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, provider, operation])
+  @@index([requestId])
 }
 
 model IngestJob {
