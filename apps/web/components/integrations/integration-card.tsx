@@ -50,6 +50,8 @@ export function IntegrationCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [secret, setSecret] = useState("");
+  const [doubaoApiKey, setDoubaoApiKey] = useState("");
+  const [doubaoAccessToken, setDoubaoAccessToken] = useState("");
 
   async function call(path: string, method: string, body?: unknown) {
     const response = await fetch(path, {
@@ -68,6 +70,8 @@ export function IntegrationCard({
     try {
       await work();
       setSecret("");
+      setDoubaoApiKey("");
+      setDoubaoAccessToken("");
       router.refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Integration operation failed.");
@@ -85,11 +89,14 @@ export function IntegrationCard({
     }
     if (integration.provider === "DOUBAO_ASR") {
       return {
+        authMode: String(formData.get("authMode") || "API_KEY"),
         baseUrl: String(formData.get("baseUrl") || ""),
+        ...(doubaoApiKey ? { apiKey: doubaoApiKey } : {}),
         appId: String(formData.get("appId") || ""),
-        ...(secret ? { accessToken: secret } : {}),
+        ...(doubaoAccessToken ? { accessToken: doubaoAccessToken } : {}),
         resourceId: String(formData.get("resourceId") || ""),
-        cluster: String(formData.get("cluster") || ""),
+        boostingTableId: String(formData.get("boostingTableId") || ""),
+        boostingTableName: String(formData.get("boostingTableName") || ""),
       };
     }
     return {
@@ -132,32 +139,46 @@ export function IntegrationCard({
               <Input name="llmProvider" aria-label="LLM Provider" required defaultValue={value(integration.publicConfig, "provider")} placeholder="openai-compatible" />
             </label>
           ) : null}
-          <label className="grid gap-1 text-sm">
-            {integration.name} Base URL
-            <Input name="baseUrl" type="url" aria-label={`${integration.name} Base URL`} required={integration.provider !== "DOUBAO_ASR"} defaultValue={value(integration.publicConfig, "baseUrl")} placeholder="https://example.invalid" />
-          </label>
           {integration.provider === "DOUBAO_ASR" ? (
             <>
-              <label className="grid gap-1 text-sm">App ID<Input name="appId" aria-label="豆包 App ID" defaultValue={value(integration.publicConfig, "appId")} /></label>
-              <label className="grid gap-1 text-sm">Resource ID<Input name="resourceId" aria-label="豆包 Resource ID" defaultValue={value(integration.publicConfig, "resourceId")} /></label>
-              <label className="grid gap-1 text-sm">Cluster<Input name="cluster" aria-label="豆包 Cluster" defaultValue={value(integration.publicConfig, "cluster")} /></label>
+              <label className="grid gap-1 text-sm">
+                认证方式
+                <select name="authMode" aria-label="豆包认证方式" defaultValue={value(integration.publicConfig, "authMode") || "API_KEY"} className="h-10 rounded-[var(--radius)] border bg-transparent px-3">
+                  <option value="API_KEY">API Key（推荐）</option>
+                  <option value="LEGACY_APP_TOKEN">Legacy App ID + Access Token</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-sm">
+                API Key
+                <Input type="password" value={doubaoApiKey} onChange={(event) => setDoubaoApiKey(event.target.value)} aria-label="豆包 ASR API Key" autoComplete="new-password" placeholder={integration.configured ? "留空以保留现有凭证" : "输入新版控制台 API Key"} />
+              </label>
+              <label className="grid gap-1 text-sm">Resource ID<Input name="resourceId" aria-label="豆包 Resource ID" defaultValue={value(integration.publicConfig, "resourceId") || "volc.bigasr.auc_turbo"} /></label>
+              <details className="rounded-lg border p-3">
+                <summary className="cursor-pointer text-sm font-medium">高级设置</summary>
+                <div className="mt-3 grid gap-3">
+                  <label className="grid gap-1 text-sm">Base URL<Input name="baseUrl" type="url" aria-label="豆包 ASR Base URL" defaultValue={value(integration.publicConfig, "baseUrl") || "https://openspeech.bytedance.com"} /></label>
+                  <label className="grid gap-1 text-sm">Legacy App ID<Input name="appId" aria-label="豆包 App ID" defaultValue={value(integration.publicConfig, "appId")} /></label>
+                  <label className="grid gap-1 text-sm">Legacy Access Token<Input type="password" value={doubaoAccessToken} onChange={(event) => setDoubaoAccessToken(event.target.value)} aria-label="豆包 ASR Access Token" autoComplete="new-password" placeholder="仅旧版控制台需要" /></label>
+                  <label className="grid gap-1 text-sm">Hotword Table ID<Input name="boostingTableId" aria-label="豆包 Hotword Table ID" defaultValue={value(integration.publicConfig, "boostingTableId")} /></label>
+                  <label className="grid gap-1 text-sm">Hotword Table Name<Input name="boostingTableName" aria-label="豆包 Hotword Table Name" defaultValue={value(integration.publicConfig, "boostingTableName")} /></label>
+                </div>
+              </details>
             </>
-          ) : null}
+          ) : (
+            <label className="grid gap-1 text-sm">
+              {integration.name} Base URL
+              <Input name="baseUrl" type="url" aria-label={`${integration.name} Base URL`} required defaultValue={value(integration.publicConfig, "baseUrl")} placeholder="https://example.invalid" />
+            </label>
+          )}
           {integration.provider === "LLM" ? (
             <label className="grid gap-1 text-sm">Model<Input name="model" aria-label="LLM Model" required defaultValue={value(integration.publicConfig, "model")} /></label>
           ) : null}
-          <label className="grid gap-1 text-sm">
-            {integration.provider === "DOUBAO_ASR" ? "Access Token" : "API Key"}
-            <Input
-              type="password"
-              value={secret}
-              onChange={(event) => setSecret(event.target.value)}
-              aria-label={`${integration.name} ${integration.provider === "DOUBAO_ASR" ? "Access Token" : "API Key"}`}
-              required={!integration.configured && integration.provider !== "DOUBAO_ASR"}
-              autoComplete="new-password"
-              placeholder={integration.configured ? "留空以保留现有凭证" : "输入凭证"}
-            />
-          </label>
+          {integration.provider !== "DOUBAO_ASR" ? (
+            <label className="grid gap-1 text-sm">
+              API Key
+              <Input type="password" value={secret} onChange={(event) => setSecret(event.target.value)} aria-label={`${integration.name} API Key`} required={!integration.configured} autoComplete="new-password" placeholder={integration.configured ? "留空以保留现有凭证" : "输入凭证"} />
+            </label>
+          ) : null}
           <div className="flex flex-wrap gap-2">
             <Button disabled={busy || !encryptionConfigured}>保存{integration.name}</Button>
             {integration.status === "CONFIGURED" ? (

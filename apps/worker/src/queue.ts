@@ -1,5 +1,20 @@
 import { Queue, UnrecoverableError, Worker, type ConnectionOptions } from "bullmq";
 import { processContentIngestJob } from "./ingest";
+import { processTranscribeSourceJob } from "./transcription";
+import {
+  transcriptionQueueConnection,
+  TRANSCRIBE_SOURCE,
+  TRANSCRIBE_SOURCE_QUEUE,
+  type TranscribeSourcePayload,
+} from "./transcription-queue";
+
+export {
+  createTranscribeSourceQueue,
+  enqueueTranscribeSource,
+  TRANSCRIBE_SOURCE,
+  TRANSCRIBE_SOURCE_QUEUE,
+  type TranscribeSourcePayload,
+} from "./transcription-queue";
 
 export const SYSTEM_QUEUE = "system-health";
 export const SYSTEM_HEALTH_CHECK = "SYSTEM_HEALTH_CHECK";
@@ -12,7 +27,6 @@ export type ContentIngestPayload = {
   sourceItemId: string;
   requestedById: string;
 };
-
 function connection(): ConnectionOptions {
   const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
   return {
@@ -71,5 +85,16 @@ export function createContentIngestWorker() {
       return processContentIngestJob(job);
     },
     { connection: connection(), concurrency: 2 },
+  );
+}
+
+export function createTranscribeSourceWorker() {
+  return new Worker<TranscribeSourcePayload>(
+    TRANSCRIBE_SOURCE_QUEUE,
+    async (job) => {
+      if (job.name !== TRANSCRIBE_SOURCE) throw new UnrecoverableError(`Unsupported job: ${job.name}`);
+      return processTranscribeSourceJob(job);
+    },
+    { connection: transcriptionQueueConnection(), concurrency: 1 },
   );
 }

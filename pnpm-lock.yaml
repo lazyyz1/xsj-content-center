@@ -99,6 +99,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@content-center/config':
+        specifier: workspace:*
+        version: link:../../packages/config
       '@content-center/core':
         specifier: workspace:*
         version: link:../../packages/core

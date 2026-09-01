@@ -14,6 +14,15 @@ const optionalUrl = z.preprocess(
   z.string().trim().url().max(2_000).optional(),
 );
 
+export const DOUBAO_DEFAULT_BASE_URL = "https://openspeech.bytedance.com";
+export const DOUBAO_DEFAULT_RESOURCE_ID = "volc.bigasr.auc_turbo";
+export const DOUBAO_AUTH_MODES = ["API_KEY", "LEGACY_APP_TOKEN"] as const;
+
+const optionalAuthMode = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.enum(DOUBAO_AUTH_MODES).optional(),
+);
+
 export const redfoxConfigSchema = z
   .object({
     baseUrl: z.string().trim().url().max(2_000),
@@ -23,14 +32,22 @@ export const redfoxConfigSchema = z
 
 export const doubaoAsrConfigSchema = z
   .object({
+    authMode: optionalAuthMode,
     baseUrl: optionalUrl,
+    apiKey: optionalText(10_000),
     appId: optionalText(500),
     accessToken: optionalText(10_000),
     resourceId: optionalText(500),
-    cluster: optionalText(500),
-    extra: z.record(z.string(), z.unknown()).optional(),
+    boostingTableId: optionalText(500),
+    boostingTableName: optionalText(500),
   })
-  .strict();
+  .strict()
+  .transform((config) => ({
+    ...config,
+    authMode: config.authMode ?? (config.appId || config.accessToken ? "LEGACY_APP_TOKEN" as const : "API_KEY" as const),
+    baseUrl: config.baseUrl ?? DOUBAO_DEFAULT_BASE_URL,
+    resourceId: config.resourceId ?? DOUBAO_DEFAULT_RESOURCE_ID,
+  }));
 
 export const llmConfigSchema = z
   .object({
@@ -53,12 +70,38 @@ export const providerConfigFields: Record<
 > = {
   REDFOX: { publicFields: ["baseUrl"], secretFields: ["apiKey"], primarySecret: "apiKey" },
   DOUBAO_ASR: {
-    publicFields: ["baseUrl", "appId", "resourceId", "cluster"],
-    secretFields: ["accessToken", "extra"],
-    primarySecret: "accessToken",
+    publicFields: ["authMode", "baseUrl", "appId", "resourceId", "boostingTableId", "boostingTableName"],
+    secretFields: ["apiKey", "accessToken"],
+    primarySecret: "apiKey",
   },
   LLM: { publicFields: ["provider", "baseUrl", "model"], secretFields: ["apiKey"], primarySecret: "apiKey" },
 };
+
+export function normalizePublicProviderConfig(
+  provider: ConfigurableIntegrationProvider,
+  config: Record<string, unknown>,
+) {
+  if (provider !== "DOUBAO_ASR") return config;
+  const authMode = config.authMode === "LEGACY_APP_TOKEN" || (!config.authMode && config.appId)
+    ? "LEGACY_APP_TOKEN"
+    : "API_KEY";
+  return {
+    ...config,
+    authMode,
+    baseUrl: typeof config.baseUrl === "string" ? config.baseUrl : DOUBAO_DEFAULT_BASE_URL,
+    resourceId: typeof config.resourceId === "string" ? config.resourceId : DOUBAO_DEFAULT_RESOURCE_ID,
+  };
+}
+
+export function primarySecretField(
+  provider: ConfigurableIntegrationProvider,
+  config: Record<string, unknown>,
+) {
+  if (provider === "DOUBAO_ASR") {
+    return config.authMode === "LEGACY_APP_TOKEN" ? "accessToken" : "apiKey";
+  }
+  return providerConfigFields[provider].primarySecret;
+}
 
 export function isConfigurableIntegrationProvider(value: string): value is ConfigurableIntegrationProvider {
   return CONFIGURABLE_INTEGRATION_PROVIDERS.includes(value as ConfigurableIntegrationProvider);

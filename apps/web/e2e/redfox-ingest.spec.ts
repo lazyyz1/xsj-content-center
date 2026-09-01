@@ -88,7 +88,7 @@ test("OWNER configures RedFox and ingests a Douyin video into private MinIO stor
   await page.getByLabel("红狐 API Base URL").fill(fixtureOrigin);
   await page.getByLabel("红狐 API API Key").fill("ak_redfox_e2e_fixture");
   await page.getByRole("button", { name: "保存红狐 API" }).click();
-  await expect(page.getByText("配置格式有效 · 无轻量 Live Test")).toBeVisible();
+  await expect(page.getByRole("button", { name: "配置格式有效 · 无轻量 Live Test" }).first()).toBeVisible();
   await page.getByRole("button", { name: "Disable" }).first().click();
   await expect(page.getByText("Disabled", { exact: true }).first()).toBeVisible();
 
@@ -113,8 +113,8 @@ test("OWNER configures RedFox and ingests a Douyin video into private MinIO stor
   await expect(page.getByText("READY", { exact: true }).first()).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole("heading", { name: "RedFox E2E 真实链路" })).toBeVisible();
   await expect(page.getByText("RedFox · REAL")).toBeVisible();
-  await expect(page.getByText("视频已保存，等待语音转写能力接入。")).toBeVisible();
-  await expect(page.getByText("Transcript", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("豆包 ASR 未配置。", { exact: false })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Transcript" })).toBeVisible();
   const video = page.locator("video");
   await expect(video).toBeVisible();
   const signedUrl = await video.getAttribute("src");

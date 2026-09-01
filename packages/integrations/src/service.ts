@@ -3,8 +3,9 @@ import { decryptConfig, encryptConfig, parseMasterEncryptionKey, secretLastFour 
 import {
   type ConfigurableIntegrationProvider,
   isConfigurableIntegrationProvider,
+  normalizePublicProviderConfig,
   parseProviderConfig,
-  providerConfigFields,
+  primarySecretField,
   splitProviderConfig,
 } from "./schemas";
 
@@ -67,7 +68,7 @@ export class IntegrationService {
       provider,
       status: row.status,
       configured: row.status === "CONFIGURED",
-      publicConfig: jsonObject(row.publicConfig),
+      publicConfig: normalizePublicProviderConfig(provider, jsonObject(row.publicConfig)),
       lastFour: row.lastFour,
       updatedAt: row.updatedAt,
     };
@@ -100,9 +101,10 @@ export class IntegrationService {
     const { publicConfig, secretConfig: suppliedSecrets } = splitProviderConfig(input.provider, parsed);
     const existingSecrets = existing?.encryptedConfig ? decryptConfig(existing.encryptedConfig, key) : {};
     const secretConfig = { ...existingSecrets, ...suppliedSecrets };
-    const primarySecret = providerConfigFields[input.provider].primarySecret;
+    const combinedConfig = { ...publicConfig, ...secretConfig };
+    const primarySecret = primarySecretField(input.provider, combinedConfig);
     const primaryValue = secretConfig[primarySecret];
-    if ((input.provider === "REDFOX" || input.provider === "LLM") && typeof primaryValue !== "string") {
+    if (typeof primaryValue !== "string" || !primaryValue) {
       throw new IntegrationServiceError("INTEGRATION_SECRET_REQUIRED", `${primarySecret} is required.`);
     }
     const configured = typeof primaryValue === "string" && primaryValue.length > 0;
@@ -172,7 +174,8 @@ export class IntegrationService {
     let configured = false;
     if (enabled && existing.encryptedConfig) {
       const secrets = decryptConfig(existing.encryptedConfig, parseMasterEncryptionKey(this.keySource()));
-      configured = typeof secrets[providerConfigFields[input.provider].primarySecret] === "string";
+      const publicConfig = normalizePublicProviderConfig(input.provider, jsonObject(existing.publicConfig));
+      configured = typeof secrets[primarySecretField(input.provider, { ...publicConfig, ...secrets })] === "string";
     }
     const status = enabled ? (configured ? "CONFIGURED" : "UNCONFIGURED") : "DISABLED";
     await this.prisma.$transaction([

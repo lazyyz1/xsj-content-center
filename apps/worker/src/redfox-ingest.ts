@@ -11,6 +11,7 @@ import {
 import { UnrecoverableError, type Job } from "bullmq";
 import { getWorkspaceIntegrationConfig, getWorkspaceIntegrationStatus } from "./integrations";
 import type { ContentIngestPayload } from "./queue";
+import { requestSourceTranscription } from "./transcription";
 
 type RedFoxRecord = Prisma.IngestJobGetPayload<{ include: { sourceItem: true } }>;
 type ProgressStage = "RESOLVING" | "FETCHING_METADATA" | "DOWNLOADING_MEDIA" | "STORING" | "DONE";
@@ -188,6 +189,7 @@ export async function processRedFoxIngestJob(
     const storage = minioStorageFromEnv();
     const mediaFetcher = new MediaFetcher(storage, { allowedTestOrigin: process.env.INGEST_TEST_FIXTURE_ORIGIN });
     let storedCount = 0;
+    let storedVideoAssetId: string | undefined;
     for (const media of resolved.media) {
       const asset = await db.sourceAsset.create({
         data: {
@@ -251,6 +253,7 @@ export async function processRedFoxIngestJob(
           }),
         ]);
         storedCount += 1;
+        if (media.type === "VIDEO") storedVideoAssetId = asset.id;
       } catch (error) {
         await db.$transaction([
           db.sourceAsset.update({ where: { id: asset.id }, data: { status: "FAILED", storageKey: null } }),
@@ -313,6 +316,22 @@ export async function processRedFoxIngestJob(
         },
       }),
     ]);
+    const doubaoStatus = await getWorkspaceIntegrationStatus(record.workspaceId, "DOUBAO_ASR");
+    if (doubaoStatus.status === "CONFIGURED" && storedVideoAssetId) {
+      try {
+        await requestSourceTranscription({
+          workspaceId: record.workspaceId,
+          sourceItemId: record.sourceItemId,
+          requestedById: record.requestedById,
+          videoAssetId: storedVideoAssetId,
+        });
+      } catch (error) {
+        console.error("TRANSCRIPTION_AUTO_ENQUEUE_FAILED", {
+          sourceItemId: record.sourceItemId,
+          errorCode: error instanceof Error ? error.message : "UNKNOWN",
+        });
+      }
+    }
     return { status: "ok" as const, sourceItemId: record.sourceItemId };
   } catch (error) {
     const failure = publicFailure(error);

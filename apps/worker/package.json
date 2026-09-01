@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     "./queue": "./src/queue.ts",
-    "./integrations": "./src/integrations.ts"
+    "./integrations": "./src/integrations.ts",
+    "./transcription": "./src/transcription.ts"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -16,6 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@content-center/config": "workspace:*",
     "@content-center/core": "workspace:*",
     "@content-center/db": "workspace:*",
     "@content-center/integrations": "workspace:*",

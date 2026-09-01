@@ -40,6 +40,13 @@ export type TranscriptResult = {
   }>;
 };
 
+export type TranscriptionInput = {
+  audio:
+    | { mode: "REMOTE_URL"; url: string }
+    | { mode: "BINARY_DATA"; data: Uint8Array };
+  contentType?: string;
+};
+
 export type ProviderInput = { prompt: string };
 
 export type SourceIngestInput = {

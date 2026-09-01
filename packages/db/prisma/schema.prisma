@@ -257,7 +257,7 @@ model SourceAsset {
   sourceItemId   String
   assetType      AssetType
   sourceProvider String
-  remoteUrl      String
+  remoteUrl      String?
   storageKey     String?
   mimeType       String?
   sizeBytes      BigInt?

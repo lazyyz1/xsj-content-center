@@ -50,7 +50,7 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
 ## Public and secret fields
 
 - RedFox：`baseUrl` 为 public；`apiKey` 加密。
-- Doubao ASR：`baseUrl`、`appId`、`resourceId`、`cluster` 为可选 public 字段；`accessToken` 与可扩展 `extra` 加密。未经真实 Provider 文档确认的字段不设为 required。
+- Doubao ASR：`authMode`、`baseUrl`、`resourceId`、Legacy `appId` 与可选热词表标识为 public 字段；新版 `apiKey` 和旧版 `accessToken` 加密。默认采用官方新版 API Key 协议。
 - LLM：`provider`、`baseUrl`、`model` 为 public；`apiKey` 加密。
 
 UI/API 只返回 `configured`、`status`、`lastFour`、`updatedAt` 和 public config。更新时 secret 输入框保持空白；留空会保留现有密文。

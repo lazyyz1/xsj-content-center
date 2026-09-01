@@ -6,6 +6,7 @@ import type {
   FetchedSourceMedia,
   SourceIngestInput,
   SourceIngestResult,
+  TranscriptionInput,
   TranscriptResult,
 } from "./types";
 import type { Readable } from "node:stream";
@@ -23,7 +24,7 @@ export interface IngestSourceProvider extends SourceProvider {
 }
 
 export interface TranscriptionProvider {
-  transcribe(input: { body: Uint8Array; contentType?: string }): Promise<ProviderResult<TranscriptResult>>;
+  transcribe(input: TranscriptionInput): Promise<ProviderResult<TranscriptResult>>;
 }
 
 export interface LLMProvider {

@@ -32,7 +32,7 @@ export class MockSourceProvider implements SourceProvider {
 }
 
 export class MockTranscriptionProvider implements TranscriptionProvider {
-  async transcribe(_input: { body: Uint8Array; contentType?: string }) {
+  async transcribe(_input: Parameters<TranscriptionProvider["transcribe"]>[0]) {
     return mockResult("TranscriptionProvider", { fullText: "MOCK MODE", segments: [] });
   }
 }

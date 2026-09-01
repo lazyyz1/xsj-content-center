@@ -1,12 +1,13 @@
-import { createContentIngestWorker, createHealthWorker } from "./queue";
+import { createContentIngestWorker, createHealthWorker, createTranscribeSourceWorker } from "./queue";
 
 const worker = createHealthWorker();
 const ingestWorker = createContentIngestWorker();
-await Promise.all([worker.waitUntilReady(), ingestWorker.waitUntilReady()]);
+const transcriptionWorker = createTranscribeSourceWorker();
+await Promise.all([worker.waitUntilReady(), ingestWorker.waitUntilReady(), transcriptionWorker.waitUntilReady()]);
 console.info("WORKER_CONNECTED");
 
 async function shutdown() {
-  await Promise.all([worker.close(), ingestWorker.close()]);
+  await Promise.all([worker.close(), ingestWorker.close(), transcriptionWorker.close()]);
   process.exit(0);
 }
 

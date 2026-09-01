@@ -80,4 +80,31 @@ describe("IntegrationService integration", () => {
       where: { workspaceId_provider: { workspaceId, provider: "LLM" } },
     })).resolves.toBeNull();
   });
+
+  it("stores the current Doubao API key encrypted and exposes only protocol defaults", async () => {
+    const apiKey = `doubao-${randomUUID()}`;
+    const result = await service.saveIntegrationConfig({
+      workspaceId,
+      userId,
+      provider: "DOUBAO_ASR",
+      config: { authMode: "API_KEY", apiKey },
+    });
+    expect(result).toMatchObject({
+      status: "CONFIGURED",
+      configured: true,
+      publicConfig: {
+        authMode: "API_KEY",
+        baseUrl: "https://openspeech.bytedance.com",
+        resourceId: "volc.bigasr.auc_turbo",
+      },
+      lastFour: apiKey.slice(-4),
+    });
+    expect(JSON.stringify(result)).not.toContain(apiKey);
+    const stored = await db.integrationConfig.findUniqueOrThrow({
+      where: { workspaceId_provider: { workspaceId, provider: "DOUBAO_ASR" } },
+    });
+    expect(stored.encryptedConfig).not.toContain(apiKey);
+    expect(JSON.stringify(stored.publicConfig)).not.toContain(apiKey);
+    await expect(service.getDecryptedIntegrationConfig(workspaceId, "DOUBAO_ASR")).resolves.toMatchObject({ apiKey });
+  });
 });

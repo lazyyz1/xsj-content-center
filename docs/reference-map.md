@@ -4,6 +4,7 @@
 
 | Repository | Commit | Source file / 模块 | License | 参考价值 | 我们怎么实现 | copied / adapted / inspired | modifications | 后续集成方式 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| [火山引擎豆包语音官方文档](https://www.volcengine.com/docs/6561/1631584?lang=zh) | 2026-09-01 核验 | 极速版 `1631584`、标准版 `1354868`、热词 `155739` | 官方文档条款 / 不复制源码 | 极速识别 endpoint、API Key/Legacy 认证、请求响应、限制、Header 状态与热词字段 | 依据公开协议独立实现 TypeScript DoubaoClient/Provider；通过 Workspace 加密配置调用 HTTPS API | inspired | 未复制官方 Python Demo；新增 Zod 校验、FFmpeg 前处理、双输入路径、显式错误、ApiUsage 与私有 Storage | 运行时通过火山引擎 HTTPS REST API 连接 |
 | [redfox-community](https://github.com/redfox-data/redfox-community) | `82f35863d0eb42267eb7fb75024f4ecf88a2444c`（video-downloader 最近相关提交 `826071af4146a17d9399a9f9a010fc783790819d`） | `skills/video-downloader/SKILL.md`、`skills/video-downloader/assets/downloader.py` | 未声明 / NOASSERTION | 官方短视频解析协议、Douyin URL 变体、响应字段与错误码 | 依据公开协议独立实现 TypeScript RedFoxClient/Provider；使用 `POST /story/api/parseWork/parse`、`X-API-KEY`、`{url, source}`，成功码按 `2*` 判断 | inspired | 未复制 Python/CLI；新增 Zod 校验、Workspace 凭证、显式错误、ApiUsage、私有 Storage 和安全媒体下载 | 运行时通过 RedFox HTTPS REST API 连接 |
 | [redfox-python-sdk](https://github.com/redfox-data/redfox-python-sdk) | `a711fcbde85fe7632ab91ec6b3b018504bac7e43`（v0.4.0） | `redfox/client.py`、`redfox/endpoints/tools.py`、`redfox/exceptions.py` | README 声明 MIT；仓库未提供可识别 LICENSE 文件 | 官方 30 秒超时、429/5xx/网络异常重试建议与结构化异常；通用下载端点确认 | 沿用现有 BullMQ attempt/backoff 执行可重试错误，不引入 Python SDK | inspired | SDK 使用 `REDFOX_API_KEY` Header，而目标 video-downloader Skill 使用 `X-API-KEY`；阶段 3B 采用后者并记录差异 | 不嵌入 SDK；仅参考协议和运行建议 |
 | [Voxen](https://github.com/Yefclub/Voxen) | `27547cfd8e68` | `prisma/schema.prisma`、`apps/worker/src/storage.py`、`apps/worker/src/pipeline.py` | MIT | URL/媒体进入后台任务并产生结构化 transcript 的处理边界 | 阶段 2 采用“SourceItem → IngestJob → BullMQ Worker → 正文/Transcript”的流程边界 | inspired | 使用 TypeScript、BullMQ、Prisma、显式状态和 Workspace 作用域从零实现；未复制源码 | 无直接集成计划；必要时仅参考公开协议 |
@@ -29,6 +30,7 @@
 - 阶段 2 新增 `CONTENT_INGEST` 业务队列，Provider 请求与持久化只在 Worker 中执行。
 - 阶段 2 素材库只实现 PostgreSQL `ilike` 搜索、人工标签与一级 Collection，不引入独立搜索服务或目录树。
 - 阶段 3B 只开放 Douyin，RedFox 其它平台能力不进入 UI 或业务成功路径。
+- 阶段 3C 只接入豆包大模型录音文件极速版；视频先通过系统 FFmpeg 生成受限 MP3，再由独立转写队列调用 Provider。
 
 ## 第三方 Packages
 

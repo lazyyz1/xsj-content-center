@@ -25,7 +25,7 @@ const service = new IntegrationService();
 
 const providerDetails: Record<ConfigurableIntegrationProvider, { name: string; description: string }> = {
   REDFOX: { name: "红狐 API", description: "Workspace 级抖音作品解析凭证；当前为真实 Provider。" },
-  DOUBAO_ASR: { name: "豆包 ASR", description: "Workspace 级语音转写凭证；Provider 尚未接入。" },
+  DOUBAO_ASR: { name: "豆包 ASR", description: "Workspace 级豆包录音文件极速版转写凭证；当前为真实 Provider。" },
   LLM: { name: "LLM", description: "Workspace 级模型凭证；Provider 尚未接入。" },
 };
 
@@ -42,7 +42,9 @@ export async function getIntegrationStatuses(workspaceId: string): Promise<Integ
         updatedAt: current.updatedAt?.toISOString() ?? null,
         ...providerDetails[provider],
         managedBy: "WORKSPACE" as const,
-        connectionTest: provider === "REDFOX" ? "LIVE_API_TEST_NOT_AVAILABLE" as const : "UNSUPPORTED_UNTIL_PROVIDER_STAGE" as const,
+        connectionTest: provider === "REDFOX" || provider === "DOUBAO_ASR"
+          ? "LIVE_API_TEST_NOT_AVAILABLE" as const
+          : "UNSUPPORTED_UNTIL_PROVIDER_STAGE" as const,
       };
     }),
   );

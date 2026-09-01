@@ -12,7 +12,7 @@ describe("mock providers", () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const results = await Promise.all([
       new MockSourceProvider().resolve("https://example.test"),
-      new MockTranscriptionProvider().transcribe({ body: new Uint8Array() }),
+      new MockTranscriptionProvider().transcribe({ audio: { mode: "BINARY_DATA", data: new Uint8Array() } }),
       new MockLLMProvider().generate({ prompt: "test" }),
       new MockPublishingProvider().publish({ content: "test" }),
       new MockStorageProvider().upload({ key: "test", body: new Uint8Array() }),

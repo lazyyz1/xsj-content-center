@@ -1,12 +1,13 @@
 # AI 内容生产中心
 
-阶段 3B RedFox Source Provider：在 Workspace 级加密凭证基础上，接通“抖音分享链接 → RedFox → 安全媒体下载 → 私有 MinIO → SourceAsset → 素材库”的真实 Provider 链路；不包含 ASR、LLM 或发布。
+阶段 3C Doubao ASR Provider：在 RedFox 已保存视频基础上，接通“VIDEO → FFmpeg → AUDIO → 豆包录音文件极速版 → Transcript → 素材库”的真实转写链路；不包含 LLM、AI 分析或发布。
 
 ## Prerequisites
 
 - Node.js `>=24`（本阶段验证：`24.18.0`）
 - pnpm `11.19.0`
 - Docker + Docker Compose
+- FFmpeg 及 FFprobe（本阶段验证：`9.0`，需要 MP3 编码能力）
 
 ## First Run
 
@@ -25,7 +26,7 @@ Web 默认运行在 `http://localhost:3000`，MinIO Console 默认运行在 `htt
 | Service | 用途 | 默认端口 |
 | --- | --- | --- |
 | Web | Next.js App Router | `3000` |
-| Worker | BullMQ 系统健康与内容采集任务消费者 | 本机进程 |
+| Worker | BullMQ 系统健康、内容采集与独立转写任务消费者 | 本机进程 |
 | PostgreSQL | Auth、Workspace、素材、采集任务、标签、Collection、AuditLog | `55432`（容器内 `5432`） |
 | Redis | BullMQ 队列 | `6379` |
 | MinIO | S3-compatible 对象存储 | `9000` / `9001` |
@@ -90,6 +91,8 @@ Key 缺失时，服务不会回退到明文保存，设置页会显示 `Secret e
 
 RedFox 通过 Workspace Integration 配置使用，不读取 `REDFOX_API_KEY` 环境变量。官方当前未公开无需作品 URL 的轻量鉴权/健康端点，因此设置页只确认 `CONFIG_VALID`，明确显示 `LIVE_API_TEST_NOT_AVAILABLE`，不会为了“测试连接”自动解析或产生调用。
 
+Doubao ASR 默认使用新版控制台 API Key 和 `volc.bigasr.auc_turbo`，也兼容旧版 App ID + Access Token。凭证同样只从 Workspace 加密配置读取。官方没有无需音频的轻量 health endpoint，因此不会用付费识别伪装连接测试。协议与限制见 [`docs/doubao-asr.md`](docs/doubao-asr.md)。
+
 Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 `8.0.0-rc`，而 Better Auth 官方明确支持 Prisma 6；这里优先稳定和兼容，不追逐 RC。
 
 ## What Works
@@ -111,6 +114,11 @@ Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 
 - `SourceAsset` 显式记录 REMOTE/DOWNLOADING/STORED/FAILED；至少一个 Asset 为 STORED 才允许 SourceItem READY。
 - `ApiUsage` 对每次 RedFox `PARSE_WORK` 调用记录 1 unit；官方未返回成本时 `cost = null`。
 - READY 抖音 canonical URL 在同一 Workspace 内禁止重复收录，避免重复调用；FAILED 素材可显式重试。
+- `TRANSCRIBE_SOURCE` 独立队列：已保存视频通过 FFmpeg 提取 MP3（mono / 16 kHz / 64 kbps），落入私有 MinIO 后调用真实 DoubaoTranscriptionProvider。
+- Doubao 支持公网 Signed URL 和受控小文件 `audio.data` 两条输入路径；localhost 不会作为远端音频地址交给云端。
+- Transcript 显式标记 `DOUBAO_ASR / REAL`，展示全文和毫秒分段；允许 OWNER/ADMIN/EDITOR 转写或重新转写，VIEWER 只读。
+- 重新转写复用 STORED AUDIO；旧 Transcript 仅在新结果成功后替换，失败时保留。
+- `ApiUsage` 记录 `TRANSCRIBE_FLASH`、时长与估算使用小时，供应商未返回账单时 `cost = null`。
 - Manual Text Ingest：文本通过真实 Worker 入库，并生成明确标记为 `MANUAL / REAL` 的 Transcript。
 - Generic Web URL Extraction：仅抓取公开 HTTP(S) 网页，经 SSRF 校验后提取为纯文本正文。
 - Library：卡片/列表视图、真实分页、标题/作者/正文搜索、平台/类型/状态/标签/Collection 筛选和排序。
@@ -121,10 +129,9 @@ Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 
 
 ## What Does Not Work Yet
 
-- Doubao ASR（豆包转写）：`UNCONFIGURED`
 - LLM 调用：未接入
 - RedFox 以外的视频来源：未开放
-- 视频/音频转写：未实现；RedFox 视频详情明确显示“等待语音转写能力接入”
+- 豆包标准版 fallback、热词管理后台、字幕编辑器：未实现
 - AI 创作：未实现
 - Publishing：未实现
 - ContentProject、Creator Memory、热点发现：未实现
@@ -138,6 +145,7 @@ Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 
 - URL 抓取只允许 HTTP(S)，对初始地址、DNS 结果和每次重定向执行 SSRF 校验，并限制超时、响应体大小和跳转次数。
 - RedFox 返回的临时媒体 URL 仅在 Worker/数据库服务端使用，不通过素材 API 返回；播放只使用本项目私有 Storage 的短期 Signed URL。
 - 媒体下载默认限制为视频 300 MiB、图片 30 MiB，拒绝 HTML/JSON 或与 Asset 类型不匹配的 MIME。
+- 极速 ASR 在调用前强制检查 2 小时 / 100 MB 限制；私网音频只有在不超过 20 MB 时才允许二进制上传。
 - 网页正文只保存和渲染 normalized plain text，不把远端 HTML 注入页面。
 - `IntegrationConfig` 将 public config 与 AES-256-GCM encrypted secret 分开保存；缺少 master key 时 fail closed，不写明文。
 - 真实外部发布必须等待后续阶段实现 `APPROVED` 人工审核门。

@@ -4,8 +4,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LibraryPoller } from "@/components/library/library-poller";
 import { SourceActions } from "@/components/library/source-actions";
+import { TranscriptionActions } from "@/components/library/transcription-actions";
 import { requireWorkspace } from "@/server/access";
 import { db, findSourceForUser } from "@content-center/db";
+import { IntegrationService } from "@content-center/integrations";
 import { minioStorageFromEnv } from "@content-center/providers";
 
 function duration(job: { startedAt: Date | null; finishedAt: Date | null }) {
@@ -27,10 +29,36 @@ const progressLabels: Record<string, string> = {
   DOWNLOADING_MEDIA: "正在保存视频",
   STORING: "正在写入素材存储",
   DONE: "已完成",
+  QUEUED: "等待转写",
+  EXTRACTING_AUDIO: "正在提取音频",
+  UPLOADING_AUDIO: "正在保存音频",
+  TRANSCRIBING: "豆包正在转写",
+  PERSISTING: "正在保存转写结果",
+  SUCCEEDED: "转写完成",
 };
 
+function formatTimestamp(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function transcriptSegments(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((segment) => {
+    if (!segment || typeof segment !== "object") return [];
+    const candidate = segment as Record<string, unknown>;
+    if (typeof candidate.startMs !== "number" || typeof candidate.endMs !== "number" || typeof candidate.text !== "string") return [];
+    return [{ startMs: candidate.startMs, endMs: candidate.endMs, text: candidate.text }];
+  });
+}
+
 export default async function SourceDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { session, workspace } = await requireWorkspace();
+  const { session, workspace, role } = await requireWorkspace();
   const { id } = await params;
   const [source, availableTags, availableCollections] = await Promise.all([
     findSourceForUser(db, { userId: session.user.id, workspaceId: workspace.id, sourceItemId: id }),
@@ -38,20 +66,36 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
     db.collection.findMany({ where: { workspaceId: workspace.id }, orderBy: { name: "asc" } }),
   ]);
   if (!source) notFound();
-  const latestJob = source.ingestJobs[0];
-  const isProcessing = source.status === "PENDING" || source.status === "PROCESSING";
-  const isMock = source.transcript?.providerMode === "MOCK" || latestJob?.providerMode === "MOCK";
+  const latestIngestJob = source.ingestJobs.find((job) => job.jobType !== "TRANSCRIBE");
+  const latestTranscriptionJob = source.ingestJobs.find((job) => job.jobType === "TRANSCRIBE");
+  const transcriptionBusy = latestTranscriptionJob?.status === "QUEUED" || latestTranscriptionJob?.status === "RUNNING";
+  const isProcessing = source.status === "PENDING" || source.status === "PROCESSING" || transcriptionBusy;
+  const isMock = source.transcript?.providerMode === "MOCK" || latestIngestJob?.providerMode === "MOCK";
   const contentTitle = source.sourceType === "URL" ? "提取正文" : "原始正文";
-  const storedAssets = source.assets.filter((asset) => asset.status === "STORED" && asset.storageKey);
+  const storedAssets = source.assets.filter((asset) => asset.status === "STORED" && asset.storageKey && asset.assetType !== "AUDIO");
   const storage = storedAssets.length ? minioStorageFromEnv() : null;
   const playableAssets = await Promise.all(storedAssets.map(async (asset) => ({
     ...asset,
     signedUrl: (await storage!.getSignedUrl(asset.storageKey!, 300)).data.url,
   })));
-  const jobMetadata = latestJob?.metadata && typeof latestJob.metadata === "object" && !Array.isArray(latestJob.metadata)
-    ? latestJob.metadata as Record<string, unknown>
+  const progressJob = transcriptionBusy ? latestTranscriptionJob : latestIngestJob;
+  const jobMetadata = progressJob?.metadata && typeof progressJob.metadata === "object" && !Array.isArray(progressJob.metadata)
+    ? progressJob.metadata as Record<string, unknown>
     : {};
   const progressStage = typeof jobMetadata.progressStage === "string" ? jobMetadata.progressStage : undefined;
+  const doubao = source.sourcePlatform === "DOUYIN"
+    ? await new IntegrationService().getIntegrationStatus(workspace.id, "DOUBAO_ASR")
+    : null;
+  const doubaoConfigured = doubao?.status === "CONFIGURED";
+  const canTranscribe = role !== "VIEWER";
+  const segments = transcriptSegments(source.transcript?.segments);
+  const transcriptState = transcriptionBusy
+    ? "转写中"
+    : source.transcript
+      ? "已完成"
+      : latestTranscriptionJob?.status === "FAILED"
+        ? "转写失败"
+        : "未转写";
 
   return (
     <>
@@ -89,16 +133,50 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
               <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[560px] text-left text-sm"><thead className="text-[var(--text-secondary)]"><tr><th className="pb-2">Asset</th><th className="pb-2">状态</th><th className="pb-2">MIME</th><th className="pb-2">大小</th><th className="pb-2">Stored At</th></tr></thead><tbody>{source.assets.map((asset) => <tr key={asset.id} className="border-t"><td className="py-3">{asset.assetType}</td><td>{asset.status}</td><td>{asset.mimeType || "—"}</td><td>{formatBytes(asset.sizeBytes)}</td><td>{asset.storedAt?.toLocaleString("zh-CN") || "—"}</td></tr>)}</tbody></table></div>
             </Card>
           ) : null}
-          <Card className="p-5">
-            <h2 className="font-semibold">{contentTitle}</h2>
-            {isProcessing ? <p className="mt-4 text-sm text-[var(--text-secondary)]">{progressStage ? progressLabels[progressStage] || progressStage : "处理中，页面会自动刷新。"}</p> : source.sourcePlatform === "DOUYIN" ? <p className="mt-4 text-sm text-[var(--text-secondary)]">视频已保存，等待语音转写能力接入。</p> : <pre className="mt-4 whitespace-pre-wrap break-words font-sans text-sm leading-7">{source.rawText || "暂无正文"}</pre>}
-          </Card>
+          {source.sourcePlatform === "DOUYIN" ? (
+            <Card className="p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="font-semibold">Transcript</h2>
+                <Badge>{transcriptState}</Badge>
+              </div>
+              {transcriptionBusy ? <p className="mt-4 text-sm text-[var(--text-secondary)]">{progressStage ? progressLabels[progressStage] || progressStage : "转写处理中，页面会自动刷新。"}</p> : null}
+              {!doubaoConfigured && !source.transcript ? (
+                <p className="mt-4 text-sm text-[var(--text-secondary)]">
+                  视频已保存。{doubao?.status === "DISABLED" ? "豆包 ASR 已禁用。" : "豆包 ASR 未配置。"}
+                  {canTranscribe ? <Link href="/settings/integrations" className="ml-2 font-medium text-[var(--accent)]">配置后转写</Link> : null}
+                </p>
+              ) : null}
+              {latestTranscriptionJob?.status === "FAILED" ? <p role="alert" className="mt-4 text-sm text-[var(--danger)]">{latestTranscriptionJob.errorMessage || "转写失败，请重试。"}</p> : null}
+              {source.transcript ? (
+                <>
+                  <h3 className="mt-5 text-sm font-medium text-[var(--text-secondary)]">全文</h3>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-7">{source.transcript.fullText}</p>
+                  {segments.length ? (
+                    <div className="mt-6 grid gap-4 border-t pt-5">
+                      {segments.map((segment, index) => (
+                        <div key={`${segment.startMs}-${segment.endMs}-${index}`} className="grid gap-1 sm:grid-cols-[120px_minmax(0,1fr)]">
+                          <span className="font-mono text-xs text-[var(--text-secondary)]">{formatTimestamp(segment.startMs)} - {formatTimestamp(segment.endMs)}</span>
+                          <p className="text-sm leading-6">{segment.text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </>
+              ) : doubaoConfigured && !transcriptionBusy && latestTranscriptionJob?.status !== "FAILED" ? <p className="mt-4 text-sm text-[var(--text-secondary)]">视频已保存，尚未转写。</p> : null}
+              <TranscriptionActions sourceId={source.id} canTranscribe={canTranscribe} configured={doubaoConfigured} hasTranscript={Boolean(source.transcript)} fullText={source.transcript?.fullText} busy={transcriptionBusy} />
+            </Card>
+          ) : (
+            <Card className="p-5">
+              <h2 className="font-semibold">{contentTitle}</h2>
+              {isProcessing ? <p className="mt-4 text-sm text-[var(--text-secondary)]">{progressStage ? progressLabels[progressStage] || progressStage : "处理中，页面会自动刷新。"}</p> : <pre className="mt-4 whitespace-pre-wrap break-words font-sans text-sm leading-7">{source.rawText || "暂无正文"}</pre>}
+            </Card>
+          )}
           <Card className="overflow-hidden">
-            <div className="border-b p-5"><h2 className="font-semibold">采集任务</h2></div>
-            <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-[var(--surface-elevated)] text-[var(--text-secondary)]"><tr><th className="p-3">状态</th><th className="p-3">Provider</th><th className="p-3">模式</th><th className="p-3">Attempt</th><th className="p-3">耗时</th><th className="p-3">错误</th></tr></thead><tbody>{source.ingestJobs.map((job) => <tr key={job.id} className="border-t"><td className="p-3">{job.status}</td><td className="p-3">{job.provider}</td><td className="p-3">{job.providerMode}</td><td className="p-3">{job.attempt}/{job.maxAttempts}</td><td className="p-3">{duration(job)}</td><td className="p-3 text-[var(--danger)]">{job.errorMessage || "—"}</td></tr>)}</tbody></table></div>
+            <div className="border-b p-5"><h2 className="font-semibold">处理任务</h2></div>
+            <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-[var(--surface-elevated)] text-[var(--text-secondary)]"><tr><th className="p-3">任务</th><th className="p-3">状态</th><th className="p-3">Provider</th><th className="p-3">模式</th><th className="p-3">Attempt</th><th className="p-3">耗时</th><th className="p-3">错误</th></tr></thead><tbody>{source.ingestJobs.map((job) => <tr key={job.id} className="border-t"><td className="p-3">{job.jobType}</td><td className="p-3">{job.status}</td><td className="p-3">{job.provider}</td><td className="p-3">{job.providerMode}</td><td className="p-3">{job.attempt}/{job.maxAttempts}</td><td className="p-3">{duration(job)}</td><td className="p-3 text-[var(--danger)]">{job.errorMessage || "—"}</td></tr>)}</tbody></table></div>
           </Card>
         </div>
-        <SourceActions sourceId={source.id} status={source.status} failedJobId={source.status === "FAILED" ? latestJob?.id : undefined} tags={source.tags.map(({ tag }) => tag)} availableTags={availableTags} collections={source.collections.map(({ collection }) => collection)} availableCollections={availableCollections} />
+        <SourceActions sourceId={source.id} status={source.status} failedJobId={source.status === "FAILED" ? latestIngestJob?.id : undefined} tags={source.tags.map(({ tag }) => tag)} availableTags={availableTags} collections={source.collections.map(({ collection }) => collection)} availableCollections={availableCollections} />
       </div>
     </>
   );
