@@ -122,9 +122,9 @@ export async function applyAIResult(input: { workspaceId: string; userId: string
     const output = motherContentPreviewSchema.parse(run.outputJson);
     const existing = await db.motherContent.findFirst({ where: { workspaceId: input.workspaceId, projectId: input.projectId } });
     if (existing?.body.trim() && !input.confirmReplace) throw new AIServiceError("AI_REPLACE_CONFIRMATION_REQUIRED", "当前母稿已有内容，请确认替换。");
-    const content = await saveMotherContent({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, data: { title: output.title, outline: output.outline, body: output.body, expectedVersion: input.expectedVersion ?? 0 } });
+    const content = await saveMotherContent({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, data: { title: output.title, outline: output.outline, body: output.body, expectedVersion: input.expectedVersion ?? 0, origin: "KIMI" } });
     await markApplied({ ...input, target: "mother_content", changedFields: ["title", "outline", "body"] });
-    return { applied: true, target: "mother_content", motherContent: { title: content.title, body: content.body, outline: content.outline, version: content.version } };
+    return { applied: true, target: "mother_content", motherContent: { title: content.title, body: content.body, outline: content.outline, version: content.version, origin: content.origin, originNote: content.originNote } };
   }
   if (isRewriteAction(run.action as AIAction)) {
     const output = rewritePreviewSchema.parse(run.outputJson);
@@ -136,7 +136,7 @@ export async function applyAIResult(input: { workspaceId: string; userId: string
     const body = `${existing.body.slice(0, start)}${replacement}${existing.body.slice(end)}`;
     const content = await saveMotherContent({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, data: { title: existing.title, outline: Array.isArray(existing.outline) ? existing.outline.filter((item): item is string => typeof item === "string") : [], body, expectedVersion: input.expectedVersion ?? existing.version } });
     await markApplied({ ...input, target: "mother_content", changedFields: ["body"] });
-    return { applied: true, target: "mother_content", motherContent: { title: content.title, body: content.body, outline: content.outline, version: content.version } };
+    return { applied: true, target: "mother_content", motherContent: { title: content.title, body: content.body, outline: content.outline, version: content.version, origin: content.origin, originNote: content.originNote } };
   }
   throw new AIServiceError("AI_RESULT_NOT_APPLICABLE", "该分析结果仅供查看，不能直接写入正式内容。");
 }

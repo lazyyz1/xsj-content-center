@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 type AIAction = "ANALYZE_SOURCES" | "EXTRACT_EVIDENCE" | "GENERATE_ANGLES" | "GENERATE_BRIEF" | "GENERATE_MOTHER_CONTENT" | "REWRITE_SELECTION" | "SHORTEN" | "EXPAND" | "ADD_PERSONAL_VIEW" | "HUMANIZE";
 type RewriteRequest = { id: number; action: AIAction; selectedText: string; selectionStart: number; selectionEnd: number };
 type Run = { id: string; action: AIAction; status: string; output?: unknown; outputJson?: unknown; contextTruncated?: boolean; errorCode?: string | null; appliedAt?: string | Date | null; discardedAt?: string | Date | null };
-type MotherContentSnapshot = { title: string; body: string; outline: string[]; version: number };
+type MotherContentSnapshot = { title: string; body: string; outline: string[]; version: number; origin: "HUMAN" | "KIMI" | "GPT_WEB"; originNote: string | null };
 
 const labels: Record<AIAction, string> = { ANALYZE_SOURCES: "分析素材", EXTRACT_EVIDENCE: "提取证据", GENERATE_ANGLES: "生成创作角度", GENERATE_BRIEF: "生成 Brief", GENERATE_MOTHER_CONTENT: "生成母稿", REWRITE_SELECTION: "改写", SHORTEN: "缩短", EXPAND: "扩写", ADD_PERSONAL_VIEW: "增加个人观点", HUMANIZE: "表达自然化" };
 const actions: AIAction[] = ["ANALYZE_SOURCES", "EXTRACT_EVIDENCE", "GENERATE_ANGLES", "GENERATE_BRIEF", "GENERATE_MOTHER_CONTENT"];
@@ -54,7 +54,7 @@ export function AICreationPanel({ projectId, integrationStatus, hasCreatorProfil
     try {
       const result = object(await call(`/api/projects/${projectId}/ai/runs/${current.id}/apply`, body));
       const appliedMother = object(result.motherContent);
-      if (result.target === "mother_content") onMotherContentApplied({ title: text(appliedMother.title), body: text(appliedMother.body), outline: array(appliedMother.outline).filter((item): item is string => typeof item === "string"), version: typeof appliedMother.version === "number" ? appliedMother.version : motherVersion + 1 });
+      if (result.target === "mother_content") onMotherContentApplied({ title: text(appliedMother.title), body: text(appliedMother.body), outline: array(appliedMother.outline).filter((item): item is string => typeof item === "string"), version: typeof appliedMother.version === "number" ? appliedMother.version : motherVersion + 1, origin: appliedMother.origin === "GPT_WEB" || appliedMother.origin === "HUMAN" ? appliedMother.origin : "KIMI", originNote: typeof appliedMother.originNote === "string" ? appliedMother.originNote : null });
       setMessage("AI 结果已应用"); setCurrent(null); router.refresh();
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : "应用失败"); }

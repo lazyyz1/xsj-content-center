@@ -23,6 +23,11 @@ export function findProjectForUser(
       },
       creativeBrief: true,
       motherContent: true,
+      deepContentPackages: {
+        where: { status: { not: "ARCHIVED" } },
+        orderBy: { version: "desc" },
+        take: 1,
+      },
       platformVariants: { orderBy: { platform: "asc" } },
     },
   });

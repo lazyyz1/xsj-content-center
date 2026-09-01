@@ -10,6 +10,7 @@ import { StudioSources } from "./studio-sources";
 import { AICreationPanel, type AIAction, type RewriteRequest } from "./ai-creation-panel";
 import { PlatformContentFactory } from "./platform-content-factory";
 import { PLATFORM_LABELS, SUPPORTED_PLATFORMS, type PlatformVariantView, type SupportedPlatform } from "@/lib/platforms";
+import { DeepContentWorkspace, type MotherSnapshot, type PackageView } from "./deep-content-workspace";
 
 type Source = {
   role: string;
@@ -30,7 +31,8 @@ export function StudioShell({ project, availableSources, editable, ai }: {
     sources: Source[];
     evidenceItems: Evidence[];
     creativeBrief: { topic: string; angle: string; audience: string; coreMessage: string; keyPoints: string[]; structure: string[]; tone: string; risks: string[]; version: number };
-    motherContent: { title: string; body: string; outline: string[]; version: number };
+    motherContent: MotherSnapshot;
+    deepContentPackage: PackageView | null;
     platformVariants: PlatformVariantView[];
   };
   availableSources: AvailableSource[];
@@ -41,7 +43,7 @@ export function StudioShell({ project, availableSources, editable, ai }: {
   const [rewriteRequest, setRewriteRequest] = useState<RewriteRequest | null>(null);
   const [appliedMotherContent, setAppliedMotherContent] = useState<typeof project.motherContent | null>(null);
   const [savedMotherVersion, setSavedMotherVersion] = useState(project.motherContent.version);
-  const [contentTab, setContentTab] = useState<"MOTHER" | SupportedPlatform>("MOTHER");
+  const [contentTab, setContentTab] = useState<"MOTHER" | "PACKAGE" | SupportedPlatform>("MOTHER");
   const [activePlatform, setActivePlatform] = useState<SupportedPlatform>("DOUYIN");
   const [platformVariants, setPlatformVariants] = useState(project.platformVariants);
   const motherContent = appliedMotherContent ?? project.motherContent;
@@ -56,6 +58,7 @@ export function StudioShell({ project, availableSources, editable, ai }: {
     <>
       <nav aria-label="内容版本" className="mb-4 flex gap-1 overflow-x-auto rounded-xl border bg-[var(--surface)] p-1">
         <button className={`min-w-24 rounded-lg px-3 py-2 text-sm ${contentTab === "MOTHER" ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`} onClick={() => setContentTab("MOTHER")}><span className="block font-medium">母稿</span><span className="mt-0.5 block text-[10px] opacity-75">v{currentMotherVersion || 0}</span></button>
+        <button className={`min-w-24 rounded-lg px-3 py-2 text-sm ${contentTab === "PACKAGE" ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`} onClick={() => setContentTab("PACKAGE")}><span className="block font-medium">创作包</span><span className="mt-0.5 block text-[10px] opacity-75">{project.deepContentPackage ? `v${project.deepContentPackage.version}` : "未生成"}</span></button>
         {SUPPORTED_PLATFORMS.map((platform) => <button key={platform} className={`min-w-24 rounded-lg px-3 py-2 text-sm ${contentTab === platform ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`} onClick={() => selectPlatform(platform)}><span className="block font-medium">{PLATFORM_LABELS[platform]}</span><span className="mt-0.5 block text-[10px] opacity-75">{platformStatus(platform)}</span></button>)}
       </nav>
       {staleCount ? <p className="mb-4 text-sm text-[var(--warning)]">{staleCount} 个平台版本需要更新</p> : null}
@@ -81,7 +84,10 @@ export function StudioShell({ project, availableSources, editable, ai }: {
         </Card>
       </div>
       </div>
-      <div className={contentTab === "MOTHER" ? "hidden" : "block"}>
+      <div className={contentTab === "PACKAGE" ? "block" : "hidden"}>
+        <DeepContentWorkspace projectId={project.id} initialPackage={project.deepContentPackage} editable={editable && project.status !== "ARCHIVED"} integrationStatus={ai.integrationStatus} motherContent={{ ...motherContent, version: currentMotherVersion }} onMotherImported={(content) => { setAppliedMotherContent(content); setSavedMotherVersion(content.version); setContentTab("MOTHER"); }} />
+      </div>
+      <div className={contentTab !== "MOTHER" && contentTab !== "PACKAGE" ? "block" : "hidden"}>
         <PlatformContentFactory projectId={project.id} activePlatform={activePlatform} motherVersion={currentMotherVersion} variants={effectiveVariants} editable={editable && project.status !== "ARCHIVED"} integrationStatus={ai.integrationStatus} onSelectPlatform={selectPlatform} onVariantChange={(variant) => setPlatformVariants((current) => [...current.filter((item) => item.platform !== variant.platform), variant])} />
       </div>
     </>

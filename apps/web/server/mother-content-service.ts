@@ -1,6 +1,6 @@
 import "server-only";
 
-import { db } from "@content-center/db";
+import { db, type MotherContentOrigin } from "@content-center/db";
 import { VersionConflictError } from "./brief-service";
 import { ProjectServiceError } from "./project-service";
 
@@ -9,9 +9,11 @@ export type MotherContentInput = {
   body: string;
   outline: string[];
   expectedVersion: number;
+  origin?: MotherContentOrigin;
+  originNote?: string | null;
 };
 
-export async function saveMotherContent(input: { workspaceId: string; userId: string; projectId: string; data: MotherContentInput }) {
+export async function saveMotherContent(input: { workspaceId: string; userId: string; projectId: string; data: MotherContentInput; auditAction?: "mother_content.updated" | "mother_content.imported_from_gpt_web" }) {
   const project = await db.contentProject.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, select: { id: true } });
   if (!project) throw new ProjectServiceError("PROJECT_NOT_FOUND");
   try {
@@ -26,6 +28,8 @@ export async function saveMotherContent(input: { workspaceId: string; userId: st
             title: input.data.title.trim(),
             body: input.data.body,
             outline: input.data.outline,
+            ...(input.data.origin === undefined ? {} : { origin: input.data.origin }),
+            ...(input.data.originNote === undefined ? {} : { originNote: input.data.originNote }),
             version: { increment: 1 },
           },
         });
@@ -40,6 +44,8 @@ export async function saveMotherContent(input: { workspaceId: string; userId: st
             title: input.data.title.trim(),
             body: input.data.body,
             outline: input.data.outline,
+            origin: input.data.origin ?? "HUMAN",
+            originNote: input.data.originNote ?? null,
             createdById: input.userId,
           },
         });
@@ -48,10 +54,10 @@ export async function saveMotherContent(input: { workspaceId: string; userId: st
         data: {
           workspaceId: input.workspaceId,
           userId: input.userId,
-          action: "mother_content.updated",
+          action: input.auditAction ?? "mother_content.updated",
           resourceType: "mother_content",
           resourceId: content.id,
-          metadata: { projectId: project.id, resourceId: content.id, changedFields: ["title", "body", "outline"] },
+          metadata: { projectId: project.id, resourceId: content.id, version: content.version, origin: content.origin, changedFields: ["title", "body", "outline", ...(input.data.origin === undefined ? [] : ["origin"]), ...(input.data.originNote === undefined ? [] : ["originNote"])] },
         },
       });
       return content;

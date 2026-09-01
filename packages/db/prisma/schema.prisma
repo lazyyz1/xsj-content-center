@@ -131,6 +131,7 @@ enum PromptType {
   ADD_PERSONAL_VIEW
   HUMANIZE
   ADAPT_PLATFORM
+  GENERATE_DEEP_CONTENT_PACKAGE
 }
 
 enum AIRunStatus {
@@ -158,29 +159,43 @@ enum PlatformVariantStatus {
   ARCHIVED
 }
 
+enum DeepContentPackageStatus {
+  DRAFT
+  GENERATING
+  READY
+  ARCHIVED
+}
+
+enum MotherContentOrigin {
+  HUMAN
+  KIMI
+  GPT_WEB
+}
+
 model User {
-  id                      String            @id @default(cuid())
+  id                      String               @id @default(cuid())
   name                    String
-  email                   String            @unique
-  emailVerified           Boolean           @default(false)
+  email                   String               @unique
+  emailVerified           Boolean              @default(false)
   image                   String?
-  createdAt               DateTime          @default(now())
-  updatedAt               DateTime          @updatedAt
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
   sessions                Session[]
   accounts                Account[]
   workspaceMemberships    WorkspaceMember[]
   auditLogs               AuditLog[]
-  createdSources          SourceItem[]      @relation("SourceCreatedBy")
-  requestedIngestJobs     IngestJob[]       @relation("IngestRequestedBy")
-  createdCollections      Collection[]      @relation("CollectionCreatedBy")
+  createdSources          SourceItem[]         @relation("SourceCreatedBy")
+  requestedIngestJobs     IngestJob[]          @relation("IngestRequestedBy")
+  createdCollections      Collection[]         @relation("CollectionCreatedBy")
   apiUsages               ApiUsage[]
-  createdProjects         ContentProject[]  @relation("ProjectCreatedBy")
-  createdEvidenceItems    EvidenceItem[]    @relation("EvidenceCreatedBy")
-  createdBriefs           CreativeBrief[]   @relation("BriefCreatedBy")
-  createdMotherContent    MotherContent[]   @relation("MotherContentCreatedBy")
+  createdProjects         ContentProject[]     @relation("ProjectCreatedBy")
+  createdEvidenceItems    EvidenceItem[]       @relation("EvidenceCreatedBy")
+  createdBriefs           CreativeBrief[]      @relation("BriefCreatedBy")
+  createdMotherContent    MotherContent[]      @relation("MotherContentCreatedBy")
   creatorProfiles         CreatorProfile[]
-  aiRuns                  AIRun[]           @relation("AIRunUser")
-  createdPlatformVariants PlatformVariant[] @relation("PlatformVariantCreatedBy")
+  aiRuns                  AIRun[]              @relation("AIRunUser")
+  createdPlatformVariants PlatformVariant[]    @relation("PlatformVariantCreatedBy")
+  createdDeepPackages     DeepContentPackage[] @relation("DeepContentPackageCreatedBy")
 }
 
 model Session {
@@ -230,30 +245,31 @@ model Verification {
 }
 
 model Workspace {
-  id                String              @id @default(cuid())
-  name              String
-  slug              String              @unique
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  members           WorkspaceMember[]
-  integrations      IntegrationConfig[]
-  auditLogs         AuditLog[]
-  sourceItems       SourceItem[]
-  ingestJobs        IngestJob[]
-  transcripts       Transcript[]
-  contentTags       ContentTag[]
-  collections       Collection[]
-  sourceAssets      SourceAsset[]
-  apiUsages         ApiUsage[]
-  contentProjects   ContentProject[]
-  evidenceItems     EvidenceItem[]
-  creativeBriefs    CreativeBrief[]
-  motherContents    MotherContent[]
-  creatorProfiles   CreatorProfile[]
-  promptTemplates   PromptTemplate[]
-  platformTemplates PlatformTemplate[]
-  platformVariants  PlatformVariant[]
-  aiRuns            AIRun[]
+  id                  String               @id @default(cuid())
+  name                String
+  slug                String               @unique
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  members             WorkspaceMember[]
+  integrations        IntegrationConfig[]
+  auditLogs           AuditLog[]
+  sourceItems         SourceItem[]
+  ingestJobs          IngestJob[]
+  transcripts         Transcript[]
+  contentTags         ContentTag[]
+  collections         Collection[]
+  sourceAssets        SourceAsset[]
+  apiUsages           ApiUsage[]
+  contentProjects     ContentProject[]
+  evidenceItems       EvidenceItem[]
+  creativeBriefs      CreativeBrief[]
+  motherContents      MotherContent[]
+  creatorProfiles     CreatorProfile[]
+  promptTemplates     PromptTemplate[]
+  platformTemplates   PlatformTemplate[]
+  platformVariants    PlatformVariant[]
+  deepContentPackages DeepContentPackage[]
+  aiRuns              AIRun[]
 }
 
 model WorkspaceMember {
@@ -481,26 +497,27 @@ model CollectionItem {
 }
 
 model ContentProject {
-  id               String               @id @default(cuid())
-  workspaceId      String
-  createdById      String
-  creatorProfileId String?
-  title            String
-  description      String?
-  goal             String?
-  audience         String?
-  status           ContentProjectStatus @default(DRAFT)
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
-  workspace        Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdBy        User                 @relation("ProjectCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  creatorProfile   CreatorProfile?      @relation(fields: [creatorProfileId], references: [id], onDelete: SetNull)
-  sources          ProjectSource[]
-  evidenceItems    EvidenceItem[]
-  creativeBrief    CreativeBrief?
-  motherContent    MotherContent?
-  platformVariants PlatformVariant[]
-  aiRuns           AIRun[]
+  id                  String               @id @default(cuid())
+  workspaceId         String
+  createdById         String
+  creatorProfileId    String?
+  title               String
+  description         String?
+  goal                String?
+  audience            String?
+  status              ContentProjectStatus @default(DRAFT)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  workspace           Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy           User                 @relation("ProjectCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  creatorProfile      CreatorProfile?      @relation(fields: [creatorProfileId], references: [id], onDelete: SetNull)
+  sources             ProjectSource[]
+  evidenceItems       EvidenceItem[]
+  creativeBrief       CreativeBrief?
+  motherContent       MotherContent?
+  platformVariants    PlatformVariant[]
+  deepContentPackages DeepContentPackage[]
+  aiRuns              AIRun[]
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
@@ -572,19 +589,21 @@ model CreativeBrief {
 }
 
 model MotherContent {
-  id               String            @id @default(cuid())
+  id               String              @id @default(cuid())
   workspaceId      String
-  projectId        String            @unique
+  projectId        String              @unique
   title            String
   body             String
   outline          Json
-  version          Int               @default(1)
+  version          Int                 @default(1)
+  origin           MotherContentOrigin @default(HUMAN)
+  originNote       String?
   createdById      String
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project          ContentProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  createdBy        User              @relation("MotherContentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  workspace        Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project          ContentProject      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy        User                @relation("MotherContentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   platformVariants PlatformVariant[]
 
   @@index([workspaceId, updatedAt])
@@ -592,15 +611,15 @@ model MotherContent {
 }
 
 model CreatorProfile {
-  id                   String           @id @default(cuid())
+  id                   String               @id @default(cuid())
   workspaceId          String
   userId               String
-  displayName          String           @default("")
-  positioning          String           @default("")
-  targetAudience       String           @default("")
-  tone                 String           @default("")
-  preferredStyle       String           @default("")
-  forbiddenStyle       String           @default("")
+  displayName          String               @default("")
+  positioning          String               @default("")
+  targetAudience       String               @default("")
+  tone                 String               @default("")
+  preferredStyle       String               @default("")
+  forbiddenStyle       String               @default("")
   coreTopics           Json
   personalViews        Json
   brandTerms           Json
@@ -609,15 +628,46 @@ model CreatorProfile {
   structurePreferences Json
   ctaPreferences       Json
   examplePhrases       Json
-  notes                String           @default("")
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
-  workspace            Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notes                String               @default("")
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  workspace            Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user                 User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   projects             ContentProject[]
+  deepContentPackages  DeepContentPackage[]
 
   @@unique([workspaceId, userId])
   @@index([userId])
+}
+
+model DeepContentPackage {
+  id                   String                   @id @default(cuid())
+  workspaceId          String
+  projectId            String
+  creatorProfileId     String?
+  version              Int
+  status               DeepContentPackageStatus @default(DRAFT)
+  topicPackage         Json
+  viewpointPackage     Json
+  evidencePackage      Json
+  expressionPackage    Json
+  structurePackage     Json
+  creatorContribution  Json
+  recommendedDirection String
+  risks                Json
+  needsConfirmation    Json
+  createdById          String
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  workspace            Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project              ContentProject           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creatorProfile       CreatorProfile?          @relation(fields: [creatorProfileId], references: [id], onDelete: SetNull)
+  createdBy            User                     @relation("DeepContentPackageCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, version])
+  @@index([workspaceId, projectId, status])
+  @@index([creatorProfileId])
+  @@index([createdById])
 }
 
 model PromptTemplate {
