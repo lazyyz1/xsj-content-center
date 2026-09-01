@@ -1,5 +1,13 @@
 # AI 内容生产中心
 
+> **Current Release: V1 Internal Trial**
+
+内部试用文档：
+
+- [V1 内部试用说明](docs/V1_INTERNAL_TRIAL.md)
+- [V1 产品验收记录](docs/V1_PRODUCT_ACCEPTANCE.md)
+- [V1.5 Backlog](docs/V1_5_BACKLOG.md)
+
 阶段 3C Doubao ASR Provider：在 RedFox 已保存视频基础上，接通“VIDEO → FFmpeg → AUDIO → 豆包录音文件极速版 → Transcript → 素材库”的真实转写链路；不包含 LLM、AI 分析或发布。
 
 ## Prerequisites
