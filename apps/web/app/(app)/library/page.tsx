@@ -5,11 +5,10 @@ import { IngestDialog } from "@/components/library/ingest-dialog";
 import { LibraryPoller } from "@/components/library/library-poller";
 import { RetryIngestButton } from "@/components/library/retry-ingest-button";
 import { getSourceProcessingState } from "@/lib/source-processing-state";
+import { sourcePlatformLabels, sourceStatusLabels, sourceTypeLabels } from "@/lib/content-labels";
 import { requireWorkspace } from "@/server/access";
 import { listLibrarySources, type LibraryQuery } from "@/server/library";
 import { db } from "@content-center/db";
-
-const statusLabels = { PENDING: "处理中", PROCESSING: "处理中", READY: "已完成", FAILED: "失败", ARCHIVED: "已归档" } as const;
 
 function queryHref(query: LibraryQuery, updates: Record<string, string>) {
   const params = new URLSearchParams();
@@ -37,7 +36,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
       <header className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">素材库</h1>
-          <p className="mt-2 text-sm text-[var(--text-secondary)]">收录文本、公开网页和抖音作品，并用标签与 Collection 组织个人素材。</p>
+          <p className="mt-2 text-sm text-[var(--text-secondary)]">收录文本、公开网页和抖音作品，并用标签与素材集整理个人素材。</p>
         </div>
         <IngestDialog />
       </header>
@@ -49,7 +48,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
             <input name="search" defaultValue={query.search} aria-label="搜索素材" placeholder="搜索标题、作者或正文" className="min-w-0 flex-1 border-0 bg-transparent text-sm outline-none" />
           </label>
           <select name="sourcePlatform" defaultValue={query.sourcePlatform ?? ""} aria-label="平台筛选" className="h-10 rounded-[var(--radius)] border bg-[var(--surface)] px-3 text-sm">
-            <option value="">全部平台</option><option value="GENERIC">Generic</option><option value="DOUYIN">抖音</option><option value="XIAOHONGSHU">小红书</option><option value="WECHAT">微信</option><option value="BILIBILI">Bilibili</option><option value="YOUTUBE">YouTube</option><option value="TIKTOK">TikTok</option><option value="OTHER">Other</option>
+            <option value="">全部平台</option>{Object.entries(sourcePlatformLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
           <select name="sourceType" defaultValue={query.sourceType ?? ""} aria-label="类型筛选" className="h-10 rounded-[var(--radius)] border bg-[var(--surface)] px-3 text-sm">
             <option value="">全部类型</option><option value="TEXT">文本</option><option value="URL">网页</option><option value="VIDEO">视频</option><option value="AUDIO">音频</option><option value="IMAGE">图片</option><option value="DOCUMENT">文档</option>
@@ -60,8 +59,8 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
           <select name="tag" defaultValue={query.tag ?? ""} aria-label="标签筛选" className="h-10 rounded-[var(--radius)] border bg-[var(--surface)] px-3 text-sm">
             <option value="">全部标签</option>{tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
           </select>
-          <select name="collection" defaultValue={query.collection ?? ""} aria-label="Collection 筛选" className="h-10 rounded-[var(--radius)] border bg-[var(--surface)] px-3 text-sm">
-            <option value="">全部 Collection</option>{collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}
+          <select name="collection" defaultValue={query.collection ?? ""} aria-label="素材集筛选" className="h-10 rounded-[var(--radius)] border bg-[var(--surface)] px-3 text-sm">
+            <option value="">全部素材集</option>{collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}
           </select>
           <div className="flex gap-2">
             <select name="sort" defaultValue={query.sort ?? "newest"} aria-label="排序" className="h-10 rounded-[var(--radius)] border bg-[var(--surface)] px-3 text-sm">
@@ -80,7 +79,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
       </Card>
 
       {items.length === 0 ? (
-        <Card className="grid min-h-64 place-items-center p-8 text-center"><div><h2 className="font-semibold">没有匹配的素材</h2><p className="mt-2 text-sm text-[var(--text-secondary)]">收录第一条内容，或调整当前搜索条件。</p></div></Card>
+        <Card className="grid min-h-64 place-items-center p-8 text-center"><div><h2 className="font-semibold">还没有可用素材</h2><p className="mt-2 text-sm text-[var(--text-secondary)]">使用右上角“收录内容”添加第一条素材，或调整当前筛选条件。</p></div></Card>
       ) : (
         <section aria-label="素材列表" className={listView ? "grid gap-3" : "grid gap-4 md:grid-cols-2 xl:grid-cols-3"}>
           {items.map((item) => {
@@ -95,10 +94,10 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
             return (
               <Card key={item.id} className={listView ? "flex flex-col gap-4 p-4 sm:flex-row sm:items-center" : "overflow-hidden"}>
                 <div className={listView ? "h-16 w-24 shrink-0 rounded-lg bg-[var(--surface-elevated)]" : "h-32 bg-[var(--surface-elevated)]"}>
-                  {item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" className="h-full w-full rounded-[inherit] object-cover" /> : <div className="grid h-full place-items-center text-xs text-[var(--text-secondary)]">{item.sourcePlatform === "DOUYIN" ? <span className="inline-flex items-center gap-1"><Music2 size={16} />抖音</span> : item.sourceType}</div>}
+                  {item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" className="h-full w-full rounded-[inherit] object-cover" /> : <div className="grid h-full place-items-center text-xs text-[var(--text-secondary)]">{item.sourcePlatform === "DOUYIN" ? <span className="inline-flex items-center gap-1"><Music2 size={16} />抖音</span> : sourceTypeLabels[item.sourceType] || item.sourceType}</div>}
                 </div>
                 <div className={listView ? "min-w-0 flex-1" : "p-4"}>
-                  <div className="mb-2 flex flex-wrap gap-1.5"><Badge>{item.sourcePlatform}</Badge><Badge>{item.sourceType}</Badge><Badge>{item.sourceType === "VIDEO" ? processing.libraryLabel : statusLabels[item.status]}</Badge>{isMock ? <Badge className="border-[var(--warning)] text-[var(--warning)]">MOCK</Badge> : null}</div>
+                  <div className="mb-2 flex flex-wrap gap-1.5"><Badge>{sourcePlatformLabels[item.sourcePlatform] || item.sourcePlatform}</Badge><Badge>{sourceTypeLabels[item.sourceType] || item.sourceType}</Badge><Badge>{item.sourceType === "VIDEO" ? processing.libraryLabel : sourceStatusLabels[item.status] || item.status}</Badge>{isMock ? <Badge className="border-[var(--warning)] text-[var(--warning)]">MOCK MODE</Badge> : null}</div>
                   <Link href={`/library/${item.id}`} className="line-clamp-2 font-semibold hover:text-[var(--accent)]">{item.title || "未命名素材"}</Link>
                   <p className="mt-2 truncate text-xs text-[var(--text-secondary)]">{item.author || "未知作者"} · {item.createdAt.toLocaleString("zh-CN")}</p>
                   <div className="mt-3 flex flex-wrap gap-1">{item.tags.map(({ tag }) => <span key={tag.id} className="rounded-full bg-[var(--surface-elevated)] px-2 py-1 text-xs">#{tag.name}</span>)}</div>

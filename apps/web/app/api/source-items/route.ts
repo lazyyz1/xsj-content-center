@@ -71,8 +71,8 @@ export async function POST(request: Request) {
         error.code,
         error.code === "REDFOX_DISABLED" ? 409 : 400,
         error.code === "REDFOX_DISABLED"
-          ? "RedFox Integration 已禁用。"
-          : "请先在 设置 → Integrations 配置红狐 API。",
+          ? "红狐 API 已禁用。"
+          : "请先在 设置 → AI 与外部服务 配置红狐 API。",
       );
     }
     if (error instanceof RedFoxError) return apiError(error.code, 400, error.message);

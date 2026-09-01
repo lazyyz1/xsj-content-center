@@ -38,7 +38,7 @@ export default async function PublishingCenterPage({ searchParams }: { searchPar
   const tasks = allTasks.filter((task) => view === "pending" ? ["READY_TO_PUBLISH", "SCHEDULED", "FAILED"].includes(task.status) : view === "published" ? task.status === "PUBLISHED" : true);
 
   return <>
-    <PageHeader title="发布中心" description="使用已人工批准的内容 Snapshot 准备发布包、安排时间，并由人工完成真实发布。" />
+    <PageHeader title="发布中心" description="使用已人工批准的内容快照准备发布包、安排时间，并由人工完成真实发布。" />
     <nav aria-label="发布中心视图" className="mb-5 flex gap-1 rounded-xl border bg-[var(--surface)] p-1">
       {([['calendar','日历'],['pending','待发布'],['published','已发布']] as const).map(([key, label]) => <Link key={key} href={`/calendar?view=${key}`} className={`flex-1 rounded-lg px-4 py-2 text-center text-sm font-medium ${view === key ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`}>{label}</Link>)}
     </nav>

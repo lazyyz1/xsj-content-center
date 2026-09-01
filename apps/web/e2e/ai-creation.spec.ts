@@ -74,21 +74,21 @@ test("CreatorProfile → angles preview/apply → brief preview/apply → mother
   expect(created.status()).toBe(201);
   const projectId = (await created.json() as { id: string }).id;
   await page.goto(`/projects/${projectId}/studio`);
-  await expect(page.getByText("CONFIGURED", { exact: true })).toBeVisible();
+  await expect(page.getByText("CONFIGURED", { exact: true }).first()).toBeVisible();
 
   await page.getByRole("button", { name: "生成创作角度" }).click();
-  await expect(page.getByRole("heading", { name: "生成创作角度 Preview" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "生成创作角度预览" })).toBeVisible();
   await expect(page.getByRole("article").filter({ hasText: "从失败捷径切入" })).toBeVisible();
   await page.getByRole("button", { name: "采用这个角度（1）" }).click();
   await expect(page.getByLabel("切入角度")).toHaveValue("先展示无证据创作为什么失效");
 
-  await page.getByRole("button", { name: "生成 Brief" }).click();
-  await expect(page.getByRole("heading", { name: "生成 Brief Preview" })).toBeVisible();
-  await page.getByRole("button", { name: "应用到 Brief" }).click();
+  await page.getByRole("button", { name: "生成创作简报" }).click();
+  await expect(page.getByRole("heading", { name: "生成创作简报预览" })).toBeVisible();
+  await page.getByRole("button", { name: "应用到创作简报" }).click();
   await expect(page.getByLabel("选题")).toHaveValue("证据驱动的 AI 创作");
 
-  await page.getByRole("button", { name: "生成母稿" }).click();
-  await expect(page.getByRole("heading", { name: "生成母稿 Preview" })).toBeVisible();
+  await page.getByRole("button", { name: "生成核心母稿" }).click();
+  await expect(page.getByRole("heading", { name: "生成核心母稿预览" })).toBeVisible();
   await expect(page.getByText(/很多人一上来就让 AI 写全文/)).toBeVisible();
   await page.getByRole("button", { name: "应用为母稿" }).click();
   await expect(page.getByLabel("母稿标题")).toHaveValue("AI 写作最容易跳过的一步");
@@ -105,6 +105,6 @@ test("unconfigured LLM is explicit and does not expose active AI actions", async
   const workspaceId = user.workspaceMemberships[0]!.workspaceId;
   const project = await db.contentProject.create({ data: { workspaceId, createdById: user.id, title: "No LLM Project" } });
   await page.goto(`/projects/${project.id}/studio`);
-  await expect(page.getByText("尚未配置 AI 模型", { exact: true })).toBeVisible();
+  await expect(page.getByText("尚未配置 AI 模型", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "生成创作角度" })).toHaveCount(0);
 });

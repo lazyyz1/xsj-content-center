@@ -81,7 +81,7 @@ test("OWNER configures RedFox and ingests a Douyin video into private MinIO stor
   await page.getByRole("button", { name: "抖音视频" }).click();
   await page.getByLabel("抖音分享链接或分享文案").fill(`复制打开抖音 ${douyinUrl}`);
   await page.getByRole("button", { name: "提交收录" }).click();
-  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("请先在 设置 → Integrations 配置红狐 API");
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("请先在 设置 → AI 与外部服务 配置红狐 API");
   expect(parseCalls).toBe(0);
 
   await page.goto("/settings/integrations");
@@ -97,7 +97,7 @@ test("OWNER configures RedFox and ingests a Douyin video into private MinIO stor
   await page.getByRole("button", { name: "抖音视频" }).click();
   await page.getByLabel("抖音分享链接或分享文案").fill(douyinUrl);
   await page.getByRole("button", { name: "提交收录" }).click();
-  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("RedFox Integration 已禁用");
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("红狐 API 已禁用");
   expect(parseCalls).toBe(0);
 
   await page.goto("/settings/integrations");
@@ -110,11 +110,13 @@ test("OWNER configures RedFox and ingests a Douyin video into private MinIO stor
   await page.getByRole("button", { name: "提交收录" }).click();
   await expect(page.getByRole("dialog").getByText("处理中", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "查看素材" }).click();
-  await expect(page.getByText("READY", { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("已完成", { exact: true }).first()).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole("heading", { name: "RedFox E2E 真实链路" })).toBeVisible();
-  await expect(page.getByText("RedFox · REAL")).toBeVisible();
+  await page.getByText("高级信息与处理记录", { exact: true }).click();
+  await expect(page.getByRole("cell", { name: "REDFOX", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "REAL", exact: true })).toBeVisible();
   await expect(page.getByText("豆包 ASR 未配置。", { exact: false })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Transcript" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "视频转写" })).toBeVisible();
   const video = page.locator("video");
   await expect(video).toBeVisible();
   const signedUrl = await video.getAttribute("src");

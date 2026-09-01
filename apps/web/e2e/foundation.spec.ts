@@ -32,7 +32,7 @@ test("register → onboarding → dashboard → integrations → logout → logi
   await page.getByRole("button", { name: "创建 Workspace" }).click();
 
   await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByRole("heading", { name: "欢迎进入 AI 内容生产中心" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "今天从哪里开始？" })).toBeVisible();
   await expect(page.getByText("素材").first()).toBeVisible();
 
   const otherUser = await db.user.create({
@@ -49,8 +49,8 @@ test("register → onboarding → dashboard → integrations → logout → logi
   expect(crossWorkspaceResponse.status()).toBe(404);
 
   await page.getByRole("link", { name: "设置" }).click();
-  await page.getByRole("link", { name: "集成状态" }).click();
-  await expect(page.getByRole("heading", { name: "集成状态" })).toBeVisible();
+  await page.getByRole("link", { name: "AI 与外部服务" }).click();
+  await expect(page.getByRole("heading", { name: "AI 与外部服务" })).toBeVisible();
   await expect(page.getByText("Unconfigured").first()).toBeVisible();
   await expect(page.getByText("Configured").first()).toBeVisible();
 

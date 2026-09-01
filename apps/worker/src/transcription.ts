@@ -63,7 +63,7 @@ async function updateProgress(jobId: string, amount: number, stage: ProgressStag
 
 async function loadDoubaoConfig(workspaceId: string) {
   const status = await integrationService.getIntegrationStatus(workspaceId, "DOUBAO_ASR");
-  if (status.status === "DISABLED") throw new DoubaoError("DOUBAO_DISABLED", "豆包 ASR Integration 已禁用。", false);
+  if (status.status === "DISABLED") throw new DoubaoError("DOUBAO_DISABLED", "豆包 ASR 已禁用。", false);
   if (status.status !== "CONFIGURED") throw new DoubaoError("DOUBAO_NOT_CONFIGURED", "请先配置豆包 ASR。", false);
   const decrypted = await integrationService.getDecryptedIntegrationConfig(workspaceId, "DOUBAO_ASR");
   if (!decrypted) throw new DoubaoError("DOUBAO_NOT_CONFIGURED", "请先配置豆包 ASR。", false);

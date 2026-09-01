@@ -44,6 +44,7 @@ test("approved → schedule → calendar → package copy → manual publish →
   const scheduledLocal = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}T10:00`;
 
   await page.goto(`/projects/${project.id}/studio`);
+  await page.getByRole("button", { name: /3 · 平台内容与审核/ }).click();
   await page.getByRole("button", { name: /^抖音/ }).click();
   await page.getByRole("button", { name: "加入发布中心" }).click();
   await page.getByLabel("计划发布时间").fill(scheduledLocal);
@@ -75,6 +76,7 @@ test("Mother update makes an approved variant stale and blocks task creation", a
   const user = await register(page, 2);
   const { project } = await approvedProject(user, "阶段八过期门禁项目", true);
   await page.goto(`/projects/${project.id}/studio`);
+  await page.getByRole("button", { name: /3 · 平台内容与审核/ }).click();
   await page.getByRole("button", { name: /^抖音/ }).click();
   await expect(page.getByRole("button", { name: "加入发布中心" })).toBeDisabled();
   await expect(page.getByText("母稿已更新，必须重新生成并审核。", { exact: true })).toBeVisible();
@@ -92,9 +94,9 @@ test("existing task keeps its approved snapshot after the variant changes", asyn
   await db.platformVariant.update({ where: { id: variant.id }, data: { body: "这是审核后修改的新内容，不应进入旧任务。", version: { increment: 1 }, status: "DRAFT" } });
   await page.goto(`/calendar/tasks/${task.id}`);
   await expect(page.getByText("当前内容已经发生变化", { exact: true })).toBeVisible();
-  await expect(page.getByText("该发布任务仍使用创建任务时的已审核 Snapshot。旧任务不会随 Variant 更新。", { exact: true })).toBeVisible();
+  await expect(page.getByText("该任务仍使用创建时固定的已审核内容快照，不会随最新平台草稿自动更新。", { exact: true })).toBeVisible();
   await expect(page.getByText("人工从 GPT 网页确认并带回的可靠母稿正文。", { exact: true })).toBeVisible();
   await expect(page.getByText("这是审核后修改的新内容，不应进入旧任务。", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "继续使用当前发布包" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "重新走审核并创建新任务" })).toHaveAttribute("href", `/projects/${project.id}/studio`);
+  await expect(page.getByRole("link", { name: "重新审核并创建新任务" })).toHaveAttribute("href", `/projects/${project.id}/studio`);
 });

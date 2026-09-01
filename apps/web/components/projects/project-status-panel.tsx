@@ -9,7 +9,7 @@ type ProjectStatus = "DRAFT" | "RESEARCHING" | "BRIEF_READY" | "WRITING" | "IN_R
 const statusLabels: Record<ProjectStatus, string> = {
   DRAFT: "草稿",
   RESEARCHING: "研究中",
-  BRIEF_READY: "Brief 已就绪",
+  BRIEF_READY: "创作简报已就绪",
   WRITING: "写作中",
   IN_REVIEW: "审核中",
   APPROVED: "已批准",
@@ -18,7 +18,7 @@ const statusLabels: Record<ProjectStatus, string> = {
 
 const primaryActions: Partial<Record<ProjectStatus, { to: ProjectStatus; label: string }>> = {
   DRAFT: { to: "RESEARCHING", label: "开始研究" },
-  RESEARCHING: { to: "BRIEF_READY", label: "确认 Brief 完成" },
+  RESEARCHING: { to: "BRIEF_READY", label: "确认创作简报完成" },
   BRIEF_READY: { to: "WRITING", label: "开始写作" },
   WRITING: { to: "IN_REVIEW", label: "提交人工审核" },
   IN_REVIEW: { to: "APPROVED", label: "批准母稿" },
@@ -70,7 +70,7 @@ export function ProjectStatusPanel({
           {project.status === "IN_REVIEW" ? <Button variant="secondary" disabled={busy} onClick={() => request(`/api/projects/${project.id}/transition`, "POST", { to: "WRITING" })}>退回修改</Button> : null}
           <Button variant="secondary" disabled={busy} onClick={() => { if (window.confirm("归档后项目将从默认列表隐藏，确定继续吗？")) void request(`/api/projects/${project.id}/transition`, "POST", { to: "ARCHIVED" }); }}>归档项目</Button>
           <Button variant="ghost" className="text-[var(--danger)]" disabled={busy} onClick={async () => {
-            if (!window.confirm("确定永久删除这个项目吗？项目中的 Evidence、Brief 和母稿也会删除，但素材库原始素材会保留。")) return;
+            if (!window.confirm("确定永久删除这个项目吗？项目中的观点 / 证据、创作简报和母稿也会删除，但素材库原始素材会保留。")) return;
             await request(`/api/projects/${project.id}`, "DELETE");
             router.push("/projects");
           }}>删除项目</Button>

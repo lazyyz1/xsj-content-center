@@ -78,15 +78,15 @@ test("Deep Package → copy GPT task → manual import → Mother GPT_WEB → pl
   await db.platformVariant.create({ data: { workspaceId: membership.workspaceId, projectId: project.id, motherContentId: mother.id, platform: "DOUYIN", title: "旧抖音稿", body: "旧平台正文", hashtags: [], mediaPlan: {}, metadata: {}, status: "READY", sourceMotherVersion: 1, createdById: user.id } });
 
   await page.goto(`/projects/${project.id}/studio`);
-  await page.getByRole("button", { name: /^创作包/ }).click();
+  await page.getByRole("button", { name: /2 · 深度创作/ }).click();
   await page.getByRole("button", { name: "生成深度创作包" }).click();
-  await expect(page.getByRole("heading", { name: "Deep Content Package Preview" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Topic · 选题" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Viewpoint · 观点" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Evidence · 证据" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Expression · 表达弹药" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Structure · 结构方案" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Creator Contribution · 创作者资产" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "深度创作包预览" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "选题方案" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "观点体系" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "证据与事实边界" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "表达素材" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "结构方案" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "创作者资产" })).toBeVisible();
   await page.getByRole("button", { name: "保存创作包" }).click();
   await expect(page.getByRole("heading", { name: "已保存创作包" })).toBeVisible();
 
@@ -98,7 +98,7 @@ test("Deep Package → copy GPT task → manual import → Mother GPT_WEB → pl
   await page.getByRole("button", { name: "生成 GPT 创作任务包" }).click();
   expect((await taskResponse).status()).toBe(200);
   expect(await page.getByLabel("GPT 创作任务包").inputValue()).toContain("可靠 Evidence");
-  await page.getByRole("button", { name: "复制 GPT 创作包" }).click();
+  await page.getByRole("button", { name: "复制给 GPT" }).click();
   await expect(page.getByText("已复制，请前往 ChatGPT 网页版完成高级创作", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "导入 GPT 成稿" }).click();
@@ -107,7 +107,7 @@ test("Deep Package → copy GPT task → manual import → Mother GPT_WEB → pl
   await page.getByLabel("GPT 成稿备注").fill("人工确认");
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "保存为母稿" }).click();
-  await expect(page.getByText("GPT WEB", { exact: true })).toBeVisible();
+  await expect(page.getByText("GPT 网页成稿", { exact: true })).toBeVisible();
   await expect(page.getByText("1 个平台版本需要更新", { exact: true })).toBeVisible();
   await expect.poll(async () => db.motherContent.findUnique({ where: { projectId: project.id } })).toMatchObject({ version: 2, origin: "GPT_WEB", title: "GPT Web 最终母稿" });
   expect(fixtureCalls).toBe(1);
@@ -118,7 +118,7 @@ test("Deep Package → copy GPT task → manual import → Mother GPT_WEB → pl
 
   await db.workspaceMember.update({ where: { id: membership.id }, data: { role: "VIEWER" } });
   await page.reload();
-  await page.getByRole("button", { name: /^创作包/ }).click();
+  await page.getByRole("button", { name: /2 · 深度创作/ }).click();
   await expect(page.getByLabel("最终选择的选题")).toBeDisabled();
   await expect(page.getByRole("button", { name: "重新生成深度创作包" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "导入 GPT 成稿" })).toHaveCount(0);

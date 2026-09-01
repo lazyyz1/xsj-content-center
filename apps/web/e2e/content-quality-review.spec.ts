@@ -58,6 +58,7 @@ test("rule gate → Workspace LLM advice → human approval → edit reset → E
   await db.platformVariant.create({ data: { workspaceId: membership.workspaceId, projectId: project.id, motherContentId: mother.id, platform: "DOUYIN", title: "可靠内容怎么做", hook: "先别急着写", body: "可靠内容先核对事实，再组织表达。", hashtags: ["内容方法"], mediaPlan: {}, metadata: {}, status: "READY", sourceMotherVersion: 1, createdById: user.id } });
 
   await page.goto(`/projects/${project.id}/studio`);
+  await page.getByRole("button", { name: /3 · 平台内容与审核/ }).click();
   await page.getByRole("button", { name: /^抖音/ }).click();
   await page.getByRole("button", { name: "提交审核" }).click();
   await expect(page.getByText("抖音已提交人工审核，不会自动运行 AI 检查。", { exact: true })).toBeVisible();
@@ -65,7 +66,7 @@ test("rule gate → Workspace LLM advice → human approval → edit reset → E
   await expect(page).toHaveURL(new RegExp(`/projects/${project.id}/review/DOUYIN$`));
   await expect(page.getByText("未发现规则问题。", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "运行 AI 检查" }).click();
-  await expect(page.getByText("TONE_TOO_GENERIC", { exact: true })).toBeVisible();
+  await expect(page.getByText("结尾略显模板化。", { exact: true })).toBeVisible();
   await expect(page.getByText("内容逻辑清楚，有一处表达可以更自然。", { exact: true })).toBeVisible();
   await page.getByLabel("确认已知风险").check();
   await page.getByRole("button", { name: "批准" }).click();
@@ -74,6 +75,7 @@ test("rule gate → Workspace LLM advice → human approval → edit reset → E
   expect(usage).toMatchObject({ provider: "LLM", inputTokens: 149, outputTokens: 47 });
 
   await page.getByRole("link", { name: "返回创作工作台" }).click();
+  await page.getByRole("button", { name: /3 · 平台内容与审核/ }).click();
   await page.getByRole("button", { name: /^抖音/ }).click();
   await page.getByLabel("抖音正文").fill("人工修改后的平台正文。");
   await expect.poll(async () => (await db.platformVariant.findUnique({ where: { projectId_platform: { projectId: project.id, platform: "DOUYIN" } } }))?.status, { timeout: 10_000 }).toBe("DRAFT");

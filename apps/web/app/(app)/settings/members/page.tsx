@@ -13,7 +13,7 @@ export default async function MembersPage() {
 
   return (
     <>
-      <PageHeader title="Workspace 成员" description="阶段 1 只提供成员列表，不开放邀请或角色编辑。" />
+      <PageHeader title="团队与权限" description="当前仅展示内容空间成员与权限，不开放邀请或角色编辑。" />
       <Card className="divide-y divide-[var(--border)] overflow-hidden">
         {members.map((member) => (
           <div key={member.id} className="flex items-center justify-between gap-4 p-5">

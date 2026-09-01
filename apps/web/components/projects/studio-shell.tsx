@@ -56,17 +56,18 @@ export function StudioShell({ project, availableSources, editable, ai }: {
 
   return (
     <>
-      <nav aria-label="内容版本" className="mb-4 flex gap-1 overflow-x-auto rounded-xl border bg-[var(--surface)] p-1">
-        <button className={`min-w-24 rounded-lg px-3 py-2 text-sm ${contentTab === "MOTHER" ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`} onClick={() => setContentTab("MOTHER")}><span className="block font-medium">母稿</span><span className="mt-0.5 block text-[10px] opacity-75">v{currentMotherVersion || 0}</span></button>
-        <button className={`min-w-24 rounded-lg px-3 py-2 text-sm ${contentTab === "PACKAGE" ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`} onClick={() => setContentTab("PACKAGE")}><span className="block font-medium">创作包</span><span className="mt-0.5 block text-[10px] opacity-75">{project.deepContentPackage ? `v${project.deepContentPackage.version}` : "未生成"}</span></button>
-        {SUPPORTED_PLATFORMS.map((platform) => <button key={platform} className={`min-w-24 rounded-lg px-3 py-2 text-sm ${contentTab === platform ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`} onClick={() => selectPlatform(platform)}><span className="block font-medium">{PLATFORM_LABELS[platform]}</span><span className="mt-0.5 block text-[10px] opacity-75">{platformStatus(platform)}</span></button>)}
+      <nav aria-label="创作步骤" className="mb-4 grid gap-1 rounded-xl border bg-[var(--surface)] p-1 sm:grid-cols-3">
+        <button className={`rounded-lg px-4 py-3 text-left text-sm ${contentTab === "MOTHER" ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`} onClick={() => setContentTab("MOTHER")}><span className="block font-medium">1 · 准备与核心母稿</span><span className="mt-1 block text-[10px] opacity-75">素材 · 观点 / 证据 · 创作简报 · v{currentMotherVersion || 0}</span></button>
+        <button className={`rounded-lg px-4 py-3 text-left text-sm ${contentTab === "PACKAGE" ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`} onClick={() => setContentTab("PACKAGE")}><span className="block font-medium">2 · 深度创作</span><span className="mt-1 block text-[10px] opacity-75">创作包 · GPT 网页成稿 · {project.deepContentPackage ? `v${project.deepContentPackage.version}` : "未生成"}</span></button>
+        <button className={`rounded-lg px-4 py-3 text-left text-sm ${contentTab !== "MOTHER" && contentTab !== "PACKAGE" ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`} onClick={() => selectPlatform(activePlatform)}><span className="block font-medium">3 · 平台内容与审核</span><span className="mt-1 block text-[10px] opacity-75">5 个平台 · 生成后逐一提交人工审核</span></button>
       </nav>
+      {contentTab !== "MOTHER" && contentTab !== "PACKAGE" ? <nav aria-label="平台版本" className="mb-4 flex gap-1 overflow-x-auto rounded-xl border bg-[var(--surface)] p-1">{SUPPORTED_PLATFORMS.map((platform) => <button key={platform} className={`min-w-24 rounded-lg px-3 py-2 text-sm ${contentTab === platform ? "bg-[var(--surface-elevated)] text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`} onClick={() => selectPlatform(platform)}><span className="block font-medium">{PLATFORM_LABELS[platform]}</span><span className="mt-0.5 block text-[10px] opacity-75">{platformStatus(platform)}</span></button>)}</nav> : null}
       {staleCount ? <p className="mb-4 text-sm text-[var(--warning)]">{staleCount} 个平台版本需要更新</p> : null}
       <div className={contentTab === "MOTHER" ? "block" : "hidden"}>
       <nav aria-label="工作台面板" className="mb-4 flex rounded-xl border bg-[var(--surface)] p-1 xl:hidden">
-        <button className={tabClass("research")} onClick={() => setTab("research")}>素材与证据</button>
-        <button className={tabClass("writing")} onClick={() => setTab("writing")}>母稿</button>
-        <button className={tabClass("brief")} onClick={() => setTab("brief")}>AI 与 Brief</button>
+        <button className={tabClass("research")} onClick={() => setTab("research")}>素材与观点</button>
+        <button className={tabClass("writing")} onClick={() => setTab("writing")}>核心母稿</button>
+        <button className={tabClass("brief")} onClick={() => setTab("brief")}>AI 与创作简报</button>
       </nav>
       <div className="grid items-start gap-5 xl:grid-cols-[320px_minmax(0,1fr)_360px]">
         <Card className={`${tab === "research" ? "block" : "hidden"} p-4 xl:block`}>

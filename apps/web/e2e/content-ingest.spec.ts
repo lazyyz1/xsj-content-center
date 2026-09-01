@@ -55,7 +55,7 @@ test("manual and URL ingest → tags → collection → search with workspace is
   await page.getByRole("button", { name: "提交收录" }).click();
   await expect(page.getByRole("dialog").getByText("处理中", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "查看素材" }).click();
-  await expect(page.getByText("READY", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("已完成", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/这是一段由用户真实输入/)).toBeVisible();
   const manualSourceId = new URL(page.url()).pathname.split("/").pop();
   if (!manualSourceId) throw new Error("Missing manual source id");
@@ -63,9 +63,9 @@ test("manual and URL ingest → tags → collection → search with workspace is
   await page.getByLabel("新标签").fill("阶段二");
   await page.getByRole("button", { name: "添加标签" }).click();
   await expect(page.getByText("#阶段二")).toBeVisible();
-  await page.getByLabel("新 Collection").fill("重点素材");
+  await page.getByLabel("新素材集").fill("重点素材");
   await page.getByRole("button", { name: "新建并加入" }).click();
-  await expect(page.getByRole("button", { name: "移出 Collection 重点素材" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "移出素材集 重点素材" })).toBeVisible();
 
   const otherUser = await db.user.create({ data: { name: "Other Workspace User", email: otherEmail } });
   const otherWorkspace = await db.workspace.create({ data: { name: "Other Workspace", slug: `other-${runId}`, members: { create: { userId: otherUser.id, role: "OWNER" } } } });
@@ -91,7 +91,7 @@ test("manual and URL ingest → tags → collection → search with workspace is
   await page.getByRole("button", { name: "提交收录" }).click();
   await expect(page.getByRole("dialog").getByText("处理中", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "查看素材" }).click();
-  await expect(page.getByText("READY", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("已完成", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("heading", { name: "E2E Fixture Article" })).toBeVisible();
   await expect(page.getByText(/served by the local Playwright fixture/)).toBeVisible();
 });

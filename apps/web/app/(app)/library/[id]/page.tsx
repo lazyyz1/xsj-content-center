@@ -6,6 +6,7 @@ import { LibraryPoller } from "@/components/library/library-poller";
 import { SourceActions } from "@/components/library/source-actions";
 import { TranscriptionActions } from "@/components/library/transcription-actions";
 import { getSourceProcessingState, type ProcessingStepState } from "@/lib/source-processing-state";
+import { sourcePlatformLabels, sourceStatusLabels, sourceTypeLabels } from "@/lib/content-labels";
 import { requireWorkspace } from "@/server/access";
 import { db, findSourceForUser } from "@content-center/db";
 import { IntegrationService } from "@content-center/integrations";
@@ -123,7 +124,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
       <LibraryPoller active={isProcessing} />
       <Link href="/library" className="mb-5 inline-flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"><ArrowLeft size={16} />返回素材库</Link>
       <header className="mb-6">
-        <div className="flex flex-wrap gap-2"><Badge>{source.sourcePlatform}</Badge><Badge>{source.sourceType}</Badge><Badge>{source.status}</Badge>{isMock ? <Badge className="border-[var(--warning)] text-[var(--warning)]">MOCK</Badge> : null}</div>
+        <div className="flex flex-wrap gap-2"><Badge>{sourcePlatformLabels[source.sourcePlatform] || source.sourcePlatform}</Badge><Badge>{sourceTypeLabels[source.sourceType] || source.sourceType}</Badge><Badge>{sourceStatusLabels[source.status] || source.status}</Badge>{isMock ? <Badge className="border-[var(--warning)] text-[var(--warning)]">MOCK MODE</Badge> : null}</div>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight">{source.title || "未命名素材"}</h1>
         <p className="mt-2 text-sm text-[var(--text-secondary)]">{source.author || "未知作者"} · {source.createdAt.toLocaleString("zh-CN")}</p>
         {source.sourceUrl ? <a href={source.sourceUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex max-w-full items-center gap-1 truncate text-sm text-[var(--accent)]">原始链接 <ExternalLink size={14} /></a> : null}
@@ -145,7 +146,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
             </Card>
           ) : null}
           <Card className="p-5">
-            <h2 className="font-semibold">Source</h2>
+            <h2 className="font-semibold">素材概览</h2>
             {playableAssets.map((asset) => asset.assetType === "VIDEO" ? (
               <video key={asset.id} controls preload="metadata" className="mt-4 max-h-[32rem] w-full rounded-xl bg-black" src={asset.signedUrl}>您的浏览器不支持视频播放。</video>
             ) : (
@@ -157,11 +158,11 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
           </Card>
           {source.sourcePlatform === "DOUYIN" ? (
             <Card className="p-5">
-              <h2 className="font-semibold">RedFox 素材信息</h2>
+              <h2 className="font-semibold">抖音素材信息</h2>
               <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
                 <div><dt className="text-[var(--text-secondary)]">平台</dt><dd className="mt-1">抖音</dd></div>
-                <div><dt className="text-[var(--text-secondary)]">Provider</dt><dd className="mt-1">RedFox · REAL</dd></div>
-                <div><dt className="text-[var(--text-secondary)]">内容类型</dt><dd className="mt-1">{source.sourceType}</dd></div>
+                <div><dt className="text-[var(--text-secondary)]">采集服务</dt><dd className="mt-1">RedFox · 真实模式</dd></div>
+                <div><dt className="text-[var(--text-secondary)]">内容类型</dt><dd className="mt-1">{sourceTypeLabels[source.sourceType] || source.sourceType}</dd></div>
                 <div><dt className="text-[var(--text-secondary)]">保存时间</dt><dd className="mt-1">{source.updatedAt.toLocaleString("zh-CN")}</dd></div>
               </dl>
               <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[560px] text-left text-sm"><thead className="text-[var(--text-secondary)]"><tr><th className="pb-2">Asset</th><th className="pb-2">状态</th><th className="pb-2">MIME</th><th className="pb-2">大小</th><th className="pb-2">Stored At</th></tr></thead><tbody>{source.assets.map((asset) => <tr key={asset.id} className="border-t"><td className="py-3">{asset.assetType}</td><td>{asset.status}</td><td>{asset.mimeType || "—"}</td><td>{formatBytes(asset.sizeBytes)}</td><td>{asset.storedAt?.toLocaleString("zh-CN") || "—"}</td></tr>)}</tbody></table></div>
@@ -170,7 +171,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
           {source.sourcePlatform === "DOUYIN" ? (
             <Card className="p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="font-semibold">Transcript</h2>
+                <h2 className="font-semibold">视频转写</h2>
                 <Badge>{processing.transcriptionLabel}</Badge>
               </div>
               {transcriptionBusy ? <p className="mt-4 text-sm text-[var(--text-secondary)]">{progressStage ? progressLabels[progressStage] || progressStage : "转写处理中，页面会自动刷新。"}</p> : null}
@@ -205,10 +206,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
               {isProcessing ? <p className="mt-4 text-sm text-[var(--text-secondary)]">{progressStage ? progressLabels[progressStage] || progressStage : "处理中，页面会自动刷新。"}</p> : <pre className="mt-4 whitespace-pre-wrap break-words font-sans text-sm leading-7">{source.rawText || "暂无正文"}</pre>}
             </Card>
           )}
-          <Card className="overflow-hidden">
-            <div className="border-b p-5"><h2 className="font-semibold">处理任务</h2></div>
-            <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-[var(--surface-elevated)] text-[var(--text-secondary)]"><tr><th className="p-3">任务</th><th className="p-3">状态</th><th className="p-3">Provider</th><th className="p-3">模式</th><th className="p-3">Attempt</th><th className="p-3">耗时</th><th className="p-3">错误</th></tr></thead><tbody>{source.ingestJobs.map((job) => <tr key={job.id} className="border-t"><td className="p-3">{job.jobType}</td><td className="p-3">{job.status}</td><td className="p-3">{job.provider}</td><td className="p-3">{job.providerMode}</td><td className="p-3">{job.attempt}/{job.maxAttempts}</td><td className="p-3">{duration(job)}</td><td className="p-3 text-[var(--danger)]">{job.errorMessage || "—"}</td></tr>)}</tbody></table></div>
-          </Card>
+          <Card className="overflow-hidden"><details><summary className="cursor-pointer list-none p-5"><h2 className="font-semibold">高级信息与处理记录</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">仅在排查采集或转写问题时需要查看。</p></summary><div className="overflow-x-auto border-t"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-[var(--surface-elevated)] text-[var(--text-secondary)]"><tr><th className="p-3">任务</th><th className="p-3">状态</th><th className="p-3">服务</th><th className="p-3">模式</th><th className="p-3">尝试次数</th><th className="p-3">耗时</th><th className="p-3">错误</th></tr></thead><tbody>{source.ingestJobs.map((job) => <tr key={job.id} className="border-t"><td className="p-3">{job.jobType}</td><td className="p-3">{job.status}</td><td className="p-3">{job.provider}</td><td className="p-3">{job.providerMode}</td><td className="p-3">{job.attempt}/{job.maxAttempts}</td><td className="p-3">{duration(job)}</td><td className="p-3 text-[var(--danger)]">{job.errorMessage || "—"}</td></tr>)}</tbody></table></div></details></Card>
         </div>
         <SourceActions sourceId={source.id} status={source.status} failedJobId={source.status === "FAILED" ? latestIngestJob?.id : undefined} tags={source.tags.map(({ tag }) => tag)} availableTags={availableTags} collections={source.collections.map(({ collection }) => collection)} availableCollections={availableCollections} availableProjects={availableProjects} canManageProjects={role !== "VIEWER"} />
       </div>

@@ -37,20 +37,20 @@ test("library source → project → evidence → brief → mother content → r
   const projectId = new URL(page.url()).pathname.split("/")[2]!;
   await expect(page.getByRole("paragraph").filter({ hasText: "阶段四素材" })).toBeVisible();
 
-  await page.getByLabel("Evidence 观点").fill("素材支持阶段四核心观点");
-  await page.getByLabel("Evidence 摘录").fill("真实项目闭环的素材正文");
-  await page.getByRole("button", { name: "新增 Evidence" }).click();
+  await page.getByLabel("观点或结论").fill("素材支持阶段四核心观点");
+  await page.getByLabel("原文摘录").fill("真实项目闭环的素材正文");
+  await page.getByRole("button", { name: "新增观点 / 证据" }).click();
   await expect(page.getByRole("paragraph").filter({ hasText: "素材支持阶段四核心观点" })).toBeVisible();
 
   await page.getByLabel("选题").fill("阶段四创作工作台");
   await page.getByLabel("核心观点").fill("先组织证据，再写可靠母稿");
   await page.getByLabel("关键要点（每行一点）").fill("素材关联\n证据整理\n人工审核");
-  await page.getByRole("button", { name: "保存 Brief" }).click();
+  await page.getByRole("button", { name: "保存创作简报" }).click();
   await expect(page.getByText("已保存", { exact: true }).last()).toBeVisible();
 
   await page.getByRole("button", { name: "开始研究" }).click();
-  await expect(page.getByRole("button", { name: "确认 Brief 完成" })).toBeVisible();
-  await page.getByRole("button", { name: "确认 Brief 完成" }).click();
+  await expect(page.getByRole("button", { name: "确认创作简报完成" })).toBeVisible();
+  await page.getByRole("button", { name: "确认创作简报完成" }).click();
   await expect(page.getByRole("button", { name: "开始写作" })).toBeVisible();
   await page.getByRole("button", { name: "开始写作" }).click();
   await expect(page.getByRole("button", { name: "提交人工审核" })).toBeVisible();
@@ -59,7 +59,7 @@ test("library source → project → evidence → brief → mother content → r
   await page.getByLabel("母稿大纲").fill("开场\n论证\n结尾");
   await page.getByLabel("母稿正文").fill("这是经过素材与 Evidence 支撑的真实持久化母稿正文。");
   await expect.poll(async () => (await db.motherContent.findUnique({ where: { projectId } }))?.body, { timeout: 10_000 }).toBe("这是经过素材与 Evidence 支撑的真实持久化母稿正文。");
-  await page.getByRole("button", { name: "提交人工审核" }).click();
+  await page.getByRole("button", { name: "提交人工审核", exact: true }).click();
   await expect(page.getByRole("button", { name: "批准母稿" })).toBeVisible();
 
   await page.reload();

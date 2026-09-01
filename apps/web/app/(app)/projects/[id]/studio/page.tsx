@@ -10,6 +10,7 @@ import { IntegrationService } from "@content-center/integrations";
 import { getCreatorProfile } from "@/server/creator-profile-service";
 import { getRecentAIRuns } from "@/server/ai/ai-run-service";
 import { deepContentPackageSchema } from "@/server/deep-content/schemas";
+import { projectStatusLabels } from "@/lib/content-labels";
 
 function stringArray(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
 
@@ -39,5 +40,5 @@ export default async function ProjectStudioPage({ params }: { params: Promise<{ 
     platformVariants: project.platformVariants.map((variant) => ({ id: variant.id, platform: variant.platform, version: variant.version, title: variant.title, body: variant.body, hook: variant.hook, summary: variant.summary, hashtags: stringArray(variant.hashtags), mediaPlan: variant.mediaPlan, metadata: variant.metadata, status: variant.status, sourceMotherVersion: variant.sourceMotherVersion, isStale: variant.sourceMotherVersion < (mother?.version ?? 0) })),
   };
   const ai = { integrationStatus: llm.status !== "CONFIGURED" && process.env.MOCK_MODE === "true" ? "MOCK" as const : llm.status, hasCreatorProfile: Boolean(project.creatorProfile || ownProfile), recentRuns: recentRuns.map((run) => ({ ...run, createdAt: run.createdAt.toISOString(), appliedAt: run.appliedAt?.toISOString() ?? null, discardedAt: run.discardedAt?.toISOString() ?? null })) };
-  return <><header className="mb-5 flex flex-wrap items-start justify-between gap-4"><div><Link href={`/projects/${project.id}`} className="mb-3 inline-flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"><ArrowLeft size={16} />返回项目详情</Link><h1 className="text-2xl font-semibold tracking-tight">{project.title}</h1><p className="mt-1 text-sm text-[var(--text-secondary)]">创作工作台</p></div><Badge>{project.status}</Badge></header><StudioShell project={studioProject} availableSources={availableSources} editable={role !== "VIEWER"} ai={ai} /></>;
+  return <><header className="mb-5 flex flex-wrap items-start justify-between gap-4"><div><Link href={`/projects/${project.id}`} className="mb-3 inline-flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"><ArrowLeft size={16} />返回项目详情</Link><h1 className="text-2xl font-semibold tracking-tight">{project.title}</h1><p className="mt-1 text-sm text-[var(--text-secondary)]">创作工作台</p></div><Badge>{projectStatusLabels[project.status] || project.status}</Badge></header><StudioShell project={studioProject} availableSources={availableSources} editable={role !== "VIEWER"} ai={ai} /></>;
 }

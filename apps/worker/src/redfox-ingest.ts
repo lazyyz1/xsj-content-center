@@ -58,17 +58,17 @@ async function recordParseUsage(input: {
 async function loadRedFoxConfig(workspaceId: string) {
   const status = await getWorkspaceIntegrationStatus(workspaceId, "REDFOX");
   if (status.status === "DISABLED") {
-    throw new RedFoxError("REDFOX_DISABLED", "RedFox Integration 已禁用。", false);
+    throw new RedFoxError("REDFOX_DISABLED", "红狐 API 已禁用。", false);
   }
   if (status.status !== "CONFIGURED") {
-    throw new RedFoxError("REDFOX_NOT_CONFIGURED", "请先在 设置 → Integrations 配置红狐 API。", false);
+    throw new RedFoxError("REDFOX_NOT_CONFIGURED", "请先在 设置 → AI 与外部服务 配置红狐 API。", false);
   }
   const config = await getWorkspaceIntegrationConfig(workspaceId, "REDFOX");
   if (!config || typeof config.apiKey !== "string" || !config.apiKey.trim()) {
-    throw new RedFoxError("REDFOX_NOT_CONFIGURED", "请先在 设置 → Integrations 配置红狐 API。", false);
+    throw new RedFoxError("REDFOX_NOT_CONFIGURED", "请先在 设置 → AI 与外部服务 配置红狐 API。", false);
   }
   if (config.baseUrl !== undefined && typeof config.baseUrl !== "string") {
-    throw new RedFoxError("REDFOX_NOT_CONFIGURED", "RedFox Integration 配置无效。", false);
+    throw new RedFoxError("REDFOX_NOT_CONFIGURED", "红狐 API 配置无效。", false);
   }
   return { apiKey: config.apiKey, baseUrl: config.baseUrl };
 }

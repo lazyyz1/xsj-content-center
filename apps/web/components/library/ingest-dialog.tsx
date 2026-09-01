@@ -54,13 +54,13 @@ export function IngestDialog() {
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/35 p-4" role="presentation">
           <section role="dialog" aria-modal="true" aria-labelledby="ingest-title" className="w-full max-w-2xl rounded-2xl border bg-[var(--surface)] p-5 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
-              <div><h2 id="ingest-title" className="text-xl font-semibold">收录内容</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">提交后由后台 Worker 处理。</p></div>
+              <div><h2 id="ingest-title" className="text-xl font-semibold">收录内容</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">提交后会自动提取并整理内容；处理期间可以离开此页面。</p></div>
               <button aria-label="关闭" onClick={close} className="rounded-lg p-2 hover:bg-[var(--surface-elevated)]"><X size={18} /></button>
             </div>
             {created ? (
               <div className="mt-6 rounded-xl border border-blue-200 bg-blue-50 p-5">
                 <p className="font-medium text-blue-900">处理中</p>
-                <p className="mt-1 text-sm text-blue-800">采集任务已进入队列，页面会自动刷新状态。</p>
+                <p className="mt-1 text-sm text-blue-800">内容已提交，页面会自动更新处理状态。</p>
                 <Link className="mt-4 inline-block text-sm font-medium text-[var(--accent)] underline" href={`/library/${created.sourceItemId}`} onClick={close}>查看素材</Link>
               </div>
             ) : (
