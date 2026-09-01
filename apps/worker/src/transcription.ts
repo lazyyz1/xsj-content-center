@@ -31,6 +31,15 @@ type TranscriptionRecord = Prisma.IngestJobGetPayload<{ include: { sourceItem: {
 
 const integrationService = new IntegrationService();
 
+export class TranscriptionAlreadyRunningError extends Error {
+  readonly code = "TRANSCRIPTION_ALREADY_RUNNING";
+
+  constructor(readonly jobId: string) {
+    super("转写任务已在进行中。");
+    this.name = "TranscriptionAlreadyRunningError";
+  }
+}
+
 function json(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
@@ -99,7 +108,7 @@ export async function requestSourceTranscription(input: {
     },
     orderBy: { createdAt: "desc" },
   });
-  if (active) return { job: active, created: false };
+  if (active) throw new TranscriptionAlreadyRunningError(active.id);
 
   const job = await db.ingestJob.create({
     data: {
@@ -152,7 +161,7 @@ export async function requestSourceTranscription(input: {
     ]);
     throw new Error("QUEUE_UNAVAILABLE");
   }
-  return { job, created: true };
+  return { job, created: true as const };
 }
 
 async function recordUsage(input: {

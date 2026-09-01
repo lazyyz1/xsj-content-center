@@ -55,7 +55,12 @@ export async function listLibrarySources(workspaceId: string, query: LibraryQuer
         status: true,
         createdAt: true,
         tags: { select: { tag: { select: { id: true, name: true } } }, take: 5 },
-        ingestJobs: { select: { id: true, providerMode: true, errorMessage: true }, orderBy: { createdAt: "desc" }, take: 1 },
+        ingestJobs: {
+          select: { id: true, jobType: true, provider: true, providerMode: true, status: true, errorMessage: true, metadata: true },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+        assets: { select: { assetType: true, status: true } },
         transcript: { select: { providerMode: true } },
       },
       orderBy,

@@ -1,6 +1,6 @@
 import { db, findSourceForUser } from "@content-center/db";
 import { DoubaoError } from "@content-center/providers";
-import { requestSourceTranscription } from "@content-center/worker/transcription";
+import { requestSourceTranscription, TranscriptionAlreadyRunningError } from "@content-center/worker/transcription";
 import { NextResponse } from "next/server";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
 
@@ -25,8 +25,11 @@ export async function POST(_request: Request, route: { params: Promise<{ id: str
       requestedById: context.session.user.id,
       videoAssetId: video.id,
     });
-    return NextResponse.json({ jobId: result.job.id, status: result.job.status, created: result.created }, { status: result.created ? 202 : 200 });
+    return NextResponse.json({ jobId: result.job.id, status: result.job.status, created: result.created }, { status: 202 });
   } catch (error) {
+    if (error instanceof TranscriptionAlreadyRunningError) {
+      return apiError(error.code, 409, error.message);
+    }
     if (error instanceof DoubaoError) {
       return apiError(error.code, error.code === "DOUBAO_DISABLED" ? 409 : 400, error.message);
     }

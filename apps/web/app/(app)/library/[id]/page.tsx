@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { LibraryPoller } from "@/components/library/library-poller";
 import { SourceActions } from "@/components/library/source-actions";
 import { TranscriptionActions } from "@/components/library/transcription-actions";
+import { getSourceProcessingState, type ProcessingStepState } from "@/lib/source-processing-state";
 import { requireWorkspace } from "@/server/access";
 import { db, findSourceForUser } from "@content-center/db";
 import { IntegrationService } from "@content-center/integrations";
@@ -35,6 +36,14 @@ const progressLabels: Record<string, string> = {
   TRANSCRIBING: "豆包正在转写",
   PERSISTING: "正在保存转写结果",
   SUCCEEDED: "转写完成",
+};
+
+const stepStateLabels: Record<ProcessingStepState, string> = {
+  WAITING: "等待",
+  PROCESSING: "处理中",
+  SUCCEEDED: "已完成",
+  FAILED: "失败",
+  SKIPPED: "已跳过",
 };
 
 function formatTimestamp(milliseconds: number) {
@@ -69,7 +78,6 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
   const latestIngestJob = source.ingestJobs.find((job) => job.jobType !== "TRANSCRIBE");
   const latestTranscriptionJob = source.ingestJobs.find((job) => job.jobType === "TRANSCRIBE");
   const transcriptionBusy = latestTranscriptionJob?.status === "QUEUED" || latestTranscriptionJob?.status === "RUNNING";
-  const isProcessing = source.status === "PENDING" || source.status === "PROCESSING" || transcriptionBusy;
   const isMock = source.transcript?.providerMode === "MOCK" || latestIngestJob?.providerMode === "MOCK";
   const contentTitle = source.sourceType === "URL" ? "提取正文" : "原始正文";
   const storedAssets = source.assets.filter((asset) => asset.status === "STORED" && asset.storageKey && asset.assetType !== "AUDIO");
@@ -87,15 +95,22 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
     ? await new IntegrationService().getIntegrationStatus(workspace.id, "DOUBAO_ASR")
     : null;
   const doubaoConfigured = doubao?.status === "CONFIGURED";
+  const processing = getSourceProcessingState({
+    sourceStatus: source.status,
+    doubaoStatus: doubao?.status,
+    hasTranscript: Boolean(source.transcript),
+    assets: source.assets,
+    jobs: source.ingestJobs,
+  });
+  const isProcessing = processing.busy;
   const canTranscribe = role !== "VIEWER";
   const segments = transcriptSegments(source.transcript?.segments);
-  const transcriptState = transcriptionBusy
-    ? "转写中"
-    : source.transcript
-      ? "已完成"
-      : latestTranscriptionJob?.status === "FAILED"
-        ? "转写失败"
-        : "未转写";
+  const pipelineSteps = [
+    ["RedFox 解析", processing.steps.redfoxParse],
+    ["视频保存", processing.steps.videoSave],
+    ["音频提取", processing.steps.audioExtraction],
+    ["AI 转写", processing.steps.aiTranscription],
+  ] as const;
 
   return (
     <>
@@ -110,6 +125,19 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="grid gap-6">
+          {source.sourcePlatform === "DOUYIN" ? (
+            <Card className="p-5">
+              <h2 className="font-semibold">处理进度</h2>
+              <ol className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {pipelineSteps.map(([label, state], index) => (
+                  <li key={label} className="rounded-xl border bg-[var(--surface-elevated)] p-3">
+                    <span className="text-xs text-[var(--text-secondary)]">步骤 {index + 1}</span>
+                    <div className="mt-1 flex items-center justify-between gap-2"><span className="text-sm font-medium">{label}</span><Badge>{stepStateLabels[state]}</Badge></div>
+                  </li>
+                ))}
+              </ol>
+            </Card>
+          ) : null}
           <Card className="p-5">
             <h2 className="font-semibold">Source</h2>
             {playableAssets.map((asset) => asset.assetType === "VIDEO" ? (
@@ -137,7 +165,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
             <Card className="p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="font-semibold">Transcript</h2>
-                <Badge>{transcriptState}</Badge>
+                <Badge>{processing.transcriptionLabel}</Badge>
               </div>
               {transcriptionBusy ? <p className="mt-4 text-sm text-[var(--text-secondary)]">{progressStage ? progressLabels[progressStage] || progressStage : "转写处理中，页面会自动刷新。"}</p> : null}
               {!doubaoConfigured && !source.transcript ? (

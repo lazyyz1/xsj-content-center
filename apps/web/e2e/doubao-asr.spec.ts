@@ -144,6 +144,7 @@ test("RedFox saved video automatically becomes a real Doubao transcript", async 
   await page.getByRole("link", { name: "查看素材" }).click();
 
   await expect(page.getByRole("heading", { name: "Transcript" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "处理进度" })).toBeVisible();
   await expect(page.getByText("豆包真实转写已完成。", { exact: true })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("00:00 - 00:00", { exact: true })).toBeVisible();
   await expect(page.getByText("00:00 - 00:01", { exact: true })).toBeVisible();
@@ -159,6 +160,8 @@ test("RedFox saved video automatically becomes a real Doubao transcript", async 
   expect(source.ingestJobs.map((job) => job.jobType)).toEqual(expect.arrayContaining(["PROCESS_MEDIA", "TRANSCRIBE"]));
   expect(parseCalls).toBe(1);
   expect(transcriptionCalls).toBe(1);
+  expect(await db.apiUsage.count({ where: { workspaceId: source.workspaceId, provider: "REDFOX", operation: "PARSE_WORK" } })).toBe(1);
+  expect(await db.apiUsage.count({ where: { workspaceId: source.workspaceId, provider: "DOUBAO_ASR", operation: "TRANSCRIBE_FLASH" } })).toBe(1);
 
   await page.getByRole("button", { name: "重新转写" }).click();
   await expect.poll(() => transcriptionCalls, { timeout: 30_000 }).toBe(2);

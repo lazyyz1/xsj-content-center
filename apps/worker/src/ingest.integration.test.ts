@@ -31,6 +31,11 @@ describe("CONTENT_INGEST integration", () => {
         const chunks: Buffer[] = [];
         for await (const chunk of request) chunks.push(Buffer.from(chunk));
         const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { url: string };
+        if (body.url === "https://www.douyin.com/video/worker-failure") {
+          response.writeHead(200, { "content-type": "application/json", "x-request-id": "worker-redfox-failure" });
+          response.end(JSON.stringify({ code: 400, msg: "fixture parse failure" }));
+          return;
+        }
         expect(body.url).toBe("https://www.douyin.com/video/worker-fixture");
         response.writeHead(200, { "content-type": "application/json", "x-request-id": "worker-redfox-request" });
         response.end(JSON.stringify({ code: 200, data: { awemeType: "video", platform: "dy", title: "RedFox Worker Fixture", videoUrl: `${fixtureOrigin}/fixture.mp4` } }));
@@ -166,5 +171,47 @@ describe("CONTENT_INGEST integration", () => {
     expect(Buffer.from(await stored.arrayBuffer())).toHaveLength(12);
     await expect(db.transcript.findUnique({ where: { sourceItemId: source.id } })).resolves.toBeNull();
     await expect(db.apiUsage.findFirst({ where: { workspaceId, provider: "REDFOX", operation: "PARSE_WORK" } })).resolves.toMatchObject({ success: true, units: 1, cost: null, providerRequestId: "worker-redfox-request" });
+  });
+
+  it("leaves a failed RedFox source without media or Transcript", async () => {
+    redfoxRequests = 0;
+    const source = await db.sourceItem.create({
+      data: {
+        workspaceId,
+        createdById: userId,
+        sourceType: "VIDEO",
+        sourcePlatform: "DOUYIN",
+        sourceUrl: "https://www.douyin.com/video/worker-failure",
+        canonicalUrl: "https://www.douyin.com/video/worker-failure",
+        status: "PENDING",
+      },
+    });
+    const jobRecord = await db.ingestJob.create({
+      data: {
+        workspaceId,
+        sourceItemId: source.id,
+        requestedById: userId,
+        jobType: "PROCESS_MEDIA",
+        provider: "REDFOX",
+        providerMode: "REAL",
+        maxAttempts: 3,
+      },
+    });
+    const queue = createContentIngestQueue();
+    const queueJob = await queue.add(CONTENT_INGEST, {
+      jobId: jobRecord.id,
+      workspaceId,
+      sourceItemId: source.id,
+      requestedById: userId,
+    }, { attempts: 3, removeOnComplete: true, removeOnFail: true });
+    await expect(queueJob.waitUntilFinished(events, 10_000)).rejects.toThrow();
+    await queue.close();
+
+    expect(redfoxRequests).toBe(1);
+    await expect(db.sourceItem.findUnique({ where: { id: source.id } })).resolves.toMatchObject({ status: "FAILED" });
+    await expect(db.ingestJob.findUnique({ where: { id: jobRecord.id } })).resolves.toMatchObject({ status: "FAILED", errorCode: "REDFOX_BAD_REQUEST" });
+    await expect(db.sourceAsset.count({ where: { sourceItemId: source.id } })).resolves.toBe(0);
+    await expect(db.transcript.findUnique({ where: { sourceItemId: source.id } })).resolves.toBeNull();
+    await expect(db.apiUsage.count({ where: { workspaceId, provider: "REDFOX", operation: "PARSE_WORK", requestId: `${jobRecord.id}:1` } })).resolves.toBe(1);
   });
 });

@@ -16,6 +16,7 @@ import {
   TRANSCRIBE_SOURCE,
   TRANSCRIBE_SOURCE_QUEUE,
 } from "./queue";
+import { requestSourceTranscription, TranscriptionAlreadyRunningError } from "./transcription";
 
 const execFileAsync = promisify(execFile);
 
@@ -174,6 +175,34 @@ describe("TRANSCRIBE_SOURCE integration", () => {
       providerRequestId: "doubao-worker-log",
     });
   }, 40_000);
+
+  it("rejects a second transcription request while one is active", async () => {
+    const source = await db.sourceItem.findUniqueOrThrow({ where: { id: completedSourceId }, include: { assets: true } });
+    const video = source.assets.find((asset) => asset.assetType === "VIDEO" && asset.status === "STORED");
+    if (!video) throw new Error("Missing video fixture");
+    const active = await db.ingestJob.create({
+      data: {
+        workspaceId,
+        sourceItemId: source.id,
+        requestedById: userId,
+        jobType: "TRANSCRIBE",
+        provider: "DOUBAO_ASR",
+        providerMode: "REAL",
+        status: "QUEUED",
+      },
+    });
+    const countBefore = await db.ingestJob.count({ where: { workspaceId, sourceItemId: source.id, jobType: "TRANSCRIBE" } });
+
+    await expect(requestSourceTranscription({
+      workspaceId,
+      sourceItemId: source.id,
+      requestedById: userId,
+      videoAssetId: video.id,
+    })).rejects.toBeInstanceOf(TranscriptionAlreadyRunningError);
+    expect(await db.ingestJob.count({ where: { workspaceId, sourceItemId: source.id, jobType: "TRANSCRIBE" } })).toBe(countBefore);
+
+    await db.ingestJob.update({ where: { id: active.id }, data: { status: "CANCELLED" } });
+  });
 
   it("keeps the old Transcript and reuses AUDIO when retranscription fails", async () => {
     fixtureMode = "EMPTY";

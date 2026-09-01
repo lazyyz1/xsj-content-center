@@ -4,6 +4,7 @@ import Link from "next/link";
 import { IngestDialog } from "@/components/library/ingest-dialog";
 import { LibraryPoller } from "@/components/library/library-poller";
 import { RetryIngestButton } from "@/components/library/retry-ingest-button";
+import { getSourceProcessingState } from "@/lib/source-processing-state";
 import { requireWorkspace } from "@/server/access";
 import { listLibrarySources, type LibraryQuery } from "@/server/library";
 import { db } from "@content-center/db";
@@ -25,7 +26,10 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
     db.collection.findMany({ where: { workspaceId: workspace.id }, orderBy: { name: "asc" } }),
   ]);
   const listView = query.view === "list";
-  const hasProcessing = items.some(({ status }) => status === "PENDING" || status === "PROCESSING");
+  const hasProcessing = items.some((item) => {
+    const latestJob = item.ingestJobs[0];
+    return item.status === "PENDING" || item.status === "PROCESSING" || latestJob?.status === "QUEUED" || latestJob?.status === "RUNNING";
+  });
 
   return (
     <>
@@ -82,13 +86,19 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
           {items.map((item) => {
             const latestJob = item.ingestJobs[0];
             const isMock = item.transcript?.providerMode === "MOCK" || latestJob?.providerMode === "MOCK";
+            const processing = getSourceProcessingState({
+              sourceStatus: item.status,
+              hasTranscript: Boolean(item.transcript),
+              assets: item.assets,
+              jobs: item.ingestJobs,
+            });
             return (
               <Card key={item.id} className={listView ? "flex flex-col gap-4 p-4 sm:flex-row sm:items-center" : "overflow-hidden"}>
                 <div className={listView ? "h-16 w-24 shrink-0 rounded-lg bg-[var(--surface-elevated)]" : "h-32 bg-[var(--surface-elevated)]"}>
                   {item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" className="h-full w-full rounded-[inherit] object-cover" /> : <div className="grid h-full place-items-center text-xs text-[var(--text-secondary)]">{item.sourcePlatform === "DOUYIN" ? <span className="inline-flex items-center gap-1"><Music2 size={16} />抖音</span> : item.sourceType}</div>}
                 </div>
                 <div className={listView ? "min-w-0 flex-1" : "p-4"}>
-                  <div className="mb-2 flex flex-wrap gap-1.5"><Badge>{item.sourcePlatform}</Badge><Badge>{item.sourceType}</Badge><Badge>{statusLabels[item.status]}</Badge>{isMock ? <Badge className="border-[var(--warning)] text-[var(--warning)]">MOCK</Badge> : null}</div>
+                  <div className="mb-2 flex flex-wrap gap-1.5"><Badge>{item.sourcePlatform}</Badge><Badge>{item.sourceType}</Badge><Badge>{item.sourceType === "VIDEO" ? processing.libraryLabel : statusLabels[item.status]}</Badge>{isMock ? <Badge className="border-[var(--warning)] text-[var(--warning)]">MOCK</Badge> : null}</div>
                   <Link href={`/library/${item.id}`} className="line-clamp-2 font-semibold hover:text-[var(--accent)]">{item.title || "未命名素材"}</Link>
                   <p className="mt-2 truncate text-xs text-[var(--text-secondary)]">{item.author || "未知作者"} · {item.createdAt.toLocaleString("zh-CN")}</p>
                   <div className="mt-3 flex flex-wrap gap-1">{item.tags.map(({ tag }) => <span key={tag.id} className="rounded-full bg-[var(--surface-elevated)] px-2 py-1 text-xs">#{tag.name}</span>)}</div>
