@@ -23,6 +23,7 @@ export function findProjectForUser(
       },
       creativeBrief: true,
       motherContent: true,
+      platformVariants: { orderBy: { platform: "asc" } },
     },
   });
 }

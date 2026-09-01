@@ -9,15 +9,15 @@ type SaveState = "IDLE" | "DIRTY" | "SAVING" | "SAVED" | "FAILED";
 
 const labels: Record<SaveState, string> = { IDLE: "已保存", DIRTY: "等待保存", SAVING: "正在保存", SAVED: "已保存", FAILED: "保存失败" };
 
-export function MotherContentEditor({ projectId, initial, editable, aiConfigured, onRewriteRequest }: { projectId: string; initial: { title: string; body: string; outline: string[]; version: number }; editable: boolean; aiConfigured: boolean; onRewriteRequest: (request: RewriteRequest) => void }) {
+export function MotherContentEditor({ projectId, initial, editable, aiConfigured, onRewriteRequest, onSaved }: { projectId: string; initial: { title: string; body: string; outline: string[]; version: number }; editable: boolean; aiConfigured: boolean; onRewriteRequest: (request: RewriteRequest) => void; onSaved?: (version: number) => void }) {
   const [title, setTitle] = useState(initial.title);
   const [body, setBody] = useState(initial.body);
   const [outlineText, setOutlineText] = useState(initial.outline.join("\n"));
   const [saveState, setSaveState] = useState<SaveState>("IDLE");
   const [error, setError] = useState("");
-  const mounted = useRef(false);
   const inFlight = useRef(false);
   const pending = useRef<Snapshot | null>(null);
+  const lastSaved = useRef<Snapshot>({ title: initial.title, body: initial.body, outline: initial.outline });
   const version = useRef(initial.version);
   const bodyArea = useRef<HTMLTextAreaElement>(null);
   const [selection, setSelection] = useState({ start: 0, end: 0 });
@@ -37,6 +37,8 @@ export function MotherContentEditor({ projectId, initial, editable, aiConfigured
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.message || result.error || "保存失败");
       version.current = result.version;
+      lastSaved.current = snapshot;
+      onSaved?.(result.version);
       setError("");
       setSaveState(pending.current ? "DIRTY" : "SAVED");
     } catch (cause) {
@@ -51,10 +53,11 @@ export function MotherContentEditor({ projectId, initial, editable, aiConfigured
 
   useEffect(() => {
     if (!editable) return;
-    if (!mounted.current) { mounted.current = true; return; }
+    const outline = outlineText.split("\n").map((item) => item.trim()).filter(Boolean);
+    if (title === lastSaved.current.title && body === lastSaved.current.body && outline.join("\n") === lastSaved.current.outline.join("\n")) return;
     setSaveState("DIRTY");
     const timer = window.setTimeout(() => {
-      pending.current = { title, body, outline: outlineText.split("\n").map((item) => item.trim()).filter(Boolean) };
+      pending.current = { title, body, outline };
       void drain();
     }, 800);
     return () => window.clearTimeout(timer);

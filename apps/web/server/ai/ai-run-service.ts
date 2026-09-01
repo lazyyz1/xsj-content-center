@@ -1,14 +1,14 @@
 import "server-only";
 
 import { db, type Prisma } from "@content-center/db";
-import { LLMError, type LLMProvider } from "@content-center/providers";
+import { LLMError, type LLMProvider, type LLMStructuredResult, type ProviderResult } from "@content-center/providers";
 import { saveBrief } from "../brief-service";
 import { createEvidence } from "../evidence-service";
 import { saveMotherContent } from "../mother-content-service";
 import { loadLLMRuntime, type LLMRuntime } from "./llm-runtime";
 import { ProjectContextBuilder } from "./project-context";
 import { renderPrompt, selectPromptTemplate } from "./prompt-service";
-import { anglesSchema, briefPreviewSchema, evidencePreviewSchema, isRewriteAction, motherContentPreviewSchema, outputInstruction, rewritePreviewSchema, schemaForAction, type AIAction } from "./schemas";
+import { AI_ACTIONS, anglesSchema, briefPreviewSchema, evidencePreviewSchema, isRewriteAction, motherContentPreviewSchema, outputInstruction, rewritePreviewSchema, schemaForAction, type AIAction } from "./schemas";
 
 export class AIServiceError extends Error {
   constructor(readonly code: "AI_RUN_NOT_FOUND" | "AI_RESULT_ALREADY_RESOLVED" | "AI_RESULT_NOT_APPLICABLE" | "AI_SELECTION_STALE" | "AI_REPLACE_CONFIRMATION_REQUIRED" | "AI_INVALID_INPUT", message: string) {
@@ -19,41 +19,60 @@ export class AIServiceError extends Error {
 function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
 function publicError(error: unknown) { return error instanceof LLMError ? error : new LLMError("LLM_GENERATION_FAILED", "AI 生成失败，请重试。", false); }
 
-export async function runAIAction(input: { workspaceId: string; userId: string; projectId: string; action: AIAction; selectedText?: string; instruction?: string }, dependencies: { runtime?: LLMRuntime; contextBuilder?: ProjectContextBuilder } = {}) {
-  const selectedText = input.selectedText?.trim();
-  if (isRewriteAction(input.action) && !selectedText) throw new AIServiceError("AI_INVALID_INPUT", "请先选择需要处理的母稿文字。");
-  if (selectedText && selectedText.length > 20_000) throw new AIServiceError("AI_INVALID_INPUT", "选择的文字过长。");
-  const [built, template, runtime] = await Promise.all([
-    (dependencies.contextBuilder ?? new ProjectContextBuilder()).build(input),
-    selectPromptTemplate(input.workspaceId, input.action),
-    dependencies.runtime ? Promise.resolve(dependencies.runtime) : loadLLMRuntime(input.workspaceId),
-  ]);
-  const inputSummary = { ...built.inputSummary, selectedTextLength: selectedText?.length ?? 0, hasInstruction: Boolean(input.instruction?.trim()) };
+export async function executeStructuredAIRun<T>(input: {
+  workspaceId: string;
+  userId: string;
+  projectId: string;
+  action: import("@content-center/db").PromptType;
+  operation: string;
+  promptVersion: number;
+  promptTemplateId?: string;
+  platformTemplateId?: string;
+  inputSummary: unknown;
+  metadata?: unknown;
+  auditMetadata?: Record<string, string | number | boolean>;
+  contextTruncated: boolean;
+  generate: (provider: LLMProvider) => Promise<ProviderResult<LLMStructuredResult<T>>>;
+}, dependencies: { runtime?: LLMRuntime } = {}) {
+  const runtime = dependencies.runtime ?? await loadLLMRuntime(input.workspaceId);
+  const safeAuditMetadata = { action: input.action, promptVersion: input.promptVersion, contextTruncated: input.contextTruncated, ...input.auditMetadata };
   const run = await db.$transaction(async (tx) => {
-    const created = await tx.aIRun.create({ data: { workspaceId: input.workspaceId, projectId: input.projectId, userId: input.userId, action: input.action, provider: runtime.providerName, model: runtime.model, promptTemplateId: template.id, promptVersion: template.version, status: "RUNNING", inputSummary: json(inputSummary), contextTruncated: built.contextTruncated } });
-    await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_started", resourceType: "ai_run", resourceId: created.id, metadata: { projectId: input.projectId, action: input.action, promptVersion: template.version, contextTruncated: built.contextTruncated } } });
+    const created = await tx.aIRun.create({ data: { workspaceId: input.workspaceId, projectId: input.projectId, userId: input.userId, action: input.action, provider: runtime.providerName, model: runtime.model, promptTemplateId: input.promptTemplateId, platformTemplateId: input.platformTemplateId, promptVersion: input.promptVersion, status: "RUNNING", inputSummary: json(input.inputSummary), metadata: input.metadata === undefined ? undefined : json(input.metadata), contextTruncated: input.contextTruncated } });
+    await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_started", resourceType: "ai_run", resourceId: created.id, metadata: { projectId: input.projectId, ...safeAuditMetadata } } });
     return created;
   });
-  const promptInput = isRewriteAction(input.action) ? { selectedText, instruction: input.instruction?.trim() || "" } : undefined;
-  const prompt = `${renderPrompt(template.template, built.context, promptInput)}${outputInstruction(input.action)}`;
   try {
-    const result = await runtime.provider.generateStructured({ systemPrompt: template.systemPrompt, prompt }, schemaForAction(input.action));
+    const result = await input.generate(runtime.provider);
     const usage = result.data.usage;
     await db.$transaction([
       db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(result.data.value), providerRequestId: result.data.providerRequestId, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, finishedAt: new Date() } }),
-      db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: "LLM", operation: input.action, requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, metadata: json({ airRunId: run.id, promptVersion: template.version, contextTruncated: built.contextTruncated }) } }),
-      db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_succeeded", resourceType: "ai_run", resourceId: run.id, metadata: { projectId: input.projectId, action: input.action, promptVersion: template.version, contextTruncated: built.contextTruncated } } }),
+      db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: "LLM", operation: input.operation, requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, metadata: json({ airRunId: run.id, promptVersion: input.promptVersion, contextTruncated: input.contextTruncated, ...input.auditMetadata }) } }),
+      db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_succeeded", resourceType: "ai_run", resourceId: run.id, metadata: { projectId: input.projectId, ...safeAuditMetadata } } }),
     ]);
-    return { id: run.id, action: input.action, status: "SUCCEEDED" as const, output: result.data.value, contextTruncated: built.contextTruncated, provider: runtime.providerName, model: result.data.model, usage };
+    return { id: run.id, action: input.action, status: "SUCCEEDED" as const, output: result.data.value, contextTruncated: input.contextTruncated, provider: runtime.providerName, model: result.data.model, usage };
   } catch (error) {
     const failure = publicError(error);
     await db.$transaction([
       db.aIRun.update({ where: { id: run.id }, data: { status: "FAILED", errorCode: failure.code, errorMessage: failure.message, finishedAt: new Date() } }),
-      db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: "LLM", operation: input.action, requestId: run.id, success: false, units: 1, cost: null, metadata: json({ airRunId: run.id, errorCode: failure.code, promptVersion: template.version, contextTruncated: built.contextTruncated }) } }),
-      db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_failed", resourceType: "ai_run", resourceId: run.id, metadata: { projectId: input.projectId, action: input.action, errorCode: failure.code } } }),
+      db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: "LLM", operation: input.operation, requestId: run.id, success: false, units: 1, cost: null, metadata: json({ airRunId: run.id, errorCode: failure.code, promptVersion: input.promptVersion, ...input.auditMetadata }) } }),
+      db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_failed", resourceType: "ai_run", resourceId: run.id, metadata: { projectId: input.projectId, errorCode: failure.code, ...safeAuditMetadata } } }),
     ]);
     throw failure;
   }
+}
+
+export async function runAIAction(input: { workspaceId: string; userId: string; projectId: string; action: AIAction; selectedText?: string; instruction?: string }, dependencies: { runtime?: LLMRuntime; contextBuilder?: ProjectContextBuilder } = {}) {
+  const selectedText = input.selectedText?.trim();
+  if (isRewriteAction(input.action) && !selectedText) throw new AIServiceError("AI_INVALID_INPUT", "请先选择需要处理的母稿文字。");
+  if (selectedText && selectedText.length > 20_000) throw new AIServiceError("AI_INVALID_INPUT", "选择的文字过长。");
+  const [built, template] = await Promise.all([
+    (dependencies.contextBuilder ?? new ProjectContextBuilder()).build(input),
+    selectPromptTemplate(input.workspaceId, input.action),
+  ]);
+  const inputSummary = { ...built.inputSummary, selectedTextLength: selectedText?.length ?? 0, hasInstruction: Boolean(input.instruction?.trim()) };
+  const promptInput = isRewriteAction(input.action) ? { selectedText, instruction: input.instruction?.trim() || "" } : undefined;
+  const prompt = `${renderPrompt(template.template, built.context, promptInput)}${outputInstruction(input.action)}`;
+  return executeStructuredAIRun({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, action: input.action, operation: input.action, promptTemplateId: template.id, promptVersion: template.version, inputSummary, contextTruncated: built.contextTruncated, generate: (provider) => provider.generateStructured({ systemPrompt: template.systemPrompt, prompt }, schemaForAction(input.action)) }, { runtime: dependencies.runtime });
 }
 
 async function scopedRun(input: { workspaceId: string; userId: string; projectId: string; runId: string }) {
@@ -128,8 +147,9 @@ export async function discardAIResult(input: { workspaceId: string; userId: stri
   return { discarded: true };
 }
 
-export function getRecentAIRuns(input: { workspaceId: string; userId: string; projectId: string }) {
-  return db.aIRun.findMany({ where: { workspaceId: input.workspaceId, projectId: input.projectId, userId: input.userId }, orderBy: { createdAt: "desc" }, take: 5, select: { id: true, action: true, status: true, outputJson: true, contextTruncated: true, errorCode: true, errorMessage: true, appliedAt: true, discardedAt: true, createdAt: true } });
+export async function getRecentAIRuns(input: { workspaceId: string; userId: string; projectId: string }) {
+  const runs = await db.aIRun.findMany({ where: { workspaceId: input.workspaceId, projectId: input.projectId, userId: input.userId, action: { in: [...AI_ACTIONS] } }, orderBy: { createdAt: "desc" }, take: 5, select: { id: true, action: true, status: true, outputJson: true, contextTruncated: true, errorCode: true, errorMessage: true, appliedAt: true, discardedAt: true, createdAt: true } });
+  return runs.map((run) => ({ ...run, action: run.action as AIAction }));
 }
 
 export type { LLMProvider };

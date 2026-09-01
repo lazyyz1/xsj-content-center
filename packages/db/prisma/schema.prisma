@@ -130,6 +130,7 @@ enum PromptType {
   EXPAND
   ADD_PERSONAL_VIEW
   HUMANIZE
+  ADAPT_PLATFORM
 }
 
 enum AIRunStatus {
@@ -140,28 +141,46 @@ enum AIRunStatus {
   CANCELLED
 }
 
+enum Platform {
+  DOUYIN
+  XIAOHONGSHU
+  WECHAT_MOMENTS
+  WECHAT_CHANNELS
+  WECHAT_OFFICIAL
+}
+
+enum PlatformVariantStatus {
+  DRAFT
+  READY
+  STALE
+  IN_REVIEW
+  APPROVED
+  ARCHIVED
+}
+
 model User {
-  id                   String            @id @default(cuid())
-  name                 String
-  email                String            @unique
-  emailVerified        Boolean           @default(false)
-  image                String?
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
-  sessions             Session[]
-  accounts             Account[]
-  workspaceMemberships WorkspaceMember[]
-  auditLogs            AuditLog[]
-  createdSources       SourceItem[]      @relation("SourceCreatedBy")
-  requestedIngestJobs  IngestJob[]       @relation("IngestRequestedBy")
-  createdCollections   Collection[]      @relation("CollectionCreatedBy")
-  apiUsages            ApiUsage[]
-  createdProjects      ContentProject[]  @relation("ProjectCreatedBy")
-  createdEvidenceItems EvidenceItem[]    @relation("EvidenceCreatedBy")
-  createdBriefs        CreativeBrief[]   @relation("BriefCreatedBy")
-  createdMotherContent MotherContent[]   @relation("MotherContentCreatedBy")
-  creatorProfiles      CreatorProfile[]
-  aiRuns               AIRun[]           @relation("AIRunUser")
+  id                      String            @id @default(cuid())
+  name                    String
+  email                   String            @unique
+  emailVerified           Boolean           @default(false)
+  image                   String?
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+  sessions                Session[]
+  accounts                Account[]
+  workspaceMemberships    WorkspaceMember[]
+  auditLogs               AuditLog[]
+  createdSources          SourceItem[]      @relation("SourceCreatedBy")
+  requestedIngestJobs     IngestJob[]       @relation("IngestRequestedBy")
+  createdCollections      Collection[]      @relation("CollectionCreatedBy")
+  apiUsages               ApiUsage[]
+  createdProjects         ContentProject[]  @relation("ProjectCreatedBy")
+  createdEvidenceItems    EvidenceItem[]    @relation("EvidenceCreatedBy")
+  createdBriefs           CreativeBrief[]   @relation("BriefCreatedBy")
+  createdMotherContent    MotherContent[]   @relation("MotherContentCreatedBy")
+  creatorProfiles         CreatorProfile[]
+  aiRuns                  AIRun[]           @relation("AIRunUser")
+  createdPlatformVariants PlatformVariant[] @relation("PlatformVariantCreatedBy")
 }
 
 model Session {
@@ -211,28 +230,30 @@ model Verification {
 }
 
 model Workspace {
-  id              String              @id @default(cuid())
-  name            String
-  slug            String              @unique
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  members         WorkspaceMember[]
-  integrations    IntegrationConfig[]
-  auditLogs       AuditLog[]
-  sourceItems     SourceItem[]
-  ingestJobs      IngestJob[]
-  transcripts     Transcript[]
-  contentTags     ContentTag[]
-  collections     Collection[]
-  sourceAssets    SourceAsset[]
-  apiUsages       ApiUsage[]
-  contentProjects ContentProject[]
-  evidenceItems   EvidenceItem[]
-  creativeBriefs  CreativeBrief[]
-  motherContents  MotherContent[]
-  creatorProfiles CreatorProfile[]
-  promptTemplates PromptTemplate[]
-  aiRuns          AIRun[]
+  id                String              @id @default(cuid())
+  name              String
+  slug              String              @unique
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  members           WorkspaceMember[]
+  integrations      IntegrationConfig[]
+  auditLogs         AuditLog[]
+  sourceItems       SourceItem[]
+  ingestJobs        IngestJob[]
+  transcripts       Transcript[]
+  contentTags       ContentTag[]
+  collections       Collection[]
+  sourceAssets      SourceAsset[]
+  apiUsages         ApiUsage[]
+  contentProjects   ContentProject[]
+  evidenceItems     EvidenceItem[]
+  creativeBriefs    CreativeBrief[]
+  motherContents    MotherContent[]
+  creatorProfiles   CreatorProfile[]
+  promptTemplates   PromptTemplate[]
+  platformTemplates PlatformTemplate[]
+  platformVariants  PlatformVariant[]
+  aiRuns            AIRun[]
 }
 
 model WorkspaceMember {
@@ -478,6 +499,7 @@ model ContentProject {
   evidenceItems    EvidenceItem[]
   creativeBrief    CreativeBrief?
   motherContent    MotherContent?
+  platformVariants PlatformVariant[]
   aiRuns           AIRun[]
 
   @@index([workspaceId, createdAt])
@@ -550,19 +572,20 @@ model CreativeBrief {
 }
 
 model MotherContent {
-  id          String         @id @default(cuid())
-  workspaceId String
-  projectId   String         @unique
-  title       String
-  body        String
-  outline     Json
-  version     Int            @default(1)
-  createdById String
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project     ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  createdBy   User           @relation("MotherContentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  id               String            @id @default(cuid())
+  workspaceId      String
+  projectId        String            @unique
+  title            String
+  body             String
+  outline          Json
+  version          Int               @default(1)
+  createdById      String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project          ContentProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy        User              @relation("MotherContentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  platformVariants PlatformVariant[]
 
   @@index([workspaceId, updatedAt])
   @@index([createdById])
@@ -616,37 +639,91 @@ model PromptTemplate {
   @@index([workspaceId, type, isActive])
 }
 
+model PlatformTemplate {
+  id           String     @id @default(cuid())
+  workspaceId  String?
+  platform     Platform
+  name         String
+  version      Int
+  systemPrompt String
+  template     String
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  workspace    Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  aiRuns       AIRun[]
+
+  @@unique([workspaceId, platform, version])
+  @@index([platform, isActive, version])
+  @@index([workspaceId, platform, isActive])
+}
+
+model PlatformVariant {
+  id                  String                @id @default(cuid())
+  workspaceId         String
+  projectId           String
+  motherContentId     String
+  platform            Platform
+  version             Int                   @default(1)
+  title               String?
+  body                String
+  hook                String?
+  summary             String?
+  hashtags            Json
+  mediaPlan           Json
+  metadata            Json
+  status              PlatformVariantStatus @default(DRAFT)
+  sourceMotherVersion Int
+  createdById         String
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  workspace           Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project             ContentProject        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  motherContent       MotherContent         @relation(fields: [motherContentId], references: [id], onDelete: Cascade)
+  createdBy           User                  @relation("PlatformVariantCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, platform])
+  @@index([workspaceId, projectId])
+  @@index([workspaceId, platform, updatedAt])
+  @@index([motherContentId])
+  @@index([createdById])
+}
+
 model AIRun {
-  id                String         @id @default(cuid())
-  workspaceId       String
-  projectId         String
-  userId            String
-  action            PromptType
-  provider          String
-  model             String
-  providerRequestId String?
-  promptTemplateId  String
-  promptVersion     Int
-  status            AIRunStatus    @default(QUEUED)
-  inputSummary      Json
-  outputJson        Json?
-  contextTruncated  Boolean        @default(false)
-  inputTokens       Int?
-  outputTokens      Int?
-  cost              Decimal?
-  errorCode         String?
-  errorMessage      String?
-  createdAt         DateTime       @default(now())
-  finishedAt        DateTime?
-  appliedAt         DateTime?
-  discardedAt       DateTime?
-  workspace         Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project           ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user              User           @relation("AIRunUser", fields: [userId], references: [id], onDelete: Restrict)
-  promptTemplate    PromptTemplate @relation(fields: [promptTemplateId], references: [id], onDelete: Restrict)
+  id                 String            @id @default(cuid())
+  workspaceId        String
+  projectId          String
+  userId             String
+  action             PromptType
+  provider           String
+  model              String
+  providerRequestId  String?
+  promptTemplateId   String?
+  platformTemplateId String?
+  promptVersion      Int
+  status             AIRunStatus       @default(QUEUED)
+  inputSummary       Json
+  metadata           Json?
+  outputJson         Json?
+  contextTruncated   Boolean           @default(false)
+  inputTokens        Int?
+  outputTokens       Int?
+  cost               Decimal?
+  errorCode          String?
+  errorMessage       String?
+  createdAt          DateTime          @default(now())
+  finishedAt         DateTime?
+  appliedAt          DateTime?
+  discardedAt        DateTime?
+  workspace          Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project            ContentProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user               User              @relation("AIRunUser", fields: [userId], references: [id], onDelete: Restrict)
+  promptTemplate     PromptTemplate?   @relation(fields: [promptTemplateId], references: [id], onDelete: Restrict)
+  platformTemplate   PlatformTemplate? @relation(fields: [platformTemplateId], references: [id], onDelete: Restrict)
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, projectId, createdAt])
   @@index([projectId, action, createdAt])
   @@index([userId])
+  @@index([platformTemplateId])
 }
