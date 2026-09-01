@@ -34,6 +34,7 @@
 | `@mozilla/readability` | `0.6.0` | [mozilla/readability](https://github.com/mozilla/readability) | Apache-2.0 | 从已通过 SSRF 校验的公开 HTML 中提取可读正文与标题 | package usage | 未修改依赖源码；输出再次规范化为纯文本 |
 | `jsdom` | `30.0.1` | [jsdom/jsdom](https://github.com/jsdom/jsdom) | MIT | 为 Readability 提供服务端 DOM 解析 | package usage | 未修改依赖源码；不执行远端页面脚本 |
 | `@types/jsdom` | `30.0.0` | [DefinitelyTyped/types/jsdom](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/jsdom) | MIT | jsdom 的 TypeScript 类型声明 | package usage | 未修改依赖源码，仅用于开发期类型检查 |
+| `server-only` | `0.0.1` | React server-only marker package | MIT | 阻止 Web Integration server module 被 Client Component 引入 | package usage | 未修改依赖源码；只作为 Next.js server boundary marker |
 
 ## 不采用
 

@@ -1,6 +1,6 @@
 # AI 内容生产中心
 
-阶段 2 内容采集与个人素材库：在阶段 1 的 Auth、Workspace/RBAC、Provider、BullMQ 与 Storage 基础上，加入真实文本/公开网页采集和可检索 Library。
+阶段 3A Integration 基础设施：在内容采集与素材库基础上，加入 Workspace 级第三方凭证加密存储、状态管理、RBAC 和审计；本阶段不连接真实 RedFox、Doubao 或 LLM API。
 
 ## Prerequisites
 
@@ -70,6 +70,26 @@ pnpm db:studio
 | Mozilla Readability | `0.6.0` |
 | jsdom | `30.0.1` |
 
+## Integration Secrets
+
+Workspace Provider 凭证使用 `INTEGRATION_ENCRYPTION_KEY` 加密。该值必须是随机生成的 32-byte base64 key，不得使用可猜测文本，也不得提交到 Git。
+
+生成新 key：
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+```
+
+将输出仅写入本机或部署环境的：
+
+```text
+INTEGRATION_ENCRYPTION_KEY=
+```
+
+Key 缺失时，服务不会回退到明文保存，设置页会显示 `Secret encryption is not configured.`。Key 格式或长度错误会明确失败。轮换流程见 [`docs/security/integration-secrets.md`](docs/security/integration-secrets.md)。
+
+RedFox and Doubao providers are not connected yet. This stage only prepares secure credential storage.
+
 Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 `8.0.0-rc`，而 Better Auth 官方明确支持 Prisma 6；这里优先稳定和兼容，不追逐 RC。
 
 ## What Works
@@ -83,7 +103,9 @@ Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 
 - Web 创建 `SYSTEM_HEALTH_CHECK`，Redis/BullMQ Worker 消费并完成任务。
 - MinIO 上传、Signed URL 和删除。
 - Dashboard 的计数来自 Workspace 范围内的数据库查询；空库显示真实的 `0`。
-- 集成页根据服务端环境配置显示 Configured、Unconfigured 或 Mock，不返回密钥。
+- Integration 页面从 Workspace `IntegrationConfig` 读取 RedFox、Doubao、LLM 状态，支持 OWNER/ADMIN 保存、Disable、Enable 和 Delete；API 只返回 public config 与 `lastFour`。
+- Provider secret 通过 AES-256-GCM、随机 IV 和认证标签加密保存；Worker 使用同一 Workspace scoped IntegrationService 解密入口。
+- Storage 继续由服务端环境变量管理，并明确显示 `Environment Managed`。
 - Manual Text Ingest：文本通过真实 Worker 入库，并生成明确标记为 `MANUAL / REAL` 的 Transcript。
 - Generic Web URL Extraction：仅抓取公开 HTTP(S) 网页，经 SSRF 校验后提取为纯文本正文。
 - Library：卡片/列表视图、真实分页、标题/作者/正文搜索、平台/类型/状态/标签/Collection 筛选和排序。
@@ -96,6 +118,7 @@ Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 
 
 - RedFox（红狐 API）：`UNCONFIGURED`
 - Doubao ASR（豆包转写）：`UNCONFIGURED`
+- LLM 调用：未接入
 - 真实视频解析：未实现（仅提供醒目的 `MOCK MODE` 流程测试入口）
 - AI 创作：未实现
 - Publishing：未实现
@@ -106,10 +129,10 @@ Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 
 ## Security Notes
 
 - `.env`、真实 Key、Cookie 和 Token 不提交到 Git。
-- 外部凭证只允许在服务端读取；集成页只显示状态。
+- 外部凭证只允许 Web server/Worker 解密；API 和 UI 只显示状态与末四位。
 - URL 抓取只允许 HTTP(S)，对初始地址、DNS 结果和每次重定向执行 SSRF 校验，并限制超时、响应体大小和跳转次数。
 - 网页正文只保存和渲染 normalized plain text，不把远端 HTML 注入页面。
-- `IntegrationConfig.encryptedConfig` 已预留，但阶段 1 没有实现成熟加密写入，因此当前不保存敏感配置。
+- `IntegrationConfig` 将 public config 与 AES-256-GCM encrypted secret 分开保存；缺少 master key 时 fail closed，不写明文。
 - 真实外部发布必须等待后续阶段实现 `APPROVED` 人工审核门。
 
 ## Reference Research

@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./queue": "./src/queue.ts"
+    "./queue": "./src/queue.ts",
+    "./integrations": "./src/integrations.ts"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -17,6 +18,7 @@
   "dependencies": {
     "@content-center/core": "workspace:*",
     "@content-center/db": "workspace:*",
+    "@content-center/integrations": "workspace:*",
     "@content-center/providers": "workspace:*",
     "bullmq": "6.3.3",
     "ioredis": "6.0.0"

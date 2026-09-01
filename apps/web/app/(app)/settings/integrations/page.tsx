@@ -1,28 +1,32 @@
-import { Badge, Card } from "@content-center/ui";
+import { canManageWorkspace } from "@content-center/core";
 import { PageHeader } from "@/components/page";
-import { getIntegrationStatuses, type IntegrationDisplayStatus } from "@/server/integrations";
+import { IntegrationCard } from "@/components/integrations/integration-card";
+import { requireWorkspace } from "@/server/access";
+import { getIntegrationStatuses, integrationVisibleToRole } from "@/server/integrations";
 
-const statusColor: Record<IntegrationDisplayStatus, string> = {
-  Configured: "border-[color-mix(in_srgb,var(--success)_30%,transparent)] text-[var(--success)]",
-  Unconfigured: "text-[var(--text-secondary)]",
-  Error: "border-[color-mix(in_srgb,var(--danger)_30%,transparent)] text-[var(--danger)]",
-  Mock: "border-[color-mix(in_srgb,var(--warning)_30%,transparent)] text-[var(--warning)]",
-};
-
-export default function IntegrationsPage() {
-  const integrations = getIntegrationStatuses();
+export default async function IntegrationsPage() {
+  const { workspace, role } = await requireWorkspace();
+  const canManage = canManageWorkspace(role);
+  const integrations = (await getIntegrationStatuses(workspace.id)).map((integration) =>
+    integrationVisibleToRole(integration, canManage),
+  );
+  const encryptionConfigured = Boolean(process.env.INTEGRATION_ENCRYPTION_KEY?.trim());
   return (
     <>
-      <PageHeader title="集成状态" description="这里只报告服务端配置状态。密钥不会返回到浏览器。" />
+      <PageHeader title="集成状态" description="Workspace 级凭证在服务端加密保存；完整密钥不会返回浏览器。" />
+      {canManage && !encryptionConfigured ? (
+        <p role="alert" className="mb-4 rounded-xl border border-[color-mix(in_srgb,var(--danger)_30%,transparent)] bg-[var(--surface)] p-4 text-sm text-[var(--danger)]">
+          Secret encryption is not configured.
+        </p>
+      ) : null}
       <div className="grid gap-4 md:grid-cols-2">
         {integrations.map((integration) => (
-          <Card key={integration.name} className="p-6">
-            <div className="flex items-center justify-between gap-4">
-              <h2 className="font-semibold">{integration.name}</h2>
-              <Badge className={statusColor[integration.status]}>{integration.status}</Badge>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">{integration.description}</p>
-          </Card>
+          <IntegrationCard
+            key={integration.provider}
+            integration={integration}
+            canManage={canManage}
+            encryptionConfigured={encryptionConfigured}
+          />
         ))}
       </div>
     </>

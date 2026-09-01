@@ -50,6 +50,9 @@ importers:
       '@content-center/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@content-center/integrations':
+        specifier: workspace:*
+        version: link:../../packages/integrations
       '@content-center/providers':
         specifier: workspace:*
         version: link:../../packages/providers
@@ -74,6 +77,9 @@ importers:
       react-dom:
         specifier: 19.2.8
         version: 19.2.8(react@19.2.8)
+      server-only:
+        specifier: 0.0.1
+        version: 0.0.1
       zod:
         specifier: 4.5.4
         version: 4.5.4
@@ -99,6 +105,9 @@ importers:
       '@content-center/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@content-center/integrations':
+        specifier: workspace:*
+        version: link:../../packages/integrations
       '@content-center/providers':
         specifier: workspace:*
         version: link:../../packages/providers
@@ -122,6 +131,15 @@ importers:
       prisma:
         specifier: 6.19.3
         version: 6.19.3(typescript@6.0.3)
+
+  packages/integrations:
+    dependencies:
+      '@content-center/db':
+        specifier: workspace:*
+        version: link:../db
+      zod:
+        specifier: 4.5.4
+        version: 4.5.4
 
   packages/providers:
     dependencies:
@@ -2128,6 +2146,9 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
+  server-only@0.0.1:
+    resolution: {integrity: sha512-qepMx2JxAa5jjfzxG79yPPq+8BuFToHd1hm7kI+Z4zAq1ftQiP7HcxMhDDItrbtwVeLg/cY2JnKnrcFkmiswNA==}
+
   set-cookie-parser@3.1.2:
     resolution: {integrity: sha512-5/r/lTwbJ3zQ+qwdUFZYeRNqda7P5HD8zQKqlSjdGt1/S0cjLAphHusj4Y58ahDtWn/g32xrIS58/ikOvwl0Lw==}
 
@@ -4133,6 +4154,8 @@ snapshots:
   scheduler@0.27.0: {}
 
   semver@7.8.5: {}
+
+  server-only@0.0.1: {}
 
   set-cookie-parser@3.1.2: {}
 

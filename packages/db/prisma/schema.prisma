@@ -26,6 +26,7 @@ enum IntegrationStatus {
   CONFIGURED
   UNCONFIGURED
   ERROR
+  DISABLED
   MOCK
 }
 
@@ -171,15 +172,18 @@ model WorkspaceMember {
 }
 
 model IntegrationConfig {
-  id              String              @id @default(cuid())
-  workspaceId     String
-  provider        IntegrationProvider
-  status          IntegrationStatus   @default(UNCONFIGURED)
-  configured      Boolean             @default(false)
-  encryptedConfig String?
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  workspace       Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id                   String              @id @default(cuid())
+  workspaceId          String
+  provider             IntegrationProvider
+  status               IntegrationStatus   @default(UNCONFIGURED)
+  configured           Boolean             @default(false)
+  publicConfig         Json?
+  encryptedConfig      String?
+  lastFour             String?
+  encryptionKeyVersion Int                 @default(1)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  workspace            Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, provider])
 }

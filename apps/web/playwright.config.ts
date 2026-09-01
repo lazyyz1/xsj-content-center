@@ -1,4 +1,7 @@
+import { randomBytes } from "node:crypto";
 import { defineConfig, devices } from "@playwright/test";
+
+process.env.INTEGRATION_ENCRYPTION_KEY ||= randomBytes(32).toString("base64");
 
 export default defineConfig({
   testDir: "./e2e",
