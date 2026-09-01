@@ -1,0 +1,45 @@
+import { normalizeSourceUrl } from "@content-center/core";
+import { db } from "@content-center/db";
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { apiError, getApiWorkspaceContext } from "@/server/api-access";
+import { listLibrarySources } from "@/server/library";
+import { createSourceAndJob } from "@/server/source-service";
+
+const createSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("TEXT"), title: z.string().trim().max(200).optional(), text: z.string().trim().min(1).max(500_000), notes: z.string().trim().max(2_000).optional() }),
+  z.object({ kind: z.literal("URL"), url: z.string().trim().url().max(2_000) }),
+  z.object({ kind: z.literal("VIDEO_MOCK"), url: z.string().trim().regex(/^mock:\/\/video\/[a-z0-9-]+$/i) }),
+]);
+
+export async function GET(request: Request) {
+  const context = await getApiWorkspaceContext();
+  if (!context) return apiError("UNAUTHORIZED", 401);
+  const params = Object.fromEntries(new URL(request.url).searchParams.entries());
+  return NextResponse.json(await listLibrarySources(context.workspace.id, params));
+}
+
+export async function POST(request: Request) {
+  const context = await getApiWorkspaceContext();
+  if (!context) return apiError("UNAUTHORIZED", 401);
+  if (context.role === "VIEWER") return apiError("FORBIDDEN", 403);
+  const parsed = createSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return apiError("INVALID_INPUT", 400, "采集输入不完整或格式不正确。");
+  if (parsed.data.kind === "URL") {
+    let canonicalUrl: string;
+    try {
+      canonicalUrl = normalizeSourceUrl(parsed.data.url);
+    } catch {
+      return apiError("INVALID_URL", 400);
+    }
+    const duplicate = await db.sourceItem.findFirst({ where: { workspaceId: context.workspace.id, canonicalUrl }, select: { id: true } });
+    if (duplicate) return NextResponse.json({ error: "DUPLICATE_URL", sourceItemId: duplicate.id }, { status: 409 });
+  }
+  try {
+    const created = await createSourceAndJob({ workspaceId: context.workspace.id, userId: context.session.user.id, source: parsed.data });
+    return NextResponse.json({ sourceItemId: created.sourceItem.id, jobId: created.ingestJob.id, status: "QUEUED" }, { status: 202 });
+  } catch (error) {
+    if (error instanceof Error && error.message === "QUEUE_UNAVAILABLE") return apiError("QUEUE_UNAVAILABLE", 503);
+    return apiError("SOURCE_CREATE_FAILED", 409, "该内容可能已被当前 Workspace 收录。");
+  }
+}

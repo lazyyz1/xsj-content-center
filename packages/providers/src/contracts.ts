@@ -3,6 +3,8 @@ import type {
   ProviderResult,
   PublishingTaskStatus,
   SourceMetadata,
+  SourceIngestInput,
+  SourceIngestResult,
   TranscriptResult,
 } from "./types";
 
@@ -11,6 +13,11 @@ export interface SourceProvider {
   resolve(input: string): Promise<ProviderResult<SourceMetadata>>;
   fetchMetadata(input: string): Promise<ProviderResult<SourceMetadata>>;
   fetchMedia(input: string): Promise<ProviderResult<{ body: Uint8Array; contentType?: string }>>;
+}
+
+export interface IngestSourceProvider extends SourceProvider {
+  readonly providerName: string;
+  ingest(input: SourceIngestInput): Promise<ProviderResult<SourceIngestResult>>;
 }
 
 export interface TranscriptionProvider {

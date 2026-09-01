@@ -29,6 +29,54 @@ enum IntegrationStatus {
   MOCK
 }
 
+enum SourceType {
+  TEXT
+  URL
+  VIDEO
+  AUDIO
+  IMAGE
+  DOCUMENT
+}
+
+enum SourcePlatform {
+  GENERIC
+  DOUYIN
+  XIAOHONGSHU
+  WECHAT
+  BILIBILI
+  YOUTUBE
+  TIKTOK
+  OTHER
+}
+
+enum SourceItemStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+  ARCHIVED
+}
+
+enum IngestJobType {
+  EXTRACT_TEXT
+  FETCH_URL
+  TRANSCRIBE
+  PROCESS_MEDIA
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum ProviderMode {
+  REAL
+  MOCK
+}
+
 model User {
   id                   String            @id @default(cuid())
   name                 String
@@ -40,7 +88,10 @@ model User {
   sessions             Session[]
   accounts             Account[]
   workspaceMemberships WorkspaceMember[]
-  auditLogs             AuditLog[]
+  auditLogs            AuditLog[]
+  createdSources       SourceItem[]      @relation("SourceCreatedBy")
+  requestedIngestJobs  IngestJob[]       @relation("IngestRequestedBy")
+  createdCollections   Collection[]      @relation("CollectionCreatedBy")
 }
 
 model Session {
@@ -74,8 +125,8 @@ model Account {
   updatedAt             DateTime  @updatedAt
   user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId])
   @@unique([issuer, accountId])
+  @@index([userId])
 }
 
 model Verification {
@@ -98,6 +149,11 @@ model Workspace {
   members      WorkspaceMember[]
   integrations IntegrationConfig[]
   auditLogs    AuditLog[]
+  sourceItems  SourceItem[]
+  ingestJobs   IngestJob[]
+  transcripts  Transcript[]
+  contentTags  ContentTag[]
+  collections  Collection[]
 }
 
 model WorkspaceMember {
@@ -142,4 +198,132 @@ model AuditLog {
 
   @@index([workspaceId, createdAt])
   @@index([userId])
+}
+
+model SourceItem {
+  id             String           @id @default(cuid())
+  workspaceId    String
+  createdById    String
+  sourceType     SourceType
+  sourcePlatform SourcePlatform   @default(GENERIC)
+  sourceUrl      String?
+  canonicalUrl   String?
+  title          String?
+  author         String?
+  description    String?
+  thumbnailUrl   String?
+  rawText        String?
+  status         SourceItemStatus @default(PENDING)
+  metadata       Json?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  workspace      Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy      User             @relation("SourceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  ingestJobs     IngestJob[]
+  transcript     Transcript?
+  tags           SourceItemTag[]
+  collections    CollectionItem[]
+
+  @@unique([workspaceId, canonicalUrl])
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, status])
+  @@index([workspaceId, sourcePlatform])
+}
+
+model IngestJob {
+  id            String        @id @default(cuid())
+  workspaceId   String
+  sourceItemId  String
+  requestedById String
+  jobType       IngestJobType
+  provider      String
+  providerMode  ProviderMode
+  status        JobStatus     @default(QUEUED)
+  progress      Int           @default(0)
+  attempt       Int           @default(0)
+  maxAttempts   Int           @default(3)
+  errorCode     String?
+  errorMessage  String?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  metadata      Json?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceItem    SourceItem    @relation(fields: [sourceItemId], references: [id], onDelete: Cascade)
+  requestedBy   User          @relation("IngestRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, status])
+  @@index([sourceItemId, createdAt])
+}
+
+model Transcript {
+  id           String       @id @default(cuid())
+  workspaceId  String
+  sourceItemId String       @unique
+  provider     String
+  providerMode ProviderMode
+  language     String?
+  durationMs   Int?
+  fullText     String
+  segments     Json
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceItem   SourceItem   @relation(fields: [sourceItemId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
+
+model ContentTag {
+  id          String          @id @default(cuid())
+  workspaceId String
+  name        String
+  slug        String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceItems SourceItemTag[]
+
+  @@unique([workspaceId, slug])
+  @@index([workspaceId, name])
+}
+
+model SourceItemTag {
+  sourceItemId String
+  tagId        String
+  createdAt    DateTime   @default(now())
+  sourceItem   SourceItem @relation(fields: [sourceItemId], references: [id], onDelete: Cascade)
+  tag          ContentTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([sourceItemId, tagId])
+  @@index([tagId])
+}
+
+model Collection {
+  id          String           @id @default(cuid())
+  workspaceId String
+  name        String
+  description String?
+  createdById String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy   User             @relation("CollectionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  sourceItems CollectionItem[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, createdAt])
+}
+
+model CollectionItem {
+  collectionId String
+  sourceItemId String
+  createdAt    DateTime   @default(now())
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  sourceItem   SourceItem @relation(fields: [sourceItemId], references: [id], onDelete: Cascade)
+
+  @@id([collectionId, sourceItemId])
+  @@index([sourceItemId])
 }

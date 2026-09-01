@@ -1,10 +1,7 @@
 import { db } from "@content-center/db";
 
 export async function getDashboardCounts(workspaceId: string) {
-  const resourceTypes = ["library_item", "content_project", "approval", "publication"] as const;
-  const [materials, projects, pendingReview, pendingPublish] = await Promise.all(
-    resourceTypes.map((resourceType) => db.auditLog.count({ where: { workspaceId, resourceType } })),
-  );
-
-  return { materials, projects, pendingReview, pendingPublish };
+  const materials = await db.sourceItem.count({ where: { workspaceId, status: { not: "ARCHIVED" } } });
+  // ContentProject, approval and publication domains do not exist yet.
+  return { materials, projects: 0, pendingReview: 0, pendingPublish: 0 };
 }

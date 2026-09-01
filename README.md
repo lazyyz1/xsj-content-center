@@ -1,6 +1,6 @@
 # AI 内容生产中心
 
-阶段 1 基础骨架：Better Auth、Workspace/RBAC、Provider 契约、BullMQ 健康队列、MinIO StorageProvider 和响应式 Web Shell。
+阶段 2 内容采集与个人素材库：在阶段 1 的 Auth、Workspace/RBAC、Provider、BullMQ 与 Storage 基础上，加入真实文本/公开网页采集和可检索 Library。
 
 ## Prerequisites
 
@@ -25,8 +25,8 @@ Web 默认运行在 `http://localhost:3000`，MinIO Console 默认运行在 `htt
 | Service | 用途 | 默认端口 |
 | --- | --- | --- |
 | Web | Next.js App Router | `3000` |
-| Worker | BullMQ 系统健康任务消费者 | 本机进程 |
-| PostgreSQL | Auth、Workspace、IntegrationConfig、AuditLog | `55432`（容器内 `5432`） |
+| Worker | BullMQ 系统健康与内容采集任务消费者 | 本机进程 |
+| PostgreSQL | Auth、Workspace、素材、采集任务、标签、Collection、AuditLog | `55432`（容器内 `5432`） |
 | Redis | BullMQ 队列 | `6379` |
 | MinIO | S3-compatible 对象存储 | `9000` / `9001` |
 
@@ -67,6 +67,8 @@ pnpm db:studio
 | AWS SDK S3 | `3.1123.0` |
 | Vitest | `4.1.11` |
 | Playwright | `1.62.1` |
+| Mozilla Readability | `0.6.0` |
+| jsdom | `30.0.1` |
 
 Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 `8.0.0-rc`，而 Better Auth 官方明确支持 Prisma 6；这里优先稳定和兼容，不追逐 RC。
 
@@ -82,15 +84,22 @@ Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 
 - MinIO 上传、Signed URL 和删除。
 - Dashboard 的计数来自 Workspace 范围内的数据库查询；空库显示真实的 `0`。
 - 集成页根据服务端环境配置显示 Configured、Unconfigured 或 Mock，不返回密钥。
+- Manual Text Ingest：文本通过真实 Worker 入库，并生成明确标记为 `MANUAL / REAL` 的 Transcript。
+- Generic Web URL Extraction：仅抓取公开 HTTP(S) 网页，经 SSRF 校验后提取为纯文本正文。
+- Library：卡片/列表视图、真实分页、标题/作者/正文搜索、平台/类型/状态/标签/Collection 筛选和排序。
+- 人工 Tags 与一级 Collections，可在素材详情中添加和移除。
+- Ingest Jobs：显式状态、进度、错误、自动瞬时错误重试和人工失败重试。
+- SourceItem 归档、确认后删除及对应 AuditLog。
+- 所有素材、任务、Transcript、Tag 与 Collection 查询均执行 Workspace Membership 隔离。
 
 ## What Does Not Work Yet
 
 - RedFox（红狐 API）：`UNCONFIGURED`
 - Doubao ASR（豆包转写）：`UNCONFIGURED`
-- 内容采集：未实现
+- 真实视频解析：未实现（仅提供醒目的 `MOCK MODE` 流程测试入口）
 - AI 创作：未实现
 - Publishing：未实现
-- 素材库、ContentProject、Creator Memory、热点发现：未实现
+- ContentProject、Creator Memory、热点发现：未实现
 
 这些能力不会以假按钮、假 API 或假成功状态呈现。
 
@@ -98,6 +107,8 @@ Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 
 
 - `.env`、真实 Key、Cookie 和 Token 不提交到 Git。
 - 外部凭证只允许在服务端读取；集成页只显示状态。
+- URL 抓取只允许 HTTP(S)，对初始地址、DNS 结果和每次重定向执行 SSRF 校验，并限制超时、响应体大小和跳转次数。
+- 网页正文只保存和渲染 normalized plain text，不把远端 HTML 注入页面。
 - `IntegrationConfig.encryptedConfig` 已预留，但阶段 1 没有实现成熟加密写入，因此当前不保存敏感配置。
 - 真实外部发布必须等待后续阶段实现 `APPROVED` 人工审核门。
 

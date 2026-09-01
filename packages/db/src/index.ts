@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+export type { Prisma } from "@prisma/client";
 
 const globalForPrisma = globalThis as unknown as { contentCenterDb?: PrismaClient };
 
@@ -9,3 +10,4 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 export * from "./workspaces";
+export * from "./sources";

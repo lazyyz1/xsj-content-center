@@ -30,6 +30,18 @@ export type TranscriptResult = {
 
 export type ProviderInput = { prompt: string };
 
+export type SourceIngestInput = {
+  value: string;
+  title?: string;
+  notes?: string;
+};
+
+export type SourceIngestResult = {
+  metadata: SourceMetadata;
+  rawText: string;
+  transcript?: TranscriptResult;
+};
+
 export type PublishingTaskStatus =
   | "DRAFT"
   | "WAITING_APPROVAL"

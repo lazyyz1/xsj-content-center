@@ -17,7 +17,7 @@ export default async function DashboardPage() {
 
   return (
     <>
-      <PageHeader title="欢迎进入 AI 内容生产中心" description="从素材到发布，后续阶段会逐步接通完整工作流。" />
+      <PageHeader title="欢迎进入 AI 内容生产中心" description="素材统计来自当前 Workspace 的真实个人素材库。" />
       <section aria-label="内容概览" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {metrics.map(([label, value]) => (
           <Card key={label} className="p-5">
@@ -29,7 +29,7 @@ export default async function DashboardPage() {
       <Card className="mt-6 flex flex-col items-start justify-between gap-5 p-6 sm:flex-row sm:items-center">
         <div>
           <h2 className="font-semibold">开始整理你的内容素材</h2>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">当前素材库为空；采集能力将在下一阶段实现。</p>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">收录文字或公开网页，建立可检索的个人素材库。</p>
         </div>
         <Button asChild>
           <Link href="/library">开始创建内容 <ArrowRight size={16} /></Link>

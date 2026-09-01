@@ -1,7 +1,17 @@
-import { Queue, Worker, type ConnectionOptions } from "bullmq";
+import { Queue, UnrecoverableError, Worker, type ConnectionOptions } from "bullmq";
+import { processContentIngestJob } from "./ingest";
 
 export const SYSTEM_QUEUE = "system-health";
 export const SYSTEM_HEALTH_CHECK = "SYSTEM_HEALTH_CHECK";
+export const CONTENT_INGEST_QUEUE = "content-ingest";
+export const CONTENT_INGEST = "CONTENT_INGEST";
+
+export type ContentIngestPayload = {
+  jobId: string;
+  workspaceId: string;
+  sourceItemId: string;
+  requestedById: string;
+};
 
 function connection(): ConnectionOptions {
   const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
@@ -31,5 +41,35 @@ export function createHealthWorker() {
       return result;
     },
     { connection: connection() },
+  );
+}
+
+export function createContentIngestQueue() {
+  return new Queue<ContentIngestPayload>(CONTENT_INGEST_QUEUE, { connection: connection() });
+}
+
+export async function enqueueContentIngest(payload: ContentIngestPayload, maxAttempts = 3) {
+  const queue = createContentIngestQueue();
+  try {
+    return await queue.add(CONTENT_INGEST, payload, {
+      jobId: `${payload.jobId}-${Date.now()}`,
+      attempts: maxAttempts,
+      backoff: { type: "exponential", delay: 500 },
+      removeOnComplete: true,
+      removeOnFail: true,
+    });
+  } finally {
+    await queue.close();
+  }
+}
+
+export function createContentIngestWorker() {
+  return new Worker<ContentIngestPayload>(
+    CONTENT_INGEST_QUEUE,
+    async (job) => {
+      if (job.name !== CONTENT_INGEST) throw new UnrecoverableError(`Unsupported job: ${job.name}`);
+      return processContentIngestJob(job);
+    },
+    { connection: connection(), concurrency: 2 },
   );
 }
