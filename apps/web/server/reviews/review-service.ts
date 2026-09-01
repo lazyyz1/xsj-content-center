@@ -188,6 +188,7 @@ export async function getPlatformReview(input: ReviewInput) {
     quality,
     records: records.map((record) => ({ id: record.id, result: record.result, issues: parseIssues(record.issues), comment: record.comment, aiReviewed: record.aiReviewed, aiRunId: record.aiRunId, aiOutput: record.aiRun?.outputJson ?? null, reviewer: record.reviewer, createdAt: record.createdAt, updatedAt: record.updatedAt })),
     canReview: context.membership.role === "OWNER" || context.membership.role === "ADMIN",
+    canPublish: context.membership.role !== "VIEWER",
     readyToPublish: isPlatformVariantReadyToPublish({ status: context.variant.status, sourceMotherVersion: context.variant.sourceMotherVersion, motherVersion: context.motherContent.version }),
     isStale: context.variant.sourceMotherVersion < context.motherContent.version,
   };

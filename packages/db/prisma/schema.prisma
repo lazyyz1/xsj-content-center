@@ -142,6 +142,15 @@ enum ReviewResult {
   REJECTED
 }
 
+enum PublishStatus {
+  DRAFT
+  SCHEDULED
+  READY_TO_PUBLISH
+  PUBLISHED
+  FAILED
+  CANCELLED
+}
+
 enum AIRunStatus {
   QUEUED
   RUNNING
@@ -205,6 +214,8 @@ model User {
   createdPlatformVariants PlatformVariant[]    @relation("PlatformVariantCreatedBy")
   createdDeepPackages     DeepContentPackage[] @relation("DeepContentPackageCreatedBy")
   reviewRecords           ReviewRecord[]       @relation("ReviewRecordReviewer")
+  createdPublishTasks     PublishTask[]         @relation("PublishTaskCreatedBy")
+  publishedTasks          PublishTask[]         @relation("PublishTaskPublisher")
 }
 
 model Session {
@@ -280,6 +291,7 @@ model Workspace {
   deepContentPackages DeepContentPackage[]
   aiRuns              AIRun[]
   reviewRecords       ReviewRecord[]
+  publishTasks        PublishTask[]
 }
 
 model WorkspaceMember {
@@ -529,6 +541,7 @@ model ContentProject {
   deepContentPackages DeepContentPackage[]
   aiRuns              AIRun[]
   reviewRecords       ReviewRecord[]
+  publishTasks        PublishTask[]
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
@@ -743,6 +756,7 @@ model PlatformVariant {
   motherContent       MotherContent         @relation(fields: [motherContentId], references: [id], onDelete: Cascade)
   createdBy           User                  @relation("PlatformVariantCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   reviewRecords       ReviewRecord[]
+  publishTasks        PublishTask[]
 
   @@unique([projectId, platform])
   @@index([workspaceId, projectId])
@@ -774,6 +788,37 @@ model ReviewRecord {
   @@index([platformVariantId, createdAt])
   @@index([reviewerId])
   @@index([aiRunId])
+}
+
+model PublishTask {
+  id                String          @id @default(cuid())
+  workspaceId       String
+  projectId         String
+  platformVariantId String
+  platform          Platform
+  status            PublishStatus   @default(DRAFT)
+  scheduledAt       DateTime?
+  publishedAt       DateTime?
+  publisherId       String?
+  createdById       String
+  externalUrl       String?
+  externalPostId    String?
+  note              String?
+  contentSnapshot   Json
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  workspace         Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project           ContentProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  platformVariant   PlatformVariant @relation(fields: [platformVariantId], references: [id], onDelete: Restrict)
+  createdBy         User            @relation("PublishTaskCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  publisher         User?           @relation("PublishTaskPublisher", fields: [publisherId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status, scheduledAt])
+  @@index([workspaceId, platform, createdAt])
+  @@index([projectId, createdAt])
+  @@index([platformVariantId, createdAt])
+  @@index([createdById])
+  @@index([publisherId])
 }
 
 model AIRun {

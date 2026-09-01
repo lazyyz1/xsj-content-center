@@ -19,7 +19,7 @@ const links: NavItem[] = [
   { label: "内容发现", icon: Radar, disabled: true },
   { label: "素材库", href: "/library", icon: Library },
   { label: "内容项目", href: "/projects", icon: FolderKanban },
-  { label: "发布日历", href: "/calendar", icon: CalendarDays },
+  { label: "发布中心", href: "/calendar", icon: CalendarDays },
   { label: "个人内容", icon: UserRound, disabled: true },
   { label: "设置", href: "/settings", icon: Settings },
 ];

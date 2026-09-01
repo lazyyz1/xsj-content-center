@@ -4,6 +4,7 @@ import { Badge, Button, Card } from "@content-center/ui";
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { PLATFORM_LABELS, SUPPORTED_PLATFORMS, type PlatformParameters, type PlatformVariantView, type SupportedPlatform } from "@/lib/platforms";
+import { AddToPublishingButton } from "@/components/publishing/add-to-publishing-button";
 
 type IntegrationStatus = "CONFIGURED" | "UNCONFIGURED" | "DISABLED" | "ERROR" | "MOCK";
 type PreviewRun = { id: string; platform: SupportedPlatform; output: unknown; sourceMotherVersion: number; contextTruncated?: boolean };
@@ -126,7 +127,7 @@ export function PlatformContentFactory({ projectId, activePlatform, motherVersio
       <div className="flex items-center justify-between gap-3"><div><h2 className="font-semibold">{PLATFORM_LABELS[activePlatform]}版本</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">正式平台内容资产 · 停止输入 800ms 后保存</p></div><Badge>{variant ? (isStale ? "母稿已更新" : variant.status === "IN_REVIEW" ? "待审核" : variant.status === "APPROVED" ? "已批准" : "草稿") : "未生成"}</Badge></div>
       {isStale && !acknowledgedStale[activePlatform] ? <div className="mt-4 rounded-xl border border-[var(--warning)] p-4 text-sm"><p className="font-medium">母稿已更新</p><p className="mt-1 text-[var(--text-secondary)]">当前平台版本基于旧母稿，不会自动覆盖。</p>{editable ? <div className="mt-3 flex gap-2"><Button onClick={() => generate([activePlatform])} disabled={!configured || busy}>重新生成</Button><Button variant="secondary" onClick={() => { setAcknowledgedStale((current) => ({ ...current, [activePlatform]: true })); setMessage("继续使用旧版本，内容未被修改。"); }}>继续使用旧版本</Button></div> : null}</div> : null}
       {variant ? <PlatformEditor platform={activePlatform} draft={draft} editable={editable} onChange={(patch) => updateDraft(activePlatform, patch)} /> : <div className="mt-8 rounded-xl border border-dashed p-10 text-center text-sm text-[var(--text-secondary)]">尚未生成{PLATFORM_LABELS[activePlatform]}版本。先在右侧生成 Preview，再人工应用。</div>}
-      {variant ? <div className="mt-5 flex flex-wrap gap-2 border-t pt-5">{editable && ["READY", "DRAFT"].includes(variant.status) ? <Button disabled={busy} onClick={submitReview}>提交审核</Button> : null}<Button asChild variant="secondary"><Link href={`/projects/${projectId}/review/${activePlatform}`}>查看审核</Link></Button></div> : null}
+      {variant ? <div className="mt-5 grid gap-3 border-t pt-5"><div className="flex flex-wrap gap-2">{editable && ["READY", "DRAFT"].includes(variant.status) ? <Button disabled={busy} onClick={submitReview}>提交审核</Button> : null}<Button asChild variant="secondary"><Link href={`/projects/${projectId}/review/${activePlatform}`}>查看审核</Link></Button></div><AddToPublishingButton compact projectId={projectId} platform={activePlatform} disabledReason={!editable ? "VIEWER 只能查看发布任务。" : isStale ? "母稿已更新，必须重新生成并审核。" : variant.status !== "APPROVED" ? "平台内容尚未通过人工审核。" : undefined} /></div> : null}
     </Card>
     <Card className="p-5">
       <div className="flex items-center justify-between"><div><h2 className="font-semibold">平台生成</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">任务生成 · 人工 Apply</p></div><Badge>{integrationStatus}</Badge></div>

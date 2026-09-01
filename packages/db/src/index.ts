@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-export type { Prisma, PromptType, AIRunStatus, Platform, PlatformVariantStatus, DeepContentPackageStatus, MotherContentOrigin, ReviewResult } from "@prisma/client";
+export type { Prisma, PromptType, AIRunStatus, Platform, PlatformVariantStatus, DeepContentPackageStatus, MotherContentOrigin, ReviewResult, PublishStatus } from "@prisma/client";
 
 const globalForPrisma = globalThis as unknown as { contentCenterDb?: PrismaClient };
 
