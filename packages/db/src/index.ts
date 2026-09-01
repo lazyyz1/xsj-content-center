@@ -11,3 +11,4 @@ if (process.env.NODE_ENV !== "production") {
 
 export * from "./workspaces";
 export * from "./sources";
+export * from "./projects";

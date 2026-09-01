@@ -69,10 +69,16 @@ function transcriptSegments(value: unknown) {
 export default async function SourceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { session, workspace, role } = await requireWorkspace();
   const { id } = await params;
-  const [source, availableTags, availableCollections] = await Promise.all([
+  const [source, availableTags, availableCollections, availableProjects] = await Promise.all([
     findSourceForUser(db, { userId: session.user.id, workspaceId: workspace.id, sourceItemId: id }),
     db.contentTag.findMany({ where: { workspaceId: workspace.id }, orderBy: { name: "asc" } }),
     db.collection.findMany({ where: { workspaceId: workspace.id }, orderBy: { name: "asc" } }),
+    db.contentProject.findMany({
+      where: { workspaceId: workspace.id, status: { not: "ARCHIVED" }, sources: { none: { sourceItemId: id } } },
+      select: { id: true, title: true },
+      orderBy: { updatedAt: "desc" },
+      take: 100,
+    }),
   ]);
   if (!source) notFound();
   const latestIngestJob = source.ingestJobs.find((job) => job.jobType !== "TRANSCRIBE");
@@ -204,7 +210,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
             <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-[var(--surface-elevated)] text-[var(--text-secondary)]"><tr><th className="p-3">任务</th><th className="p-3">状态</th><th className="p-3">Provider</th><th className="p-3">模式</th><th className="p-3">Attempt</th><th className="p-3">耗时</th><th className="p-3">错误</th></tr></thead><tbody>{source.ingestJobs.map((job) => <tr key={job.id} className="border-t"><td className="p-3">{job.jobType}</td><td className="p-3">{job.status}</td><td className="p-3">{job.provider}</td><td className="p-3">{job.providerMode}</td><td className="p-3">{job.attempt}/{job.maxAttempts}</td><td className="p-3">{duration(job)}</td><td className="p-3 text-[var(--danger)]">{job.errorMessage || "—"}</td></tr>)}</tbody></table></div>
           </Card>
         </div>
-        <SourceActions sourceId={source.id} status={source.status} failedJobId={source.status === "FAILED" ? latestIngestJob?.id : undefined} tags={source.tags.map(({ tag }) => tag)} availableTags={availableTags} collections={source.collections.map(({ collection }) => collection)} availableCollections={availableCollections} />
+        <SourceActions sourceId={source.id} status={source.status} failedJobId={source.status === "FAILED" ? latestIngestJob?.id : undefined} tags={source.tags.map(({ tag }) => tag)} availableTags={availableTags} collections={source.collections.map(({ collection }) => collection)} availableCollections={availableCollections} availableProjects={availableProjects} canManageProjects={role !== "VIEWER"} />
       </div>
     </>
   );

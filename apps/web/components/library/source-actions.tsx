@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 type NamedResource = { id: string; name: string };
+type AvailableProject = { id: string; title: string };
 
 export function SourceActions({
   sourceId,
@@ -14,6 +15,8 @@ export function SourceActions({
   availableTags,
   collections,
   availableCollections,
+  availableProjects,
+  canManageProjects,
 }: {
   sourceId: string;
   status: string;
@@ -22,6 +25,8 @@ export function SourceActions({
   availableTags: NamedResource[];
   collections: NamedResource[];
   availableCollections: NamedResource[];
+  availableProjects: AvailableProject[];
+  canManageProjects: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -75,6 +80,28 @@ export function SourceActions({
           <Button disabled={busy}>新建并加入</Button>
         </form>
       </section>
+
+      {canManageProjects ? (
+        <section className="rounded-xl border p-4">
+          <h2 className="font-semibold">内容项目</h2>
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">素材只建立引用关系，不会复制原始内容。</p>
+          <form className="mt-4 grid gap-2" action={(formData) => action(async () => {
+            const project = await call("/api/projects", "POST", { title: String(formData.get("projectTitle") || ""), sourceItemId: sourceId });
+            router.push(`/projects/${project.id}/studio`);
+          })}>
+            <input name="projectTitle" aria-label="新项目名称" required maxLength={200} className="h-10 rounded-[var(--radius)] border bg-transparent px-3" placeholder="输入项目名称" />
+            <Button disabled={busy}>用此素材新建项目</Button>
+          </form>
+          <form className="mt-3 grid gap-2" action={(formData) => action(async () => {
+            const projectId = String(formData.get("projectId") || "");
+            await call(`/api/projects/${projectId}/sources`, "POST", { sourceItemId: sourceId, role: "REFERENCE" });
+            router.push(`/projects/${projectId}/studio`);
+          })}>
+            <select name="projectId" aria-label="选择内容项目" required defaultValue="" className="h-10 min-w-0 rounded-[var(--radius)] border bg-transparent px-3"><option value="" disabled>选择未关联的项目</option>{availableProjects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select>
+            <Button variant="secondary" disabled={busy || availableProjects.length === 0}>加入已有项目</Button>
+          </form>
+        </section>
+      ) : null}
 
       <section className="flex flex-wrap gap-2 rounded-xl border p-4">
         {status === "FAILED" && failedJobId ? <Button disabled={busy} onClick={() => action(async () => { await call(`/api/ingest-jobs/${failedJobId}/retry`, "POST"); })}>重试采集</Button> : null}

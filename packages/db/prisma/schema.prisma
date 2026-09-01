@@ -91,6 +91,34 @@ enum AssetStatus {
   FAILED
 }
 
+enum ContentProjectStatus {
+  DRAFT
+  RESEARCHING
+  BRIEF_READY
+  WRITING
+  IN_REVIEW
+  APPROVED
+  ARCHIVED
+}
+
+enum ProjectSourceRole {
+  REFERENCE
+  EVIDENCE
+  INSPIRATION
+  OWN_MATERIAL
+}
+
+enum EvidenceType {
+  FACT
+  VIEWPOINT
+  CASE
+  DATA
+  QUOTE
+  EXPERIENCE
+  QUESTION
+  OTHER
+}
+
 model User {
   id                   String            @id @default(cuid())
   name                 String
@@ -107,6 +135,10 @@ model User {
   requestedIngestJobs  IngestJob[]       @relation("IngestRequestedBy")
   createdCollections   Collection[]      @relation("CollectionCreatedBy")
   apiUsages            ApiUsage[]
+  createdProjects      ContentProject[]  @relation("ProjectCreatedBy")
+  createdEvidenceItems EvidenceItem[]    @relation("EvidenceCreatedBy")
+  createdBriefs        CreativeBrief[]   @relation("BriefCreatedBy")
+  createdMotherContent MotherContent[]   @relation("MotherContentCreatedBy")
 }
 
 model Session {
@@ -156,21 +188,25 @@ model Verification {
 }
 
 model Workspace {
-  id           String              @id @default(cuid())
-  name         String
-  slug         String              @unique
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
-  members      WorkspaceMember[]
-  integrations IntegrationConfig[]
-  auditLogs    AuditLog[]
-  sourceItems  SourceItem[]
-  ingestJobs   IngestJob[]
-  transcripts  Transcript[]
-  contentTags  ContentTag[]
-  collections  Collection[]
-  sourceAssets SourceAsset[]
-  apiUsages    ApiUsage[]
+  id              String              @id @default(cuid())
+  name            String
+  slug            String              @unique
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  members         WorkspaceMember[]
+  integrations    IntegrationConfig[]
+  auditLogs       AuditLog[]
+  sourceItems     SourceItem[]
+  ingestJobs      IngestJob[]
+  transcripts     Transcript[]
+  contentTags     ContentTag[]
+  collections     Collection[]
+  sourceAssets    SourceAsset[]
+  apiUsages       ApiUsage[]
+  contentProjects ContentProject[]
+  evidenceItems   EvidenceItem[]
+  creativeBriefs  CreativeBrief[]
+  motherContents  MotherContent[]
 }
 
 model WorkspaceMember {
@@ -244,6 +280,8 @@ model SourceItem {
   tags           SourceItemTag[]
   collections    CollectionItem[]
   assets         SourceAsset[]
+  projects       ProjectSource[]
+  evidenceItems  EvidenceItem[]
 
   @@unique([workspaceId, canonicalUrl])
   @@index([workspaceId, createdAt])
@@ -391,4 +429,109 @@ model CollectionItem {
 
   @@id([collectionId, sourceItemId])
   @@index([sourceItemId])
+}
+
+model ContentProject {
+  id            String               @id @default(cuid())
+  workspaceId   String
+  createdById   String
+  title         String
+  description   String?
+  goal          String?
+  audience      String?
+  status        ContentProjectStatus @default(DRAFT)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  workspace     Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy     User                 @relation("ProjectCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  sources       ProjectSource[]
+  evidenceItems EvidenceItem[]
+  creativeBrief CreativeBrief?
+  motherContent MotherContent?
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, status])
+  @@index([createdById])
+}
+
+model ProjectSource {
+  id           String            @id @default(cuid())
+  projectId    String
+  sourceItemId String
+  role         ProjectSourceRole @default(REFERENCE)
+  sortOrder    Int               @default(0)
+  createdAt    DateTime          @default(now())
+  project      ContentProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceItem   SourceItem        @relation(fields: [sourceItemId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, sourceItemId])
+  @@index([sourceItemId])
+  @@index([projectId, sortOrder])
+}
+
+model EvidenceItem {
+  id           String         @id @default(cuid())
+  workspaceId  String
+  projectId    String
+  sourceItemId String?
+  type         EvidenceType
+  excerpt      String?
+  claim        String?
+  note         String?
+  sourceUrl    String?
+  sortOrder    Int            @default(0)
+  createdById  String
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project      ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceItem   SourceItem?    @relation(fields: [sourceItemId], references: [id], onDelete: SetNull)
+  createdBy    User           @relation("EvidenceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, projectId, sortOrder])
+  @@index([sourceItemId])
+  @@index([createdById])
+}
+
+model CreativeBrief {
+  id          String         @id @default(cuid())
+  workspaceId String
+  projectId   String         @unique
+  topic       String
+  angle       String
+  audience    String
+  coreMessage String
+  keyPoints   Json
+  structure   Json
+  tone        String
+  risks       Json
+  version     Int            @default(1)
+  createdById String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project     ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy   User           @relation("BriefCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, updatedAt])
+  @@index([createdById])
+}
+
+model MotherContent {
+  id          String         @id @default(cuid())
+  workspaceId String
+  projectId   String         @unique
+  title       String
+  body        String
+  outline     Json
+  version     Int            @default(1)
+  createdById String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project     ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy   User           @relation("MotherContentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, updatedAt])
+  @@index([createdById])
 }
