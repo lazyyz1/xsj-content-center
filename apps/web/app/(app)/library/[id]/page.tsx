@@ -9,8 +9,9 @@ import { getSourceProcessingState, type ProcessingStepState } from "@/lib/source
 import { sourcePlatformLabels, sourceStatusLabels, sourceTypeLabels } from "@/lib/content-labels";
 import { requireWorkspace } from "@/server/access";
 import { db, findSourceForUser } from "@content-center/db";
-import { IntegrationService } from "@content-center/integrations";
+import { IntegrationService, parseProviderConfig } from "@content-center/integrations";
 import { minioStorageFromEnv } from "@content-center/providers";
+import { getLocalAsrDisplay } from "@/server/local-asr";
 
 function duration(job: { startedAt: Date | null; finishedAt: Date | null }) {
   if (!job.startedAt) return "—";
@@ -34,7 +35,7 @@ const progressLabels: Record<string, string> = {
   QUEUED: "等待转写",
   EXTRACTING_AUDIO: "正在提取音频",
   UPLOADING_AUDIO: "正在保存音频",
-  TRANSCRIBING: "豆包正在转写",
+  TRANSCRIBING: "正在转写",
   PERSISTING: "正在保存转写结果",
   SUCCEEDED: "转写完成",
 };
@@ -67,6 +68,12 @@ function transcriptSegments(value: unknown) {
   });
 }
 
+function jsonObject(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+const qualityLabels: Record<string, string> = { FAST: "速度优先", BALANCED: "均衡", QUALITY: "质量优先" };
+
 export default async function SourceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { session, workspace, role } = await requireWorkspace();
   const { id } = await params;
@@ -98,13 +105,22 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
     ? progressJob.metadata as Record<string, unknown>
     : {};
   const progressStage = typeof jobMetadata.progressStage === "string" ? jobMetadata.progressStage : undefined;
-  const doubao = source.sourcePlatform === "DOUYIN"
-    ? await new IntegrationService().getIntegrationStatus(workspace.id, "DOUBAO_ASR")
-    : null;
-  const doubaoConfigured = doubao?.status === "CONFIGURED";
+  const integrationService = new IntegrationService();
+  const [doubao, transcription, localAsr] = source.sourcePlatform === "DOUYIN"
+    ? await Promise.all([
+        integrationService.getIntegrationStatus(workspace.id, "DOUBAO_ASR"),
+        integrationService.getIntegrationStatus(workspace.id, "TRANSCRIPTION"),
+        getLocalAsrDisplay(workspace.id),
+      ])
+    : [null, null, null];
+  const transcriptionConfig = parseProviderConfig("TRANSCRIPTION", transcription?.publicConfig ?? {}) as { source: "LOCAL_FUNASR" | "DOUBAO"; qualityMode: "FAST" | "BALANCED" | "QUALITY" };
+  const selectedLocalQuality = localAsr?.qualityModes[transcriptionConfig.qualityMode];
+  const transcriptionConfigured = transcriptionConfig.source === "DOUBAO"
+    ? doubao?.status === "CONFIGURED"
+    : localAsr?.status === "NORMAL" && selectedLocalQuality?.available === true && selectedLocalQuality.installed;
   const processing = getSourceProcessingState({
     sourceStatus: source.status,
-    doubaoStatus: doubao?.status,
+    transcriptionStatus: transcriptionConfigured ? "CONFIGURED" : "UNCONFIGURED",
     hasTranscript: Boolean(source.transcript),
     assets: source.assets,
     jobs: source.ingestJobs,
@@ -112,6 +128,8 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
   const isProcessing = processing.busy;
   const canTranscribe = role !== "VIEWER";
   const segments = transcriptSegments(source.transcript?.segments);
+  const transcriptMetadata = jsonObject(source.transcript?.metadata);
+  const transcriptTechnical = jsonObject(transcriptMetadata.technical);
   const pipelineSteps = [
     ["RedFox 解析", processing.steps.redfoxParse],
     ["视频保存", processing.steps.videoSave],
@@ -175,15 +193,22 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
                 <Badge>{processing.transcriptionLabel}</Badge>
               </div>
               {transcriptionBusy ? <p className="mt-4 text-sm text-[var(--text-secondary)]">{progressStage ? progressLabels[progressStage] || progressStage : "转写处理中，页面会自动刷新。"}</p> : null}
-              {!doubaoConfigured && !source.transcript ? (
+              {!transcriptionConfigured && !source.transcript ? (
                 <p className="mt-4 text-sm text-[var(--text-secondary)]">
-                  视频已保存。{doubao?.status === "DISABLED" ? "豆包 ASR 已禁用。" : "豆包 ASR 未配置。"}
+                  视频已保存。{transcriptionConfig.source === "LOCAL_FUNASR"
+                    ? localAsr?.status !== "NORMAL" ? "本地语音识别服务未启动。" : "当前质量模式所需模型尚未安装或硬件不支持。"
+                    : doubao?.status === "DISABLED" ? "豆包 ASR 已禁用。" : "豆包 ASR 未配置。"}
                   {canTranscribe ? <Link href="/settings/integrations" className="ml-2 font-medium text-[var(--accent)]">配置后转写</Link> : null}
                 </p>
               ) : null}
               {latestTranscriptionJob?.status === "FAILED" ? <p role="alert" className="mt-4 text-sm text-[var(--danger)]">{latestTranscriptionJob.errorMessage || "转写失败，请重试。"}</p> : null}
               {source.transcript ? (
                 <>
+                  <dl className="mt-4 grid gap-3 rounded-xl bg-[var(--surface-elevated)] p-4 text-sm sm:grid-cols-3">
+                    <div><dt className="text-[var(--text-secondary)]">方式</dt><dd className="mt-1">{typeof transcriptMetadata.methodLabel === "string" ? transcriptMetadata.methodLabel : source.transcript.provider === "LOCAL_FUNASR" ? "本地转写" : "豆包云端"}</dd></div>
+                    <div><dt className="text-[var(--text-secondary)]">质量</dt><dd className="mt-1">{qualityLabels[String(transcriptMetadata.qualityMode)] ?? "—"}</dd></div>
+                    <div><dt className="text-[var(--text-secondary)]">耗时</dt><dd className="mt-1">{typeof transcriptMetadata.processingMs === "number" ? `${Math.round(transcriptMetadata.processingMs / 1_000)} 秒` : "—"}</dd></div>
+                  </dl>
                   <h3 className="mt-5 text-sm font-medium text-[var(--text-secondary)]">全文</h3>
                   <p className="mt-2 whitespace-pre-wrap text-sm leading-7">{source.transcript.fullText}</p>
                   {segments.length ? (
@@ -197,8 +222,8 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
                     </div>
                   ) : null}
                 </>
-              ) : doubaoConfigured && !transcriptionBusy && latestTranscriptionJob?.status !== "FAILED" ? <p className="mt-4 text-sm text-[var(--text-secondary)]">视频已保存，尚未转写。</p> : null}
-              <TranscriptionActions sourceId={source.id} canTranscribe={canTranscribe} configured={doubaoConfigured} hasTranscript={Boolean(source.transcript)} fullText={source.transcript?.fullText} busy={transcriptionBusy} />
+              ) : transcriptionConfigured && !transcriptionBusy && latestTranscriptionJob?.status !== "FAILED" ? <p className="mt-4 text-sm text-[var(--text-secondary)]">视频已保存，尚未转写。</p> : null}
+              <TranscriptionActions sourceId={source.id} canTranscribe={canTranscribe} configured={transcriptionConfigured} hasTranscript={Boolean(source.transcript)} fullText={source.transcript?.fullText} busy={transcriptionBusy} />
             </Card>
           ) : (
             <Card className="p-5">
@@ -206,7 +231,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
               {isProcessing ? <p className="mt-4 text-sm text-[var(--text-secondary)]">{progressStage ? progressLabels[progressStage] || progressStage : "处理中，页面会自动刷新。"}</p> : <pre className="mt-4 whitespace-pre-wrap break-words font-sans text-sm leading-7">{source.rawText || "暂无正文"}</pre>}
             </Card>
           )}
-          <Card className="overflow-hidden"><details><summary className="cursor-pointer list-none p-5"><h2 className="font-semibold">高级信息与处理记录</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">仅在排查采集或转写问题时需要查看。</p></summary><div className="overflow-x-auto border-t"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-[var(--surface-elevated)] text-[var(--text-secondary)]"><tr><th className="p-3">任务</th><th className="p-3">状态</th><th className="p-3">服务</th><th className="p-3">模式</th><th className="p-3">尝试次数</th><th className="p-3">耗时</th><th className="p-3">错误</th></tr></thead><tbody>{source.ingestJobs.map((job) => <tr key={job.id} className="border-t"><td className="p-3">{job.jobType}</td><td className="p-3">{job.status}</td><td className="p-3">{job.provider}</td><td className="p-3">{job.providerMode}</td><td className="p-3">{job.attempt}/{job.maxAttempts}</td><td className="p-3">{duration(job)}</td><td className="p-3 text-[var(--danger)]">{job.errorMessage || "—"}</td></tr>)}</tbody></table></div></details></Card>
+          <Card className="overflow-hidden"><details><summary className="cursor-pointer list-none p-5"><h2 className="font-semibold">高级信息与处理记录</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">仅在排查采集或转写问题时需要查看。</p></summary><div className="overflow-x-auto border-t"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-[var(--surface-elevated)] text-[var(--text-secondary)]"><tr><th className="p-3">任务</th><th className="p-3">状态</th><th className="p-3">服务</th><th className="p-3">模式</th><th className="p-3">尝试次数</th><th className="p-3">耗时</th><th className="p-3">错误</th></tr></thead><tbody>{source.ingestJobs.map((job) => <tr key={job.id} className="border-t"><td className="p-3">{job.jobType}</td><td className="p-3">{job.status}</td><td className="p-3">{job.provider}</td><td className="p-3">{job.providerMode}</td><td className="p-3">{job.attempt}/{job.maxAttempts}</td><td className="p-3">{duration(job)}</td><td className="p-3 text-[var(--danger)]">{job.errorMessage || "—"}</td></tr>)}</tbody></table></div>{Object.keys(transcriptTechnical).length ? <div className="border-t p-5"><h3 className="text-sm font-medium">高级处理信息</h3><pre className="mt-3 overflow-auto rounded-lg bg-[var(--surface-elevated)] p-3 text-xs">{JSON.stringify(transcriptTechnical, null, 2)}</pre></div> : null}</details></Card>
         </div>
         <SourceActions sourceId={source.id} status={source.status} failedJobId={source.status === "FAILED" ? latestIngestJob?.id : undefined} tags={source.tags.map(({ tag }) => tag)} availableTags={availableTags} collections={source.collections.map(({ collection }) => collection)} availableCollections={availableCollections} availableProjects={availableProjects} canManageProjects={role !== "VIEWER"} />
       </div>

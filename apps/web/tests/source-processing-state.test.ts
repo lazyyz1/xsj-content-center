@@ -9,7 +9,7 @@ describe("getSourceProcessingState", () => {
   it("reports saved video with unconfigured ASR without changing READY semantics", () => {
     expect(getSourceProcessingState({
       sourceStatus: "READY",
-      doubaoStatus: "UNCONFIGURED",
+      transcriptionStatus: "UNCONFIGURED",
       hasTranscript: false,
       assets: [storedVideo],
       jobs: [redfoxSucceeded],
@@ -21,7 +21,7 @@ describe("getSourceProcessingState", () => {
   });
 
   it("maps queued, audio extraction and transcription progress explicitly", () => {
-    const base = { sourceStatus: "READY", doubaoStatus: "CONFIGURED", hasTranscript: false, assets: [storedVideo], jobs: [redfoxSucceeded] } as const;
+    const base = { sourceStatus: "READY", transcriptionStatus: "CONFIGURED", hasTranscript: false, assets: [storedVideo], jobs: [redfoxSucceeded] } as const;
     expect(getSourceProcessingState(base).transcription).toBe("NOT_STARTED");
     expect(getSourceProcessingState({ ...base, jobs: [{ jobType: "TRANSCRIBE", provider: "DOUBAO_ASR", status: "QUEUED" }, ...base.jobs] }).transcription).toBe("QUEUED");
     expect(getSourceProcessingState({ ...base, jobs: [{ jobType: "TRANSCRIBE", provider: "DOUBAO_ASR", status: "RUNNING", metadata: { progressStage: "EXTRACTING_AUDIO" } }, ...base.jobs] }).transcription).toBe("EXTRACTING_AUDIO");
@@ -41,7 +41,7 @@ describe("getSourceProcessingState", () => {
   it("keeps an old transcript visible while exposing the latest retry failure", () => {
     expect(getSourceProcessingState({
       sourceStatus: "READY",
-      doubaoStatus: "CONFIGURED",
+      transcriptionStatus: "CONFIGURED",
       hasTranscript: true,
       assets: [storedVideo, storedAudio],
       jobs: [{ jobType: "TRANSCRIBE", provider: "DOUBAO_ASR", status: "FAILED" }, redfoxSucceeded],

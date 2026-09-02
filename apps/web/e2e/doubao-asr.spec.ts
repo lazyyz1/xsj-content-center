@@ -131,11 +131,13 @@ test("RedFox saved video automatically becomes a real Doubao transcript", async 
   await page.getByLabel("RedFox API Key").fill("redfox-e2e-key");
   await page.getByLabel("RedFox 配置").getByRole("button", { name: "保存配置" }).click();
   await page.getByLabel("豆包语音识别 API Key").fill(doubaoKey);
-  await page.getByText("高级设置").click();
-  await page.getByText("高级设置", { exact: true }).click();
+  await page.getByLabel("豆包语音识别 配置").getByText("高级设置", { exact: true }).click();
   await page.getByLabel("豆包语音识别 Base URL").fill(fixtureOrigin);
   await page.getByLabel("豆包语音识别 配置").getByRole("button", { name: "保存配置" }).click();
   await expect(page.getByLabel("豆包语音识别 已保存凭证")).toContainText(doubaoKey.slice(-4));
+  await page.getByLabel("语音转写配置").getByText("豆包云端", { exact: true }).click();
+  await page.getByLabel("语音转写配置").getByRole("button", { name: "保存转写设置" }).click();
+  await expect(page.getByLabel("语音转写配置").getByText("语音转写设置已保存。")).toBeVisible();
 
   await page.goto("/library");
   await page.getByRole("button", { name: "收录内容" }).click();

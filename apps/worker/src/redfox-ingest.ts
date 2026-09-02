@@ -316,8 +316,7 @@ export async function processRedFoxIngestJob(
         },
       }),
     ]);
-    const doubaoStatus = await getWorkspaceIntegrationStatus(record.workspaceId, "DOUBAO_ASR");
-    if (doubaoStatus.status === "CONFIGURED" && storedVideoAssetId) {
+    if (storedVideoAssetId) {
       try {
         await requestSourceTranscription({
           workspaceId: record.workspaceId,

@@ -5,6 +5,7 @@ import {
   isConfigurableIntegrationProvider,
   normalizePublicProviderConfig,
   parseProviderConfig,
+  providerRequiresSecret,
   primarySecretField,
   splitProviderConfig,
 } from "./schemas";
@@ -82,8 +83,10 @@ export class IntegrationService {
     const row = await this.prisma.integrationConfig.findUnique({
       where: { workspaceId_provider: { workspaceId, provider } },
     });
-    if (!row || row.status !== "CONFIGURED" || !row.encryptedConfig) return null;
-    const secretConfig = decryptConfig(row.encryptedConfig, parseMasterEncryptionKey(this.keySource()));
+    if (!row || row.status !== "CONFIGURED") return null;
+    const secretConfig = row.encryptedConfig
+      ? decryptConfig(row.encryptedConfig, parseMasterEncryptionKey(this.keySource()))
+      : {};
     const publicConfig = normalizePublicProviderConfig(provider, jsonObject(row.publicConfig));
     if (provider === "LLM") {
       const runtimeConfig = { ...publicConfig };
@@ -102,21 +105,22 @@ export class IntegrationService {
     config: unknown;
   }) {
     const parsed = parseProviderConfig(input.provider, input.config);
-    const key = parseMasterEncryptionKey(this.keySource());
+    const requiresSecret = providerRequiresSecret(input.provider);
+    const key = requiresSecret ? parseMasterEncryptionKey(this.keySource()) : null;
     const existing = await this.prisma.integrationConfig.findUnique({
       where: { workspaceId_provider: { workspaceId: input.workspaceId, provider: input.provider } },
     });
     const { publicConfig, secretConfig: suppliedSecrets } = splitProviderConfig(input.provider, parsed);
-    const existingSecrets = existing?.encryptedConfig ? decryptConfig(existing.encryptedConfig, key) : {};
+    const existingSecrets = existing?.encryptedConfig && key ? decryptConfig(existing.encryptedConfig, key) : {};
     const secretConfig = { ...existingSecrets, ...suppliedSecrets };
     const combinedConfig = { ...publicConfig, ...secretConfig };
     const primarySecret = primarySecretField(input.provider, combinedConfig);
-    const primaryValue = secretConfig[primarySecret];
-    if (typeof primaryValue !== "string" || !primaryValue) {
+    const primaryValue = primarySecret ? secretConfig[primarySecret] : undefined;
+    if (requiresSecret && (typeof primaryValue !== "string" || !primaryValue)) {
       throw new IntegrationServiceError("INTEGRATION_SECRET_REQUIRED", `${primarySecret} is required.`);
     }
-    const configured = typeof primaryValue === "string" && primaryValue.length > 0;
-    const encryptedConfig = Object.keys(secretConfig).length > 0 ? encryptConfig(secretConfig, key) : null;
+    const configured = requiresSecret ? typeof primaryValue === "string" && primaryValue.length > 0 : true;
+    const encryptedConfig = Object.keys(secretConfig).length > 0 && key ? encryptConfig(secretConfig, key) : null;
     const changedFields = Object.keys(parsed).sort();
     const status = configured ? "CONFIGURED" : "UNCONFIGURED";
 
@@ -130,7 +134,7 @@ export class IntegrationService {
           configured,
           publicConfig: inputJson(publicConfig),
           encryptedConfig,
-          lastFour: configured ? secretLastFour(primaryValue as string) : null,
+          lastFour: requiresSecret && configured ? secretLastFour(primaryValue as string) : null,
           encryptionKeyVersion: 1,
         },
         update: {
@@ -138,7 +142,7 @@ export class IntegrationService {
           configured,
           publicConfig: inputJson(publicConfig),
           encryptedConfig,
-          lastFour: configured ? secretLastFour(primaryValue as string) : null,
+          lastFour: requiresSecret && configured ? secretLastFour(primaryValue as string) : null,
           encryptionKeyVersion: 1,
         },
       });
@@ -180,10 +184,13 @@ export class IntegrationService {
     });
     if (!existing) throw new IntegrationServiceError("INTEGRATION_NOT_FOUND", "Integration does not exist.");
     let configured = false;
-    if (enabled && existing.encryptedConfig) {
+    if (enabled && !providerRequiresSecret(input.provider)) {
+      configured = true;
+    } else if (enabled && existing.encryptedConfig) {
       const secrets = decryptConfig(existing.encryptedConfig, parseMasterEncryptionKey(this.keySource()));
       const publicConfig = normalizePublicProviderConfig(input.provider, jsonObject(existing.publicConfig));
-      configured = typeof secrets[primarySecretField(input.provider, { ...publicConfig, ...secrets })] === "string";
+      const primarySecret = primarySecretField(input.provider, { ...publicConfig, ...secrets });
+      configured = Boolean(primarySecret && typeof secrets[primarySecret] === "string");
     }
     const status = enabled ? (configured ? "CONFIGURED" : "UNCONFIGURED") : "DISABLED";
     await this.prisma.$transaction([

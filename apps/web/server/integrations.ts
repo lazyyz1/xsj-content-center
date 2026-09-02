@@ -41,6 +41,12 @@ const providerDetails: Record<ConfigurableIntegrationProvider, { name: string; d
     usage: ["视频转文字"],
     defaults: { baseUrl: DOUBAO_DEFAULT_BASE_URL, resourceId: DOUBAO_DEFAULT_RESOURCE_ID },
   },
+  TRANSCRIPTION: {
+    name: "语音转写策略",
+    description: "选择本地免费转写或豆包云端服务，并设置本地质量目标。",
+    usage: ["视频转文字"],
+    defaults: { source: "LOCAL_FUNASR", qualityMode: "BALANCED" },
+  },
   LLM: {
     name: "Kimi AI",
     description: "用于素材分析、深度创作包、多平台内容生成和 AI 内容检查。",

@@ -1,5 +1,5 @@
 import { db, findSourceForUser } from "@content-center/db";
-import { DoubaoError } from "@content-center/providers";
+import { DoubaoError, LocalAsrError } from "@content-center/providers";
 import { requestSourceTranscription, TranscriptionAlreadyRunningError } from "@content-center/worker/transcription";
 import { NextResponse } from "next/server";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
@@ -32,6 +32,10 @@ export async function POST(_request: Request, route: { params: Promise<{ id: str
     }
     if (error instanceof DoubaoError) {
       return apiError(error.code, error.code === "DOUBAO_DISABLED" ? 409 : 400, error.message);
+    }
+    if (error instanceof LocalAsrError) {
+      const status = error.code === "LOCAL_ASR_NOT_RUNNING" ? 503 : 409;
+      return apiError(error.code, status, error.message);
     }
     if (error instanceof Error && error.message === "QUEUE_UNAVAILABLE") return apiError("QUEUE_UNAVAILABLE", 503, "转写队列暂时不可用。");
     return apiError("TRANSCRIPTION_REQUEST_FAILED", 500, "无法创建转写任务。");

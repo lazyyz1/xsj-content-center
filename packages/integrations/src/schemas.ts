@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const CONFIGURABLE_INTEGRATION_PROVIDERS = ["REDFOX", "DOUBAO_ASR", "LLM"] as const;
+export const CONFIGURABLE_INTEGRATION_PROVIDERS = ["REDFOX", "DOUBAO_ASR", "TRANSCRIPTION", "LLM"] as const;
 export type ConfigurableIntegrationProvider = (typeof CONFIGURABLE_INTEGRATION_PROVIDERS)[number];
 
 const optionalText = (max: number) =>
@@ -17,6 +17,11 @@ const optionalUrl = z.preprocess(
 export const DOUBAO_DEFAULT_BASE_URL = "https://openspeech.bytedance.com";
 export const DOUBAO_DEFAULT_RESOURCE_ID = "volc.bigasr.auc_turbo";
 export const DOUBAO_AUTH_MODES = ["API_KEY", "LEGACY_APP_TOKEN"] as const;
+export const TRANSCRIPTION_SOURCES = ["LOCAL_FUNASR", "DOUBAO"] as const;
+export const TRANSCRIPTION_QUALITY_MODES = ["FAST", "BALANCED", "QUALITY"] as const;
+export const TRANSCRIPTION_MODEL_SELECTION_MODES = ["AUTO", "MANUAL"] as const;
+export const LOCAL_TRANSCRIPTION_MODELS = ["SENSEVOICE_SMALL", "PARAFORMER_ZH", "FUN_ASR_NANO"] as const;
+export const LOCAL_ASR_DEFAULT_ENDPOINT = "http://127.0.0.1:8765";
 
 const optionalAuthMode = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
@@ -49,6 +54,26 @@ export const doubaoAsrConfigSchema = z
     resourceId: config.resourceId ?? DOUBAO_DEFAULT_RESOURCE_ID,
   }));
 
+export const transcriptionConfigSchema = z
+  .object({
+    source: z.enum(TRANSCRIPTION_SOURCES).default("LOCAL_FUNASR"),
+    qualityMode: z.enum(TRANSCRIPTION_QUALITY_MODES).default("BALANCED"),
+    selectionMode: z.enum(TRANSCRIPTION_MODEL_SELECTION_MODES).default("AUTO"),
+    manualModel: z.enum(LOCAL_TRANSCRIPTION_MODELS).optional(),
+    fallbackToDoubao: z.boolean().default(false),
+    endpoint: z.string().trim().url().max(2_000).default(LOCAL_ASR_DEFAULT_ENDPOINT),
+  })
+  .strict()
+  .superRefine((config, context) => {
+    const endpoint = new URL(config.endpoint);
+    if (!(["127.0.0.1", "localhost", "::1"].includes(endpoint.hostname)) || endpoint.protocol !== "http:") {
+      context.addIssue({ code: "custom", path: ["endpoint"], message: "Local ASR endpoint must use loopback HTTP." });
+    }
+    if (config.selectionMode === "MANUAL" && !config.manualModel) {
+      context.addIssue({ code: "custom", path: ["manualModel"], message: "Manual model is required." });
+    }
+  });
+
 export const llmConfigSchema = z
   .object({
     provider: z.string().trim().min(1).max(100),
@@ -75,18 +100,23 @@ export const llmConfigSchema = z
 export const providerConfigSchemas = {
   REDFOX: redfoxConfigSchema,
   DOUBAO_ASR: doubaoAsrConfigSchema,
+  TRANSCRIPTION: transcriptionConfigSchema,
   LLM: llmConfigSchema,
 } as const;
 
 export const providerConfigFields: Record<
   ConfigurableIntegrationProvider,
-  { publicFields: readonly string[]; secretFields: readonly string[]; primarySecret: string }
+  { publicFields: readonly string[]; secretFields: readonly string[]; primarySecret?: string }
 > = {
   REDFOX: { publicFields: ["baseUrl"], secretFields: ["apiKey"], primarySecret: "apiKey" },
   DOUBAO_ASR: {
     publicFields: ["authMode", "baseUrl", "appId", "resourceId", "boostingTableId", "boostingTableName"],
     secretFields: ["apiKey", "accessToken"],
     primarySecret: "apiKey",
+  },
+  TRANSCRIPTION: {
+    publicFields: ["source", "qualityMode", "selectionMode", "manualModel", "fallbackToDoubao", "endpoint"],
+    secretFields: [],
   },
   LLM: { publicFields: ["provider", "baseUrl", "label", "modelId"], secretFields: ["apiKey"], primarySecret: "apiKey" },
 };
@@ -125,6 +155,10 @@ export function primarySecretField(
     return config.authMode === "LEGACY_APP_TOKEN" ? "accessToken" : "apiKey";
   }
   return providerConfigFields[provider].primarySecret;
+}
+
+export function providerRequiresSecret(provider: ConfigurableIntegrationProvider) {
+  return providerConfigFields[provider].secretFields.length > 0;
 }
 
 export function isConfigurableIntegrationProvider(value: string): value is ConfigurableIntegrationProvider {

@@ -109,6 +109,29 @@ describe("IntegrationService integration", () => {
     await expect(service.getDecryptedIntegrationConfig(workspaceId, "DOUBAO_ASR")).resolves.toMatchObject({ apiKey });
   });
 
+  it("stores the transcription product policy without requiring or fabricating a secret", async () => {
+    const result = await service.saveIntegrationConfig({
+      workspaceId,
+      userId,
+      provider: "TRANSCRIPTION",
+      config: { source: "LOCAL_FUNASR", qualityMode: "BALANCED", selectionMode: "AUTO", fallbackToDoubao: false },
+    });
+    expect(result).toMatchObject({
+      status: "CONFIGURED",
+      configured: true,
+      lastFour: null,
+      publicConfig: { source: "LOCAL_FUNASR", qualityMode: "BALANCED", selectionMode: "AUTO", fallbackToDoubao: false },
+    });
+    const stored = await db.integrationConfig.findUniqueOrThrow({
+      where: { workspaceId_provider: { workspaceId, provider: "TRANSCRIPTION" } },
+    });
+    expect(stored.encryptedConfig).toBeNull();
+    await expect(service.getDecryptedIntegrationConfig(workspaceId, "TRANSCRIPTION")).resolves.toMatchObject({
+      source: "LOCAL_FUNASR",
+      qualityMode: "BALANCED",
+    });
+  });
+
   it("preserves the RedFox secret when only Base URL changes", async () => {
     const result = await service.saveIntegrationConfig({
       workspaceId,

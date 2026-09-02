@@ -24,7 +24,7 @@ export class IntegrationSecretError extends Error {
   }
 }
 
-export function parseMasterEncryptionKey(value = process.env.INTEGRATION_ENCRYPTION_KEY): Buffer {
+export function parseMasterEncryptionKey(value?: string): Buffer {
   if (!value?.trim()) {
     throw new IntegrationSecretError(
       "INTEGRATION_ENCRYPTION_NOT_CONFIGURED",

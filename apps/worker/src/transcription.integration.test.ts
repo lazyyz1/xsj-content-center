@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { db } from "@content-center/db";
 import { IntegrationService } from "@content-center/integrations";
-import { minioStorageFromEnv } from "@content-center/providers";
+import { LocalAsrError, minioStorageFromEnv } from "@content-center/providers";
 import { QueueEvents } from "bullmq";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -16,7 +16,7 @@ import {
   TRANSCRIBE_SOURCE,
   TRANSCRIBE_SOURCE_QUEUE,
 } from "./queue";
-import { requestSourceTranscription, TranscriptionAlreadyRunningError } from "./transcription";
+import { requestSourceTranscription, resolveWorkspaceTranscriptionPlan, TranscriptionAlreadyRunningError } from "./transcription";
 
 const execFileAsync = promisify(execFile);
 
@@ -84,6 +84,12 @@ describe("TRANSCRIBE_SOURCE integration", () => {
       provider: "DOUBAO_ASR",
       config: { authMode: "API_KEY", baseUrl: fixtureOrigin, apiKey },
     });
+    await new IntegrationService().saveIntegrationConfig({
+      workspaceId,
+      userId,
+      provider: "TRANSCRIPTION",
+      config: { source: "DOUBAO", qualityMode: "BALANCED", selectionMode: "AUTO", fallbackToDoubao: false },
+    });
     await Promise.all([worker.waitUntilReady(), events.waitUntilReady()]);
   });
 
@@ -104,6 +110,50 @@ describe("TRANSCRIBE_SOURCE integration", () => {
     await db.$disconnect();
     if (originalEncryptionKey === undefined) delete process.env.INTEGRATION_ENCRYPTION_KEY;
     else process.env.INTEGRATION_ENCRYPTION_KEY = originalEncryptionKey;
+  });
+
+  it("never falls back implicitly and uses Doubao only when the workspace explicitly enables fallback", async () => {
+    const service = new IntegrationService();
+    try {
+      await service.saveIntegrationConfig({
+        workspaceId,
+        userId,
+        provider: "TRANSCRIPTION",
+        config: {
+          source: "LOCAL_FUNASR",
+          qualityMode: "BALANCED",
+          selectionMode: "AUTO",
+          fallbackToDoubao: false,
+          endpoint: "http://127.0.0.1:1",
+        },
+      });
+      await expect(resolveWorkspaceTranscriptionPlan(workspaceId)).rejects.toBeInstanceOf(LocalAsrError);
+
+      await service.saveIntegrationConfig({
+        workspaceId,
+        userId,
+        provider: "TRANSCRIPTION",
+        config: {
+          source: "LOCAL_FUNASR",
+          qualityMode: "BALANCED",
+          selectionMode: "AUTO",
+          fallbackToDoubao: true,
+          endpoint: "http://127.0.0.1:1",
+        },
+      });
+      await expect(resolveWorkspaceTranscriptionPlan(workspaceId)).resolves.toMatchObject({
+        provider: "DOUBAO_ASR",
+        fallbackToDoubao: true,
+        fallbackUsed: true,
+      });
+    } finally {
+      await service.saveIntegrationConfig({
+        workspaceId,
+        userId,
+        provider: "TRANSCRIPTION",
+        config: { source: "DOUBAO", qualityMode: "BALANCED", selectionMode: "AUTO", fallbackToDoubao: false },
+      });
+    }
   });
 
   it("runs VIDEO STORED through FFmpeg, MinIO, Doubao and Transcript", async () => {

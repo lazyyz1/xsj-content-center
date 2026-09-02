@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 type Integration = {
-  provider: "REDFOX" | "DOUBAO_ASR" | "LLM" | "STORAGE";
+  provider: "REDFOX" | "DOUBAO_ASR" | "TRANSCRIPTION" | "LLM" | "STORAGE";
   name: string;
   status: "CONFIGURED" | "UNCONFIGURED" | "ERROR" | "DISABLED" | "MOCK";
   configured: boolean;

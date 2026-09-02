@@ -27,6 +27,7 @@ export function assertFlashAudioLimits(input: { sizeBytes: number; durationMs: n
 }
 
 type ProcessorOptions = { ffmpegPath?: string; ffprobePath?: string };
+type ExtractAudioOptions = { limits?: "DOUBAO_FLASH" | "NONE" };
 
 async function runProcess(command: string, args: string[], failureCode: MediaProcessorErrorCode) {
   return new Promise<string>((resolve, reject) => {
@@ -62,7 +63,7 @@ export class FFmpegMediaProcessor {
     await runProcess(this.ffprobePath, ["-version"], "FFMPEG_NOT_AVAILABLE");
   }
 
-  async extractAudio(input: string) {
+  async extractAudio(input: string, options: ExtractAudioOptions = {}) {
     const directory = await mkdtemp(join(tmpdir(), "content-center-asr-"));
     const outputPath = join(directory, "audio.mp3");
     const cleanup = () => rm(directory, { recursive: true, force: true });
@@ -92,7 +93,7 @@ export class FFmpegMediaProcessor {
       }
       const file = await stat(outputPath);
       const result = { path: outputPath, sizeBytes: file.size, durationMs: Math.round(durationSeconds * 1_000), cleanup };
-      assertFlashAudioLimits(result);
+      if ((options.limits ?? "DOUBAO_FLASH") === "DOUBAO_FLASH") assertFlashAudioLimits(result);
       return result;
     } catch (error) {
       await cleanup();

@@ -16,6 +16,7 @@
 - pnpm `11.19.0`
 - Docker + Docker Compose
 - FFmpeg 及 FFprobe（本阶段验证：`9.0`，需要 MP3 编码能力）
+- 可选本地 ASR：Python `3.11`；NVIDIA GPU 建议使用 CUDA 版 PyTorch
 
 ## First Run
 
@@ -38,6 +39,7 @@ Web 默认运行在 `http://localhost:3000`，MinIO Console 默认运行在 `htt
 | PostgreSQL | Auth、Workspace、素材、采集任务、标签、Collection、AuditLog | `55432`（容器内 `5432`） |
 | Redis | BullMQ 队列 | `6379` |
 | MinIO | S3-compatible 对象存储 | `9000` / `9001` |
+| Local ASR | localhost-only FunASR 语音转写 | `8765` |
 
 ## Commands
 
@@ -45,6 +47,10 @@ Web 默认运行在 `http://localhost:3000`，MinIO Console 默认运行在 `htt
 pnpm dev
 pnpm dev:web
 pnpm dev:worker
+pnpm dev:asr
+
+pnpm asr:fixtures
+pnpm asr:benchmark
 
 pnpm lint
 pnpm typecheck
@@ -103,6 +109,8 @@ RedFox 通过 Workspace Integration 配置使用，不读取 `REDFOX_API_KEY` �
 
 Doubao ASR 默认使用新版控制台 API Key 和 `volc.bigasr.auc_turbo`，也兼容旧版 App ID + Access Token。凭证同样只从 Workspace 加密配置读取。官方没有无需音频的轻量 health endpoint，因此不会用付费识别伪装连接测试。协议与限制见 [`docs/doubao-asr.md`](docs/doubao-asr.md)。
 
+免费本地语音转写由 localhost-only FunASR 服务提供。本地模型没有 API 调用费用，但会消耗本机 CPU/GPU、内存和磁盘。普通用户只选择「速度优先 / 均衡推荐 / 质量优先」，具体模型依本机 benchmark 由 Resolver 决定。安装、实测结果和资源消耗见 [`docs/local-asr.md`](docs/local-asr.md)。
+
 Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 `8.0.0-rc`，而 Better Auth 官方明确支持 Prisma 6；这里优先稳定和兼容，不追逐 RC。
 
 ## What Works
@@ -125,6 +133,7 @@ Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 
 - `ApiUsage` 对每次 RedFox `PARSE_WORK` 调用记录 1 unit；官方未返回成本时 `cost = null`。
 - READY 抖音 canonical URL 在同一 Workspace 内禁止重复收录，避免重复调用；FAILED 素材可显式重试。
 - `TRANSCRIBE_SOURCE` 独立队列：已保存视频通过 FFmpeg 提取 MP3（mono / 16 kHz / 64 kbps），落入私有 MinIO 后调用真实 DoubaoTranscriptionProvider。
+- 同一 `TRANSCRIBE_SOURCE` 队列支持默认免费本地 FunASR；`TranscriptionQualityResolver` 根据硬件、已安装模型和本机 benchmark 解析质量档，本地失败不会默认转豆包。
 - Doubao 支持公网 Signed URL 和受控小文件 `audio.data` 两条输入路径；localhost 不会作为远端音频地址交给云端。
 - Transcript 显式标记 `DOUBAO_ASR / REAL`，展示全文和毫秒分段；允许 OWNER/ADMIN/EDITOR 转写或重新转写，VIEWER 只读。
 - 重新转写复用 STORED AUDIO；旧 Transcript 仅在新结果成功后替换，失败时保留。

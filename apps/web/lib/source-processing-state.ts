@@ -11,7 +11,7 @@ export type TranscriptionState =
 
 type SourceProcessingInput = {
   sourceStatus: "PENDING" | "PROCESSING" | "READY" | "FAILED" | "ARCHIVED";
-  doubaoStatus?: "UNCONFIGURED" | "CONFIGURED" | "DISABLED" | "MOCK" | "ERROR";
+  transcriptionStatus?: "UNCONFIGURED" | "CONFIGURED" | "DISABLED" | "MOCK" | "ERROR";
   hasTranscript: boolean;
   assets: ReadonlyArray<{ assetType: "VIDEO" | "IMAGE" | "AUDIO"; status: "REMOTE" | "DOWNLOADING" | "STORED" | "FAILED" }>;
   jobs: ReadonlyArray<{
@@ -45,7 +45,7 @@ export function getSourceProcessingState(input: SourceProcessingInput) {
   const failedVideo = input.assets.some((asset) => asset.assetType === "VIDEO" && asset.status === "FAILED");
   const storedAudio = input.assets.some((asset) => asset.assetType === "AUDIO" && asset.status === "STORED");
   const failedAudio = input.assets.some((asset) => asset.assetType === "AUDIO" && asset.status === "FAILED");
-  const doubaoConfigured = input.doubaoStatus === "CONFIGURED";
+  const transcriptionConfigured = input.transcriptionStatus === "CONFIGURED";
   const stage = progressStage(transcriptionJob?.metadata);
 
   let transcription: TranscriptionState;
@@ -54,7 +54,7 @@ export function getSourceProcessingState(input: SourceProcessingInput) {
   else if (transcriptionJob?.status === "RUNNING" && (stage === "EXTRACTING_AUDIO" || stage === "UPLOADING_AUDIO")) transcription = "EXTRACTING_AUDIO";
   else if (transcriptionJob?.status === "RUNNING") transcription = "TRANSCRIBING";
   else if (transcriptionJob?.status === "SUCCEEDED" || input.hasTranscript) transcription = "SUCCEEDED";
-  else if (!doubaoConfigured) transcription = "NOT_CONFIGURED";
+  else if (!transcriptionConfigured) transcription = "NOT_CONFIGURED";
   else transcription = "NOT_STARTED";
 
   const redfoxParse: ProcessingStepState = redfoxJob?.status === "FAILED"
@@ -79,7 +79,7 @@ export function getSourceProcessingState(input: SourceProcessingInput) {
 
   const audioExtraction: ProcessingStepState = storedAudio
     ? "SUCCEEDED"
-    : !doubaoConfigured || videoSave === "FAILED" || videoSave === "SKIPPED"
+    : !transcriptionConfigured || videoSave === "FAILED" || videoSave === "SKIPPED"
       ? "SKIPPED"
       : failedAudio || (transcription === "FAILED" && !storedAudio)
         ? "FAILED"
@@ -93,7 +93,7 @@ export function getSourceProcessingState(input: SourceProcessingInput) {
       ? "FAILED"
       : transcription === "SUCCEEDED"
         ? "SUCCEEDED"
-        : !doubaoConfigured || videoSave === "FAILED" || videoSave === "SKIPPED"
+        : !transcriptionConfigured || videoSave === "FAILED" || videoSave === "SKIPPED"
           ? "SKIPPED"
         : transcription === "TRANSCRIBING" || transcription === "EXTRACTING_AUDIO"
           ? "PROCESSING"

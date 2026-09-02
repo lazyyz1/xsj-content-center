@@ -47,4 +47,24 @@ describe("provider config schemas", () => {
       model: "legacy-model-id",
     })).toMatchObject({ label: "自定义模型", modelId: "legacy-model-id" });
   });
+
+  it("stores product-level transcription choices without exposing model routing", () => {
+    expect(parseProviderConfig("TRANSCRIPTION", {})).toEqual({
+      source: "LOCAL_FUNASR",
+      qualityMode: "BALANCED",
+      selectionMode: "AUTO",
+      fallbackToDoubao: false,
+      endpoint: "http://127.0.0.1:8765",
+    });
+    const parsed = parseProviderConfig("TRANSCRIPTION", {
+      source: "LOCAL_FUNASR",
+      qualityMode: "QUALITY",
+      selectionMode: "MANUAL",
+      manualModel: "FUN_ASR_NANO",
+      fallbackToDoubao: true,
+      endpoint: "http://localhost:8765",
+    });
+    expect(splitProviderConfig("TRANSCRIPTION", parsed)).toEqual({ publicConfig: parsed, secretConfig: {} });
+    expect(() => parseProviderConfig("TRANSCRIPTION", { endpoint: "http://192.168.1.10:8765" })).toThrow();
+  });
 });
