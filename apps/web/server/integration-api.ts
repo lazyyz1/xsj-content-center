@@ -26,8 +26,8 @@ export function integrationApiError(error: unknown) {
     const status = error.code === "INTEGRATION_NOT_FOUND" ? 404 : error.code === "INTEGRATION_SECRET_REQUIRED" ? 400 : 404;
     return apiError(error.code, status, error.message);
   }
-  if (error instanceof ZodError) return apiError("INVALID_INTEGRATION_CONFIG", 400, "Integration configuration is invalid.");
-  return apiError("INTEGRATION_OPERATION_FAILED", 500, "Integration operation failed.");
+  if (error instanceof ZodError) return apiError("INVALID_INTEGRATION_CONFIG", 400, "配置内容格式不正确。");
+  return apiError("INTEGRATION_OPERATION_FAILED", 500, "配置操作失败。");
 }
 
 export function noContent() {

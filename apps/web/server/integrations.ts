@@ -2,9 +2,12 @@ import "server-only";
 
 import {
   CONFIGURABLE_INTEGRATION_PROVIDERS,
+  DOUBAO_DEFAULT_BASE_URL,
+  DOUBAO_DEFAULT_RESOURCE_ID,
   IntegrationService,
   type ConfigurableIntegrationProvider,
 } from "@content-center/integrations";
+import { REDFOX_DEFAULT_BASE_URL } from "@content-center/providers";
 
 export type IntegrationDisplayStatus = "CONFIGURED" | "UNCONFIGURED" | "ERROR" | "DISABLED" | "MOCK";
 
@@ -17,16 +20,33 @@ export type IntegrationDisplay = {
   lastFour: string | null;
   updatedAt: string | null;
   description: string;
+  usage: readonly string[];
+  defaults: Record<string, string>;
   managedBy: "WORKSPACE" | "ENVIRONMENT";
   connectionTest: "UNSUPPORTED_UNTIL_PROVIDER_STAGE" | "LIVE_API_TEST_NOT_AVAILABLE" | "NOT_APPLICABLE";
 };
 
 const service = new IntegrationService();
 
-const providerDetails: Record<ConfigurableIntegrationProvider, { name: string; description: string }> = {
-  REDFOX: { name: "红狐 API", description: "Workspace 级抖音作品解析凭证；当前为真实 Provider。" },
-  DOUBAO_ASR: { name: "豆包 ASR", description: "Workspace 级豆包录音文件极速版转写凭证；当前为真实 Provider。" },
-  LLM: { name: "LLM", description: "Workspace 级 OpenAI-compatible 模型凭证；生成请求由服务端 Adapter 发起。" },
+const providerDetails: Record<ConfigurableIntegrationProvider, { name: string; description: string; usage: readonly string[]; defaults: Record<string, string> }> = {
+  REDFOX: {
+    name: "RedFox",
+    description: "解析抖音等平台素材，获取视频和内容信息。",
+    usage: ["抖音素材收录"],
+    defaults: { baseUrl: REDFOX_DEFAULT_BASE_URL },
+  },
+  DOUBAO_ASR: {
+    name: "豆包语音识别",
+    description: "将视频中的语音转写为文字稿。",
+    usage: ["视频转文字"],
+    defaults: { baseUrl: DOUBAO_DEFAULT_BASE_URL, resourceId: DOUBAO_DEFAULT_RESOURCE_ID },
+  },
+  LLM: {
+    name: "Kimi AI",
+    description: "用于素材分析、深度创作包、多平台内容生成和 AI 内容检查。",
+    usage: ["内容拆解", "深度创作包", "多平台生成", "AI 审核"],
+    defaults: { provider: "kimi" },
+  },
 };
 
 function hasEvery(...keys: string[]): boolean {
@@ -66,6 +86,8 @@ export async function getIntegrationStatuses(workspaceId: string): Promise<Integ
       lastFour: null,
       updatedAt: null,
       description: "S3-compatible 对象存储，由服务端环境变量管理。",
+      usage: ["素材文件与音视频保存"],
+      defaults: {},
       managedBy: "ENVIRONMENT",
       connectionTest: "NOT_APPLICABLE",
     },

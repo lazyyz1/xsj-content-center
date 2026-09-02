@@ -127,14 +127,15 @@ test("RedFox saved video automatically becomes a real Doubao transcript", async 
   await expect(page).toHaveURL(/\/dashboard$/);
 
   await page.goto("/settings/integrations");
-  await page.getByLabel("红狐 API Base URL").fill(fixtureOrigin);
-  await page.getByLabel("红狐 API API Key").fill("redfox-e2e-key");
-  await page.getByRole("button", { name: "保存红狐 API" }).click();
-  await page.getByLabel("豆包 ASR API Key").fill(doubaoKey);
+  await page.getByLabel("RedFox Base URL").fill(fixtureOrigin);
+  await page.getByLabel("RedFox API Key").fill("redfox-e2e-key");
+  await page.getByLabel("RedFox 配置").getByRole("button", { name: "保存配置" }).click();
+  await page.getByLabel("豆包语音识别 API Key").fill(doubaoKey);
   await page.getByText("高级设置").click();
-  await page.getByLabel("豆包 ASR Base URL").fill(fixtureOrigin);
-  await page.getByRole("button", { name: "保存豆包 ASR" }).click();
-  await expect(page.getByLabel("豆包 ASR 已保存凭证")).toContainText(`••••${doubaoKey.slice(-4)}`);
+  await page.getByText("高级设置", { exact: true }).click();
+  await page.getByLabel("豆包语音识别 Base URL").fill(fixtureOrigin);
+  await page.getByLabel("豆包语音识别 配置").getByRole("button", { name: "保存配置" }).click();
+  await expect(page.getByLabel("豆包语音识别 已保存凭证")).toContainText(doubaoKey.slice(-4));
 
   await page.goto("/library");
   await page.getByRole("button", { name: "收录内容" }).click();

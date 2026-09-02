@@ -33,12 +33,18 @@ describe("provider config schemas", () => {
     expect(splitProviderConfig("DOUBAO_ASR", parsed).secretConfig).toEqual({ accessToken: "legacy-token" });
   });
 
-  it("validates the reserved LLM configuration without invoking it", () => {
+  it("keeps the Kimi display label separate from its API model ID", () => {
     expect(parseProviderConfig("LLM", {
-      provider: "openai-compatible",
+      provider: "kimi",
       baseUrl: "https://example.invalid/v1",
       apiKey: "fake-key",
-      model: "example-model",
-    })).toMatchObject({ provider: "openai-compatible", model: "example-model" });
+      label: "Kimi 2.7",
+      modelId: "confirmed-model-id",
+    })).toMatchObject({ provider: "kimi", label: "Kimi 2.7", modelId: "confirmed-model-id" });
+    expect(parseProviderConfig("LLM", {
+      provider: "legacy-compatible",
+      baseUrl: "https://example.invalid/v1",
+      model: "legacy-model-id",
+    })).toMatchObject({ label: "自定义模型", modelId: "legacy-model-id" });
   });
 });

@@ -83,6 +83,8 @@ pnpm db:studio
 
 Workspace Provider 凭证使用 `INTEGRATION_ENCRYPTION_KEY` 加密。该值必须是随机生成的 32-byte base64 key，不得使用可猜测文本，也不得提交到 Git。
 
+生产环境和 Workspace 使用的 RedFox、豆包语音识别、Kimi AI 凭证，建议由 OWNER / ADMIN 在后台「设置 → AI 与外部服务」中配置。Provider 相关环境变量仅用于开发、测试或系统基础配置，不是正式 Workspace 业务凭证的首选来源。
+
 生成新 key：
 
 ```bash
@@ -95,7 +97,7 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
 INTEGRATION_ENCRYPTION_KEY=
 ```
 
-Key 缺失时，服务不会回退到明文保存，设置页会显示 `Secret encryption is not configured.`。Key 格式或长度错误会明确失败。轮换流程见 [`docs/security/integration-secrets.md`](docs/security/integration-secrets.md)。
+Key 缺失时，服务不会回退到明文保存，设置页会明确提示密钥加密服务尚未配置。Key 格式或长度错误会明确失败。轮换流程见 [`docs/security/integration-secrets.md`](docs/security/integration-secrets.md)。
 
 RedFox 通过 Workspace Integration 配置使用，不读取 `REDFOX_API_KEY` 环境变量。官方当前未公开无需作品 URL 的轻量鉴权/健康端点，因此设置页只确认 `CONFIG_VALID`，明确显示 `LIVE_API_TEST_NOT_AVAILABLE`，不会为了“测试连接”自动解析或产生调用。
 
@@ -114,7 +116,7 @@ Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 
 - Web 创建 `SYSTEM_HEALTH_CHECK`，Redis/BullMQ Worker 消费并完成任务。
 - MinIO 上传、Signed URL 和删除。
 - Dashboard 的计数来自 Workspace 范围内的数据库查询；空库显示真实的 `0`。
-- Integration 页面从 Workspace `IntegrationConfig` 读取 RedFox、Doubao、LLM 状态，支持 OWNER/ADMIN 保存、Disable、Enable 和 Delete；API 只返回 public config 与 `lastFour`。
+- 「AI 与外部服务」页面从 Workspace `IntegrationConfig` 读取 RedFox、豆包语音识别、Kimi AI 状态，支持 OWNER/ADMIN 保存、禁用、启用和删除；API 只返回公开配置与 `lastFour`。
 - Provider secret 通过 AES-256-GCM、随机 IV 和认证标签加密保存；Worker 使用同一 Workspace scoped IntegrationService 解密入口。
 - Storage 继续由服务端环境变量管理，并明确显示 `Environment Managed`。
 - RedFoxSourceProvider：只开放明确的抖音作品链接/分享文案，使用 Workspace 解密后的 API Key 调用真实 RedFox 解析协议。

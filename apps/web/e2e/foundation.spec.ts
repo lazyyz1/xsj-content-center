@@ -51,8 +51,8 @@ test("register → onboarding → dashboard → integrations → logout → logi
   await page.getByRole("link", { name: "设置" }).click();
   await page.getByRole("link", { name: "AI 与外部服务" }).click();
   await expect(page.getByRole("heading", { name: "AI 与外部服务" })).toBeVisible();
-  await expect(page.getByText("Unconfigured").first()).toBeVisible();
-  await expect(page.getByText("Configured").first()).toBeVisible();
+  await expect(page.getByText("未配置").first()).toBeVisible();
+  await expect(page.getByText("已配置").first()).toBeVisible();
 
   await page.getByRole("button", { name: "退出登录" }).click();
   await expect(page).toHaveURL(/\/login$/);

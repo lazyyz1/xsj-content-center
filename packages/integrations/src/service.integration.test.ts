@@ -7,6 +7,7 @@ describe("IntegrationService integration", () => {
   const runId = randomUUID();
   const userId = `integration-admin-${runId}`;
   const plaintext = `fake-admin-secret-${randomUUID()}`;
+  const replacementSecret = `replacement-secret-${randomUUID()}`;
   const key = randomBytes(32).toString("base64");
   const service = new IntegrationService(db, () => key);
   let workspaceId = "";
@@ -106,5 +107,85 @@ describe("IntegrationService integration", () => {
     expect(stored.encryptedConfig).not.toContain(apiKey);
     expect(JSON.stringify(stored.publicConfig)).not.toContain(apiKey);
     await expect(service.getDecryptedIntegrationConfig(workspaceId, "DOUBAO_ASR")).resolves.toMatchObject({ apiKey });
+  });
+
+  it("preserves the RedFox secret when only Base URL changes", async () => {
+    const result = await service.saveIntegrationConfig({
+      workspaceId,
+      userId,
+      provider: "REDFOX",
+      config: { baseUrl: "https://changed.example.invalid" },
+    });
+    expect(result).toMatchObject({ publicConfig: { baseUrl: "https://changed.example.invalid" }, lastFour: plaintext.slice(-4) });
+    await expect(service.getDecryptedIntegrationConfig(workspaceId, "REDFOX")).resolves.toEqual({
+      baseUrl: "https://changed.example.invalid",
+      apiKey: plaintext,
+    });
+  });
+
+  it("replaces the RedFox secret and updates lastFour without exposing plaintext", async () => {
+    const result = await service.saveIntegrationConfig({
+      workspaceId,
+      userId,
+      provider: "REDFOX",
+      config: { baseUrl: "https://changed.example.invalid", apiKey: replacementSecret },
+    });
+    expect(result.lastFour).toBe(replacementSecret.slice(-4));
+    expect(JSON.stringify(result)).not.toContain(replacementSecret);
+    const stored = await db.integrationConfig.findUniqueOrThrow({
+      where: { workspaceId_provider: { workspaceId, provider: "REDFOX" } },
+    });
+    expect(stored.encryptedConfig).not.toContain(replacementSecret);
+    const audits = await db.auditLog.findMany({ where: { workspaceId, resourceId: stored.id } });
+    expect(JSON.stringify(audits)).not.toContain(replacementSecret);
+  });
+
+  it("stores Kimi label and model ID while adapting the model ID for the existing LLM runtime", async () => {
+    const apiKey = `kimi-${randomUUID()}`;
+    const result = await service.saveIntegrationConfig({
+      workspaceId,
+      userId,
+      provider: "LLM",
+      config: {
+        provider: "kimi",
+        baseUrl: "https://kimi.example.invalid/v1",
+        apiKey,
+        label: "Kimi 2.7",
+        modelId: "workspace-confirmed-model-id",
+      },
+    });
+    expect(result).toMatchObject({
+      publicConfig: { provider: "kimi", label: "Kimi 2.7", modelId: "workspace-confirmed-model-id" },
+      lastFour: apiKey.slice(-4),
+    });
+    expect(JSON.stringify(result)).not.toContain(apiKey);
+    await expect(service.getDecryptedIntegrationConfig(workspaceId, "LLM")).resolves.toEqual({
+      provider: "kimi",
+      baseUrl: "https://kimi.example.invalid/v1",
+      apiKey,
+      model: "workspace-confirmed-model-id",
+    });
+  });
+
+  it("isolates provider configuration by Workspace", async () => {
+    const otherUserId = `other-integration-${runId}`;
+    const otherSecret = `other-workspace-${randomUUID()}`;
+    await db.user.create({ data: { id: otherUserId, name: "Other Admin", email: `${otherUserId}@example.test` } });
+    const otherWorkspace = await db.workspace.create({
+      data: { name: "Other Integration Test", slug: `other-${runId}`, members: { create: { userId: otherUserId, role: "OWNER" } } },
+    });
+    try {
+      await service.saveIntegrationConfig({
+        workspaceId: otherWorkspace.id,
+        userId: otherUserId,
+        provider: "REDFOX",
+        config: { baseUrl: "https://other.example.invalid", apiKey: otherSecret },
+      });
+      await expect(service.getDecryptedIntegrationConfig(workspaceId, "REDFOX")).resolves.toMatchObject({ apiKey: replacementSecret });
+      await expect(service.getDecryptedIntegrationConfig(otherWorkspace.id, "REDFOX")).resolves.toEqual({ baseUrl: "https://other.example.invalid", apiKey: otherSecret });
+    } finally {
+      await db.workspace.delete({ where: { id: otherWorkspace.id } });
+      await db.user.delete({ where: { id: otherUserId } });
+    }
   });
 });

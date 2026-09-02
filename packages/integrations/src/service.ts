@@ -78,13 +78,21 @@ export class IntegrationService {
     return this.getIntegrationStatus(workspaceId, provider);
   }
 
-  async getDecryptedIntegrationConfig(workspaceId: string, provider: ConfigurableIntegrationProvider) {
+  async getDecryptedIntegrationConfig(workspaceId: string, provider: ConfigurableIntegrationProvider): Promise<Record<string, unknown> | null> {
     const row = await this.prisma.integrationConfig.findUnique({
       where: { workspaceId_provider: { workspaceId, provider } },
     });
     if (!row || row.status !== "CONFIGURED" || !row.encryptedConfig) return null;
     const secretConfig = decryptConfig(row.encryptedConfig, parseMasterEncryptionKey(this.keySource()));
-    return { ...jsonObject(row.publicConfig), ...secretConfig };
+    const publicConfig = normalizePublicProviderConfig(provider, jsonObject(row.publicConfig));
+    if (provider === "LLM") {
+      const runtimeConfig = { ...publicConfig };
+      const modelId = runtimeConfig.modelId;
+      delete runtimeConfig.label;
+      delete runtimeConfig.modelId;
+      return { ...runtimeConfig, ...secretConfig, model: modelId };
+    }
+    return { ...publicConfig, ...secretConfig };
   }
 
   async saveIntegrationConfig(input: {

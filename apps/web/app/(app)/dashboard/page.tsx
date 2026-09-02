@@ -1,13 +1,17 @@
 import { Button, Card } from "@content-center/ui";
-import { ArrowRight, CheckCircle2, FolderPlus, LibraryBig, Send } from "lucide-react";
+import { ArrowRight, CheckCircle2, FolderPlus, LibraryBig, Send, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { PageHeader } from "@/components/page";
 import { requireWorkspace } from "@/server/access";
 import { getDashboardCounts } from "@/server/dashboard";
+import { getIntegrationStatuses } from "@/server/integrations";
 
 export default async function DashboardPage() {
   const { workspace } = await requireWorkspace();
-  const counts = await getDashboardCounts(workspace.id);
+  const [counts, integrations] = await Promise.all([getDashboardCounts(workspace.id), getIntegrationStatuses(workspace.id)]);
+  const missingServices = integrations
+    .filter((integration) => integration.provider !== "STORAGE" && integration.status !== "CONFIGURED" && integration.status !== "MOCK")
+    .map((integration) => integration.name);
   const metrics = [
     ["素材", counts.materials],
     ["内容项目", counts.projects],
@@ -24,6 +28,12 @@ export default async function DashboardPage() {
   return (
     <>
       <PageHeader title="今天从哪里开始？" description="查看真实进度，并继续下一步内容工作。" />
+      {missingServices.length > 0 ? (
+        <Link href="/settings/integrations" className="mb-6 flex items-center justify-between gap-4 rounded-2xl border bg-[var(--surface)] p-4 transition-colors hover:border-[var(--accent)] sm:p-5">
+          <div className="flex items-start gap-3"><Settings2 size={19} className="mt-0.5 shrink-0 text-[var(--accent)]" /><div><p className="text-sm font-medium">完成 AI 服务配置</p><p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">尚未就绪：{missingServices.join("、")}。可按实际使用需要逐项配置。</p></div></div>
+          <ArrowRight size={17} className="shrink-0 text-[var(--text-secondary)]" />
+        </Link>
+      ) : null}
       <section aria-label="内容概览" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {metrics.map(([label, value]) => (
           <Card key={label} className="p-5">

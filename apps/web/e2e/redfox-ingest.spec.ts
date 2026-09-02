@@ -85,11 +85,11 @@ test("OWNER configures RedFox and ingests a Douyin video into private MinIO stor
   expect(parseCalls).toBe(0);
 
   await page.goto("/settings/integrations");
-  await page.getByLabel("红狐 API Base URL").fill(fixtureOrigin);
-  await page.getByLabel("红狐 API API Key").fill("ak_redfox_e2e_fixture");
-  await page.getByRole("button", { name: "保存红狐 API" }).click();
+  await page.getByLabel("RedFox Base URL").fill(fixtureOrigin);
+  await page.getByLabel("RedFox API Key").fill("ak_redfox_e2e_fixture");
+  await page.getByLabel("RedFox 配置").getByRole("button", { name: "保存配置" }).click();
   await expect(page.getByRole("button", { name: "配置格式有效 · 无轻量 Live Test" }).first()).toBeVisible();
-  await page.getByRole("button", { name: "Disable" }).first().click();
+  await page.getByLabel("RedFox 配置").getByRole("button", { name: "禁用" }).click();
   await expect(page.getByText("Disabled", { exact: true }).first()).toBeVisible();
 
   await page.goto("/library");
@@ -101,8 +101,8 @@ test("OWNER configures RedFox and ingests a Douyin video into private MinIO stor
   expect(parseCalls).toBe(0);
 
   await page.goto("/settings/integrations");
-  await page.getByRole("button", { name: "Enable" }).first().click();
-  await expect(page.getByRole("button", { name: "Disable" }).first()).toBeVisible();
+  await page.getByLabel("RedFox 配置").getByRole("button", { name: "启用" }).click();
+  await expect(page.getByLabel("RedFox 配置").getByRole("button", { name: "禁用" })).toBeVisible();
   await page.goto("/library");
   await page.getByRole("button", { name: "收录内容" }).click();
   await page.getByRole("button", { name: "抖音视频" }).click();

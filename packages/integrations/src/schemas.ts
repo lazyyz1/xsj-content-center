@@ -54,9 +54,23 @@ export const llmConfigSchema = z
     provider: z.string().trim().min(1).max(100),
     baseUrl: z.string().trim().url().max(2_000),
     apiKey: optionalText(10_000),
-    model: z.string().trim().min(1).max(200),
+    label: optionalText(100),
+    modelId: optionalText(200),
+    model: optionalText(200),
   })
-  .strict();
+  .strict()
+  .superRefine((config, context) => {
+    if (!config.modelId && !config.model) {
+      context.addIssue({ code: "custom", path: ["modelId"], message: "Model ID is required." });
+    }
+  })
+  .transform((config) => ({
+    provider: config.provider,
+    baseUrl: config.baseUrl,
+    ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+    label: config.label ?? "自定义模型",
+    modelId: config.modelId ?? config.model!,
+  }));
 
 export const providerConfigSchemas = {
   REDFOX: redfoxConfigSchema,
@@ -74,13 +88,23 @@ export const providerConfigFields: Record<
     secretFields: ["apiKey", "accessToken"],
     primarySecret: "apiKey",
   },
-  LLM: { publicFields: ["provider", "baseUrl", "model"], secretFields: ["apiKey"], primarySecret: "apiKey" },
+  LLM: { publicFields: ["provider", "baseUrl", "label", "modelId"], secretFields: ["apiKey"], primarySecret: "apiKey" },
 };
 
 export function normalizePublicProviderConfig(
   provider: ConfigurableIntegrationProvider,
   config: Record<string, unknown>,
 ) {
+  if (provider === "LLM") {
+    const modelId = typeof config.modelId === "string" ? config.modelId : config.model;
+    const rest = { ...config };
+    delete rest.model;
+    return {
+      ...rest,
+      label: typeof config.label === "string" ? config.label : "自定义模型",
+      ...(typeof modelId === "string" ? { modelId } : {}),
+    };
+  }
   if (provider !== "DOUBAO_ASR") return config;
   const authMode = config.authMode === "LEGACY_APP_TOKEN" || (!config.authMode && config.appId)
     ? "LEGACY_APP_TOKEN"
