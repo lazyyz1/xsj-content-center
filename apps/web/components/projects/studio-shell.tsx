@@ -14,7 +14,7 @@ import { DeepContentWorkspace, type MotherSnapshot, type PackageView } from "./d
 
 type Source = {
   role: string;
-  sourceItem: { id: string; title: string | null; sourcePlatform: string; sourceType: string; rawText: string | null; transcript: { fullText: string } | null; materialAnalysis: { topic: string | null; coreViewpoint: string | null } | null };
+  sourceItem: { id: string; title: string | null; sourcePlatform: string; sourceType: string; rawText: string | null; transcript: { fullText: string } | null; materialAnalysis: { version: number; suggestedTitle: string | null; summary: string | null; topic: string | null; targetAudience: string | null; coreViewpoint: string | null; keyPoints: string[]; coreQuestion: string | null } | null };
 };
 type Evidence = { id: string; type: string; excerpt: string | null; claim: string | null; note: string | null; sourceItemId: string | null; sourceItem: { title: string | null } | null };
 type AvailableSource = { id: string; title: string | null; sourcePlatform: string; sourceType: string };
@@ -30,7 +30,7 @@ export function StudioShell({ project, availableSources, editable, ai }: {
     audience: string | null;
     sources: Source[];
     evidenceItems: Evidence[];
-    creativeBrief: { topic: string; angle: string; audience: string; coreMessage: string; keyPoints: string[]; structure: string[]; tone: string; risks: string[]; version: number };
+    creativeBrief: { topic: string; angle: string; audience: string; coreMessage: string; coreQuestion: string; background: string; keyPoints: string[]; structure: string[]; tone: string; risks: string[]; version: number; initializedFromMaterialAnalysis: boolean; analysisUpdateAvailable: boolean };
     motherContent: MotherSnapshot;
     deepContentPackage: PackageView | null;
     platformVariants: PlatformVariantView[];

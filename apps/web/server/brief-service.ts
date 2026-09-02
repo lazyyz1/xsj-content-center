@@ -17,6 +17,8 @@ export type BriefInput = {
   angle: string;
   audience: string;
   coreMessage: string;
+  coreQuestion?: string;
+  background?: string;
   keyPoints: string[];
   structure: string[];
   tone: string;
@@ -40,6 +42,8 @@ export async function saveBrief(input: { workspaceId: string; userId: string; pr
             angle: input.data.angle.trim(),
             audience: input.data.audience.trim(),
             coreMessage: input.data.coreMessage.trim(),
+            ...(input.data.coreQuestion !== undefined ? { coreQuestion: input.data.coreQuestion.trim() || null } : {}),
+            ...(input.data.background !== undefined ? { background: input.data.background.trim() || null } : {}),
             keyPoints: input.data.keyPoints,
             structure: input.data.structure,
             tone: input.data.tone.trim(),
@@ -59,6 +63,8 @@ export async function saveBrief(input: { workspaceId: string; userId: string; pr
             angle: input.data.angle.trim(),
             audience: input.data.audience.trim(),
             coreMessage: input.data.coreMessage.trim(),
+            coreQuestion: input.data.coreQuestion?.trim() || null,
+            background: input.data.background?.trim() || null,
             keyPoints: input.data.keyPoints,
             structure: input.data.structure,
             tone: input.data.tone.trim(),
@@ -74,7 +80,7 @@ export async function saveBrief(input: { workspaceId: string; userId: string; pr
           action: "brief.updated",
           resourceType: "creative_brief",
           resourceId: brief.id,
-          metadata: { projectId: project.id, resourceId: brief.id, changedFields: ["topic", "angle", "audience", "coreMessage", "keyPoints", "structure", "tone", "risks"] },
+          metadata: { projectId: project.id, resourceId: brief.id, changedFields: ["topic", "angle", "audience", "coreMessage", ...(input.data.coreQuestion !== undefined ? ["coreQuestion"] : []), ...(input.data.background !== undefined ? ["background"] : []), "keyPoints", "structure", "tone", "risks"] },
         },
       });
       return brief;

@@ -888,10 +888,13 @@ model CreativeBrief {
   angle       String
   audience    String
   coreMessage String
+  coreQuestion String?
+  background   String?
   keyPoints   Json
   structure   Json
   tone        String
   risks       Json
+  metadata    Json?
   version     Int            @default(1)
   createdById String
   createdAt   DateTime       @default(now())

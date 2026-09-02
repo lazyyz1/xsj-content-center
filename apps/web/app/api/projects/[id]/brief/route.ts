@@ -9,6 +9,8 @@ const schema = z.object({
   angle: z.string().max(5_000),
   audience: z.string().max(2_000),
   coreMessage: z.string().max(10_000),
+  coreQuestion: z.string().max(5_000).optional(),
+  background: z.string().max(10_000).optional(),
   keyPoints: z.array(z.string().max(5_000)).max(100),
   structure: z.array(z.string().max(5_000)).max(100),
   tone: z.string().max(2_000),

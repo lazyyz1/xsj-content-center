@@ -7,6 +7,7 @@ import { executeStructuredAIRun } from "../ai/ai-run-service";
 import { loadLLMRuntime, type LLMRuntime } from "../ai/llm-runtime";
 import { renderPrompt, selectPromptTemplate } from "../ai/prompt-service";
 import { createProject } from "../project-service";
+import { MaterialAnalysisToBriefMapper, type MaterialAnalysisBriefDraft } from "./brief-mapper";
 import { buildMaterialAnalysisContext, MaterialAnalysisContextError } from "./context-builder";
 import { materialAnalysisEditSchema, materialAnalysisOutputInstruction, materialAnalysisOutputSchema, type MaterialAnalysisOutput } from "./schemas";
 
@@ -160,12 +161,40 @@ export async function updateMaterialAnalysis(input: { workspaceId: string; sourc
   return toMaterialAnalysisDTO(updated, source.transcript?.updatedAt);
 }
 
+async function initializeExistingProjectBrief(input: { workspaceId: string; projectId: string; sourceItemId: string; userId: string; draft: MaterialAnalysisBriefDraft }) {
+  try {
+    return await db.$transaction(async (tx) => {
+      const project = await tx.contentProject.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId, sources: { some: { sourceItemId: input.sourceItemId } } }, select: { id: true } });
+      if (!project) throw new MaterialAnalysisError("SOURCE_NOT_FOUND", "项目或主素材不存在。");
+      const existing = await tx.creativeBrief.findUnique({ where: { projectId: project.id }, select: { id: true } });
+      if (existing) return false;
+      const brief = await tx.creativeBrief.create({ data: { workspaceId: input.workspaceId, projectId: project.id, createdById: input.userId, ...input.draft } });
+      await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "brief.initialized", resourceType: "creative_brief", resourceId: brief.id, metadata: { projectId: project.id, source: "MATERIAL_ANALYSIS", primarySourceItemId: input.sourceItemId } } });
+      return true;
+    });
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "P2002") return false;
+    throw error;
+  }
+}
+
 export async function createProjectFromMaterial(input: { workspaceId: string; sourceItemId: string; userId: string }) {
   const source = await scopedSource(input.workspaceId, input.sourceItemId);
-  const existing = await db.projectSource.findFirst({ where: { sourceItemId: source.id, project: { workspaceId: input.workspaceId, status: { not: "ARCHIVED" } } }, orderBy: { createdAt: "desc" }, select: { projectId: true } });
-  if (existing) return { projectId: existing.projectId, created: false };
   const latest = await db.materialAnalysis.findFirst({ where: { workspaceId: input.workspaceId, sourceItemId: source.id, status: "COMPLETED" }, orderBy: { version: "desc" } });
-  if (!latest) throw new MaterialAnalysisError("ANALYSIS_NOT_FOUND", "请先完成智能整理。");
-  const project = await createProject({ workspaceId: input.workspaceId, userId: input.userId, sourceItemId: source.id, title: latest.suggestedTitle || source.title || "未命名内容项目", description: latest.summary || undefined, audience: latest.targetAudience || undefined });
-  return { projectId: project.id, created: true };
+  const existing = await db.projectSource.findFirst({
+    where: { sourceItemId: source.id, project: { workspaceId: input.workspaceId, status: { not: "ARCHIVED" } } },
+    orderBy: { createdAt: "desc" },
+    select: { project: { select: { id: true, title: true, audience: true, creativeBrief: { select: { id: true } } } } },
+  });
+  if (existing) {
+    if (!latest || existing.project.creativeBrief) return { projectId: existing.project.id, created: false, briefInitialized: false };
+    const draft = MaterialAnalysisToBriefMapper.map({ analysis: latest, source, project: existing.project });
+    const briefInitialized = await initializeExistingProjectBrief({ workspaceId: input.workspaceId, projectId: existing.project.id, sourceItemId: source.id, userId: input.userId, draft });
+    return { projectId: existing.project.id, created: false, briefInitialized };
+  }
+  const title = latest?.suggestedTitle || source.title || "未命名内容项目";
+  const audience = latest?.targetAudience || undefined;
+  const initialBrief = latest ? MaterialAnalysisToBriefMapper.map({ analysis: latest, source, project: { title, audience: audience ?? null } }) : undefined;
+  const project = await createProject({ workspaceId: input.workspaceId, userId: input.userId, sourceItemId: source.id, title, description: latest?.summary || undefined, audience, initialBrief });
+  return { projectId: project.id, created: true, briefInitialized: Boolean(initialBrief) };
 }

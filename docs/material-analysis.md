@@ -51,6 +51,12 @@ AI tags 首先只保存在 `MaterialAnalysis`。用户明确保存编辑结果�
 
 运行时统一经过 Workspace LLM Adapter、`AIRun` 和 `ApiUsage`，并保持 `KIMI_2_6_ONLY`。前端不能传模型。未配置时页面明确显示未配置状态；产品环境不会用 fixture 或 deterministic 文本冒充 AI 结果。
 
+## 接入创作工作台
+
+用户点击“基于这条素材创作”时，服务端复用当前项目创建流程，把最新一版已完成的 `MaterialAnalysis` 映射为初始 `CreativeBrief`。项目、主素材关联和初始简报在同一个数据库事务中创建；该过程只读取已保存的整理结果，不再次调用 Kimi 或 RedFox。
+
+映射只覆盖有直接来源的事实字段：选题、目标受众、核心问题、素材核心观点、关键要点和参考内容摘要。切入角度、内容结构、语气与风险点保持空白，交给创作者填写。完整映射、来源追踪和不覆盖规则见 [material-studio-handoff.md](./material-studio-handoff.md)。
+
 ## 后续 Structure Analysis
 
 未来结构分析只能读取已校验的 `MaterialAnalysisDTO` 和明确的来源数据，使用新的业务对象与 PromptType；不得把 Hook、结构、CTA 或二创方案回填进本对象。

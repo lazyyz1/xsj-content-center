@@ -6,6 +6,7 @@ vi.mock("server-only", () => ({}));
 import { db } from "@content-center/db";
 import { MockLLMProvider } from "@content-center/providers";
 import { analyzeMaterial, createProjectFromMaterial, getMaterialAnalysis, updateMaterialAnalysis } from "../server/material-analysis/service";
+import { readMaterialAnalysisBriefMetadata } from "../server/material-analysis/brief-mapper";
 import { materialAnalysisOutputSchema } from "../server/material-analysis/schemas";
 
 describe("V1.2B-1 smart material analysis", () => {
@@ -91,11 +92,37 @@ describe("V1.2B-1 smart material analysis", () => {
     expect((await getMaterialAnalysis({ workspaceId: workspaceAId, sourceItemId: sourceAId })).current?.stale).toBe(true);
   });
 
-  it("creates one project from the material and reuses it", async () => {
+  it("creates one project and brief from the primary material without extra AI calls or later overwrite", async () => {
+    const aiRunsBefore = await db.aIRun.count({ where: { workspaceId: workspaceAId } });
+    const usageBefore = await db.apiUsage.count({ where: { workspaceId: workspaceAId } });
+    const sourceAnalysis = await db.materialAnalysis.findFirstOrThrow({ where: { workspaceId: workspaceAId, sourceItemId: sourceAId, status: "COMPLETED" }, orderBy: { version: "desc" } });
     const first = await createProjectFromMaterial({ workspaceId: workspaceAId, sourceItemId: sourceAId, userId: userAId });
-    const second = await createProjectFromMaterial({ workspaceId: workspaceAId, sourceItemId: sourceAId, userId: userAId });
-    expect(first.created).toBe(true); expect(second).toEqual({ projectId: first.projectId, created: false });
+    expect(first).toMatchObject({ created: true, briefInitialized: true });
     await expect(db.projectSource.findFirst({ where: { projectId: first.projectId, sourceItemId: sourceAId } })).resolves.toBeTruthy();
+    const initialBrief = await db.creativeBrief.findUniqueOrThrow({ where: { projectId: first.projectId } });
+    expect(initialBrief).toMatchObject({ topic: sourceAnalysis.topic, audience: sourceAnalysis.targetAudience, coreMessage: sourceAnalysis.coreViewpoint, coreQuestion: sourceAnalysis.coreQuestion, background: sourceAnalysis.summary, angle: "", structure: [], tone: "" });
+    expect(initialBrief.keyPoints).toEqual(sourceAnalysis.keyPoints);
+    const provenance = readMaterialAnalysisBriefMetadata(initialBrief.metadata);
+    expect(provenance).toMatchObject({ primarySourceItemId: sourceAId, initializedFromMaterialAnalysisId: sourceAnalysis.id, materialAnalysisVersion: sourceAnalysis.version });
+    expect(await db.aIRun.count({ where: { workspaceId: workspaceAId } })).toBe(aiRunsBefore);
+    expect(await db.apiUsage.count({ where: { workspaceId: workspaceAId } })).toBe(usageBefore);
+
+    await db.creativeBrief.update({ where: { id: initialBrief.id }, data: { audience: "人工修改受众", coreQuestion: "人工修改问题", version: { increment: 1 } } });
+    const latest = await db.materialAnalysis.findFirstOrThrow({ where: { workspaceId: workspaceAId, sourceItemId: sourceAId }, orderBy: { version: "desc" } });
+    await db.materialAnalysis.create({ data: { workspaceId: workspaceAId, sourceItemId: sourceAId, createdById: userAId, version: latest.version + 1, status: "COMPLETED", suggestedTitle: "新版标题", summary: "新版摘要", topic: "新版主题", tags: [], keywords: [], targetAudience: "新版受众", coreViewpoint: "新版观点", keyPoints: ["新版要点"], coreQuestion: "新版问题", transcriptUpdatedAtAtAnalysis: latest.transcriptUpdatedAtAtAnalysis } });
+    const second = await createProjectFromMaterial({ workspaceId: workspaceAId, sourceItemId: sourceAId, userId: userAId });
+    expect(second).toEqual({ projectId: first.projectId, created: false, briefInitialized: false });
+    await expect(db.creativeBrief.findUniqueOrThrow({ where: { id: initialBrief.id } })).resolves.toMatchObject({ audience: "人工修改受众", coreQuestion: "人工修改问题", topic: sourceAnalysis.topic });
+    expect(readMaterialAnalysisBriefMetadata((await db.creativeBrief.findUniqueOrThrow({ where: { id: initialBrief.id } })).metadata)?.materialAnalysisVersion).toBe(provenance?.materialAnalysisVersion);
+  });
+
+  it("keeps no-analysis projects compatible and enforces workspace isolation", async () => {
+    const first = await createProjectFromMaterial({ workspaceId: workspaceBId, sourceItemId: sourceBId, userId: userBId });
+    expect(first).toMatchObject({ created: true, briefInitialized: false });
+    await expect(db.creativeBrief.findUnique({ where: { projectId: first.projectId } })).resolves.toBeNull();
+    const second = await createProjectFromMaterial({ workspaceId: workspaceBId, sourceItemId: sourceBId, userId: userBId });
+    expect(second).toEqual({ projectId: first.projectId, created: false, briefInitialized: false });
+    await expect(createProjectFromMaterial({ workspaceId: workspaceAId, sourceItemId: sourceBId, userId: userAId })).rejects.toMatchObject({ code: "SOURCE_NOT_FOUND" });
   });
 
   it("enforces workspace scope and never enables product MOCK results", async () => {

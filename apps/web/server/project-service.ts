@@ -24,6 +24,20 @@ export type ProjectListQuery = {
   review?: string;
 };
 
+export type InitialCreativeBrief = {
+  topic: string;
+  angle: string;
+  audience: string;
+  coreMessage: string;
+  coreQuestion: string;
+  background: string;
+  keyPoints: string[];
+  structure: string[];
+  tone: string;
+  risks: string[];
+  metadata: Prisma.InputJsonValue;
+};
+
 export async function listProjects(workspaceId: string, query: ProjectListQuery) {
   const page = Math.max(1, Number(query.page) || 1);
   const pageSize = Math.min(50, Math.max(1, Number(query.pageSize) || 12));
@@ -79,6 +93,7 @@ export async function createProject(input: {
   goal?: string;
   audience?: string;
   sourceItemId?: string;
+  initialBrief?: InitialCreativeBrief;
 }) {
   const source = input.sourceItemId
     ? await db.sourceItem.findFirst({ where: { id: input.sourceItemId, workspaceId: input.workspaceId }, select: { id: true } })
@@ -124,6 +139,26 @@ export async function createProject(input: {
           resourceType: "project_source",
           resourceId: relation.id,
           metadata: { projectId: project.id, sourceItemId: source.id, role: "REFERENCE" },
+        },
+      });
+    }
+    if (input.initialBrief) {
+      const brief = await tx.creativeBrief.create({
+        data: {
+          workspaceId: input.workspaceId,
+          projectId: project.id,
+          createdById: input.userId,
+          ...input.initialBrief,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          workspaceId: input.workspaceId,
+          userId: input.userId,
+          action: "brief.initialized",
+          resourceType: "creative_brief",
+          resourceId: brief.id,
+          metadata: { projectId: project.id, source: "MATERIAL_ANALYSIS" },
         },
       });
     }
