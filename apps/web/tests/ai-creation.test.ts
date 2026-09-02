@@ -76,11 +76,12 @@ describe("AI creation engine", () => {
 
   it("keeps AI output in preview until explicit apply or discard", async () => {
     let motherPrompt = "";
+    let motherCalls = 0;
     const fixture = (input: { prompt: string }) => {
       if (input.prompt.includes("EXTRACT_EVIDENCE")) return { items: [{ type: "FACT", excerpt: "Supported excerpt", claim: "Supported claim", note: "", sourceItemId: sourceId }] };
       if (input.prompt.includes("GENERATE_ANGLES")) return { angles: [{ title: "Evidence-first angle", angle: "Start from a failed shortcut", coreMessage: "Evidence improves originality", whyItWorks: "Concrete", targetAudience: "Teams", recommendedStructure: ["Failure", "Evidence", "Method"], risk: "Avoid absolutes", evidenceIds: [], sourceItemIds: [sourceId] }] };
       if (input.prompt.includes("GENERATE_BRIEF")) return { topic: "AI content workflow", angle: "Evidence first", audience: "Teams", coreMessage: "Build from evidence", keyPoints: ["Collect", "Verify", "Write"], structure: ["Hook", "Method", "CTA"], tone: "Direct", risks: ["No invented facts"], evidenceIds: [], sourceItemIds: [sourceId] };
-      if (input.prompt.includes("GENERATE_MOTHER_CONTENT")) { motherPrompt = input.prompt; return { title: "Evidence before drafting", outline: ["Hook", "Method"], body: "Mother body", evidenceIds: [], sourceItemIds: [sourceId] }; }
+      if (input.prompt.includes("GENERATE_MOTHER_CONTENT")) { motherCalls += 1; motherPrompt = input.prompt; return { title: "Evidence before drafting", outline: ["Hook", "Method"], body: "Mother body", evidenceIds: [], sourceItemIds: [sourceId] }; }
       if (input.prompt.includes("HUMANIZE")) return { original: "Mother body", aiVersion: "A more natural mother body" };
       return { topics: ["AI workflow"], coreClaims: [], facts: [], cases: [], questions: [], hooks: [], structures: [], risks: [], reusableInsights: [] };
     };
@@ -94,12 +95,18 @@ describe("AI creation engine", () => {
     const briefRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "GENERATE_BRIEF" }, { runtime });
     await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: briefRun.id, expectedVersion: 1 });
     const motherRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "GENERATE_MOTHER_CONTENT" }, { runtime });
+    expect(motherCalls).toBe(1);
     expect(motherPrompt).toContain("Material summary");
     expect(motherPrompt).toContain("Unified interpretation");
     expect(motherPrompt).toContain("not source paraphrasing");
     expect(motherPrompt).toContain("Never invent the creator's personal experience");
     expect(motherPrompt).toContain("Do not reproduce source speech inside quotation marks");
     expect(motherPrompt).toContain("do not repeat its exact number");
+    expect(motherPrompt).toContain("External writing method");
+    expect(motherPrompt).toContain("叙事机制指纹");
+    expect(motherPrompt).toContain("The external writing method above, for organization and expression only");
+    expect(motherPrompt).not.toMatch(/contract lifecycle|onboarding|growth|monetization/i);
+    await expect(db.aIRun.findUniqueOrThrow({ where: { id: motherRun.id } })).resolves.toMatchObject({ metadata: expect.objectContaining({ writingMethodSource: "ip-strategist", writingMethodVersion: "v2.2.0", writingMethodSections: expect.any(Array) }) });
     await expect(db.motherContent.findUnique({ where: { projectId } })).resolves.toBeNull();
     await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: motherRun.id, expectedVersion: 0 });
     await saveMotherContent({ workspaceId: workspaceAId, userId: userAId, projectId, data: { title: "Human edited V1", body: "Human work must survive", outline: ["Edited"], expectedVersion: 1 } });
