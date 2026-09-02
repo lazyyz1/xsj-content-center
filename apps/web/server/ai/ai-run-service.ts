@@ -20,7 +20,7 @@ function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.st
 function publicError(error: unknown, runtime: LLMRuntime) {
   if (error instanceof LLMError && runtime.productModel === "KIMI_2_6") {
     if (error.code === "LLM_AUTH_FAILED") return new LLMError("KIMI_AUTH_FAILED", "Kimi 2.6 认证失败，请检查 API 配置。", false, error.details);
-    if (error.code === "LLM_GENERATION_FAILED" && (error.details.httpStatus === 400 || error.details.httpStatus === 404)) {
+    if (error.code === "LLM_GENERATION_FAILED" && error.details.httpStatus === 404) {
       return new LLMError("KIMI_MODEL_UNAVAILABLE", "当前 Kimi 2.6 模型配置不可用，请检查 Model ID。", false, error.details);
     }
   }

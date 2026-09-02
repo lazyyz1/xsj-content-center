@@ -334,11 +334,13 @@ export function getIdea(workspaceId: string, ideaId: string) {
   return db.contentIdea.findFirst({ where: { id: ideaId, workspaceId }, include: { references: { orderBy: { createdAt: "desc" }, include: { trendSnapshot: true } }, project: { select: { id: true } } } });
 }
 
-export async function createIdea(input: { workspaceId: string; userId: string; title: string; description?: string; reference?: ExternalContentInput }) {
+export async function createIdea(input: { workspaceId: string; userId: string; title: string; description?: string; reference?: ExternalContentInput; sourceItemId?: string }) {
   const creatorProfile = await db.creatorProfile.findUnique({ where: { workspaceId_userId: { workspaceId: input.workspaceId, userId: input.userId } }, select: { id: true } });
+  const source = input.sourceItemId ? await db.sourceItem.findFirst({ where: { id: input.sourceItemId, workspaceId: input.workspaceId }, select: { id: true } }) : null;
+  if (input.sourceItemId && !source) throw new DiscoveryServiceError("DISCOVERY_NOT_FOUND", "素材不存在。");
   return db.$transaction(async (tx) => {
     const idea = await tx.contentIdea.create({ data: { workspaceId: input.workspaceId, creatorProfileId: creatorProfile?.id, title: input.title, description: input.description || null, createdById: input.userId } });
-    if (input.reference) await tx.contentIdeaReference.create({ data: referenceData(idea.id, input.reference) });
+    if (input.reference) await tx.contentIdeaReference.create({ data: { ...referenceData(idea.id, input.reference), sourceItemId: source?.id } });
     await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "discovery.idea_created", resourceType: "content_idea", resourceId: idea.id, metadata: { hasReference: Boolean(input.reference) } } });
     return idea;
   });

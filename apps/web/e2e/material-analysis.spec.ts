@@ -78,20 +78,28 @@ test("material detail supports analyze, edit, tags, reanalysis, project handoff 
 
   await page.goto(`/library/${source.id}`);
   const card = page.getByTestId("material-analysis-card");
+  for (const tab of ["整理", "信息", "创作", "处理"]) await expect(page.getByRole("tab", { name: tab })).toBeVisible();
+  for (const tab of ["信息", "创作", "处理", "整理"]) await page.getByRole("tab", { name: tab }).click();
+  expect(calls).toBe(0);
+  await expect(page.getByTestId("transcript-scroll-region")).toHaveCSS("overflow-y", "auto");
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  await page.getByLabel("编辑转写全文").fill("内容团队常常收集很多视频；编辑后的转写仍应保留在固定高度工作区。 ");
+  await page.getByRole("button", { name: "保存转写" }).click();
+  await expect(page.getByTestId("transcript-scroll-region")).toContainText("编辑后的转写仍应保留");
   await expect(card).toContainText("尚未整理");
   await page.getByRole("button", { name: "开始智能整理" }).click();
   await expect(card).toContainText("已智能整理");
   await expect(card).toContainText("先整理素材，再开始创作");
   expect(calls).toBe(1);
 
-  await page.getByRole("button", { name: "编辑整理结果" }).click();
+  await page.getByRole("button", { name: "编辑整理" }).click();
   await page.getByLabel("主题").fill("人工确认后的主题");
   await page.getByLabel("标签（逗号分隔，最多 8 个）").fill("素材整理，人工标签，人工标签");
   await page.getByRole("button", { name: "保存修改" }).click();
   await expect(card).toContainText("人工确认后的主题");
   await expect(db.contentTag.findFirst({ where: { workspaceId: membership.workspaceId, slug: "人工标签" } })).resolves.toBeTruthy();
 
-  await page.getByRole("button", { name: "重新智能整理" }).click();
+  await page.getByRole("button", { name: "重新整理" }).click();
   await expect(card).toContainText("当前版本不会删除");
   await page.getByRole("button", { name: "确认重新整理" }).click();
   await expect(card).toContainText("第二版：先整理素材，再开始创作");
@@ -100,11 +108,14 @@ test("material detail supports analyze, edit, tags, reanalysis, project handoff 
   for (const viewport of [{ width: 375, height: 812 }, { width: 430, height: 932 }]) {
     await page.setViewportSize(viewport);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-    await expect(card).toBeVisible();
+    await page.getByRole("button", { name: "素材工作栏" }).click();
+    await expect(page.getByRole("dialog", { name: "素材工作栏" })).toBeVisible();
+    await page.getByRole("button", { name: "关闭", exact: true }).click();
   }
   await page.setViewportSize({ width: 1280, height: 900 });
 
   const callsBeforeProject = calls;
+  await page.getByRole("tab", { name: "创作" }).click();
   await page.getByRole("button", { name: "基于这条素材创作" }).click();
   await expect(page).toHaveURL(/\/projects\/.+\/studio$/);
   const projectId = page.url().match(/\/projects\/([^/]+)\/studio$/)?.[1];
@@ -134,7 +145,7 @@ test("material detail supports analyze, edit, tags, reanalysis, project handoff 
   await expect(page.getByLabel("核心问题")).toHaveValue("人工确认后真正要解决什么？");
 
   await page.goto(`/library/${source.id}`);
-  await page.getByRole("button", { name: "重新智能整理" }).click();
+  await page.getByRole("button", { name: "重新整理" }).click();
   await page.getByRole("button", { name: "确认重新整理" }).click();
   await expect.poll(() => db.materialAnalysis.count({ where: { sourceItemId: source.id, status: "COMPLETED" } })).toBe(3);
   await expect(page.getByTestId("material-analysis-card")).toContainText("第二版：先整理素材，再开始创作");
@@ -155,9 +166,11 @@ test("material detail supports analyze, edit, tags, reanalysis, project handoff 
   expect(forbiddenBrief.status()).toBe(403);
   await page.goto(`/library/${source.id}`);
   await expect(page.getByTestId("material-analysis-card")).toContainText("第二版：先整理素材，再开始创作");
-  await expect(page.getByRole("button", { name: "编辑整理结果" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "编辑整理" })).toHaveCount(0);
   const forbidden = await page.request.post(`/api/source-items/${source.id}/material-analysis`);
   expect(forbidden.status()).toBe(403);
+  const forbiddenTranscript = await page.request.put(`/api/source-items/${source.id}/transcript`, { data: { fullText: "VIEWER 不允许修改" } });
+  expect(forbiddenTranscript.status()).toBe(403);
 });
 
 test("unconfigured Kimi is explicit and never creates a fake analysis", async ({ page }) => {

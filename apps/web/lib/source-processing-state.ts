@@ -80,24 +80,24 @@ export function getSourceProcessingState(input: SourceProcessingInput) {
 
   const audioExtraction: ProcessingStepState = storedAudio
     ? "SUCCEEDED"
+    : transcription === "EXTRACTING_AUDIO"
+      ? "PROCESSING"
+      : transcription === "TRANSCRIBING" || transcription === "SUCCEEDED"
+        ? "SUCCEEDED"
     : !transcriptionConfigured || videoSave === "FAILED" || videoSave === "SKIPPED"
       ? "SKIPPED"
       : failedAudio || (transcription === "FAILED" && !storedAudio)
         ? "FAILED"
-        : transcription === "EXTRACTING_AUDIO"
-          ? "PROCESSING"
-          : transcription === "TRANSCRIBING" || transcription === "SUCCEEDED"
-            ? "SUCCEEDED"
-            : "WAITING";
+        : "WAITING";
 
   const aiTranscription: ProcessingStepState = transcription === "FAILED"
       ? "FAILED"
       : transcription === "SUCCEEDED"
         ? "SUCCEEDED"
+        : transcription === "QUEUED" || transcription === "TRANSCRIBING" || transcription === "EXTRACTING_AUDIO"
+          ? "PROCESSING"
         : !transcriptionConfigured || videoSave === "FAILED" || videoSave === "SKIPPED"
           ? "SKIPPED"
-        : transcription === "TRANSCRIBING" || transcription === "EXTRACTING_AUDIO"
-          ? "PROCESSING"
           : "WAITING";
 
   const libraryLabel = storedVideo

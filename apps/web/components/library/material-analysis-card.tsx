@@ -45,13 +45,15 @@ async function request(url: string, method: string, body?: unknown) {
   return result;
 }
 
-export function MaterialAnalysisCard({ sourceId, current: initial, canEdit, llmStatus, canConfigure, hasTranscript }: {
+export function MaterialAnalysisCard({ sourceId, current: initial, canEdit, llmStatus, canConfigure, hasTranscript, embedded = false, showCreateAction = true }: {
   sourceId: string;
   current: MaterialAnalysisDTO | null;
   canEdit: boolean;
   llmStatus: string;
   canConfigure: boolean;
   hasTranscript: boolean;
+  embedded?: boolean;
+  showCreateAction?: boolean;
 }) {
   const router = useRouter();
   const [current, setCurrent] = useState(initial);
@@ -70,6 +72,7 @@ export function MaterialAnalysisCard({ sourceId, current: initial, canEdit, llmS
     ["keywords", "关键词（逗号分隔，最多 10 个）", false], ["contentType", "内容类型", false], ["targetAudience", "目标人群", true],
     ["coreViewpoint", "核心观点", true], ["keyPoints", "关键要点（每行一项，最多 6 项）", true], ["coreQuestion", "核心问题", true],
   ] as const : [], [form]);
+  const Container = embedded ? "section" : Card;
 
   async function analyze() {
     if (current && !confirming) { setConfirming(true); return; }
@@ -100,7 +103,7 @@ export function MaterialAnalysisCard({ sourceId, current: initial, canEdit, llmS
   }
 
   return (
-    <Card className="p-5" data-testid="material-analysis-card">
+    <Container className={embedded ? "" : "p-5"} data-testid="material-analysis-card">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div><h2 className="font-semibold">智能整理</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">理解素材的主题、观点与可用信息；不会自动生成稿件。</p></div>
         <div className="flex gap-2"><Badge>{statusLabel}</Badge>{current?.stale ? <Badge className="border-[var(--warning)] text-[var(--warning)]">转写已更新</Badge> : null}{llmStatus === "MOCK" ? <Badge className="border-[var(--warning)] text-[var(--warning)]">MOCK MODE</Badge> : null}</div>
@@ -128,11 +131,11 @@ export function MaterialAnalysisCard({ sourceId, current: initial, canEdit, llmS
       {notice ? <p role="status" className="mt-4 text-sm text-[var(--success)]">{notice}</p> : null}
       {canEdit ? <div className="mt-5 flex flex-wrap gap-2">
         {editing ? <><Button disabled={busy} onClick={save}>保存修改</Button><Button variant="secondary" disabled={busy} onClick={() => { setEditing(false); if (current) setForm(editableFrom(current)); }}>取消</Button></> : <>
-          {current?.status === "COMPLETED" ? <Button variant="secondary" disabled={busy} onClick={() => setEditing(true)}>编辑整理结果</Button> : null}
-          {hasTranscript && configured && current?.status !== "PROCESSING" ? <Button variant="secondary" disabled={busy || confirming} onClick={analyze}>{analyzing ? "处理中…" : current ? "重新智能整理" : "开始智能整理"}</Button> : null}
-          {current?.status === "COMPLETED" ? <Button disabled={busy} onClick={createContent}>基于这条素材创作</Button> : null}
+          {current?.status === "COMPLETED" ? <Button variant="secondary" disabled={busy} onClick={() => setEditing(true)}>编辑整理</Button> : null}
+          {hasTranscript && configured && current?.status !== "PROCESSING" ? <Button variant="secondary" disabled={busy || confirming} onClick={analyze}>{analyzing ? "处理中…" : current ? "重新整理" : "开始智能整理"}</Button> : null}
+          {showCreateAction && current?.status === "COMPLETED" ? <Button disabled={busy} onClick={createContent}>基于这条素材创作</Button> : null}
         </>}
       </div> : null}
-    </Card>
+    </Container>
   );
 }

@@ -49,6 +49,7 @@ export const createIdeaSchema = z.object({
   title: z.string().trim().min(1).max(300),
   description: z.string().trim().max(2_000).optional(),
   reference: externalContentSchema.optional(),
+  sourceItemId: z.string().trim().min(1).optional(),
 }).strict();
 export const addIdeaReferenceSchema = z.object({ reference: externalContentSchema }).strict();
 export const updateIdeaSchema = z.object({

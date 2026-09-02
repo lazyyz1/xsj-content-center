@@ -29,6 +29,7 @@ beforeAll(async () => {
       if (prompt.includes("INVALID_ENVELOPE_JSON")) return send(200, "not-json");
       if (prompt.includes("INVALID_ENVELOPE_SCHEMA")) return send(200, JSON.stringify({ choices: [] }));
       if (prompt.includes("INVALID_STRUCTURED")) return send(200, completion(JSON.stringify({ wrong: true })));
+      if (prompt.includes("FENCED_STRUCTURED")) return send(200, completion("```json\n{\"ok\":true,\"title\":\"Fenced result\"}\n```"));
       if (prompt.includes("TIMEOUT")) return setTimeout(() => send(200, completion(JSON.stringify({ ok: true }))), 100);
       return send(200, completion(JSON.stringify({ ok: true, title: "Fixture result" })));
     });
@@ -69,6 +70,11 @@ describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
   it("validates structured JSON with Zod", async () => {
     const result = await provider().generateStructured({ prompt: "STRUCTURED" }, z.object({ ok: z.boolean(), title: z.string() }));
     expect(result.data.value).toEqual({ ok: true, title: "Fixture result" });
+  });
+
+  it("accepts one JSON code fence before schema validation", async () => {
+    const result = await provider().generateStructured({ prompt: "FENCED_STRUCTURED" }, z.object({ ok: z.boolean(), title: z.string() }));
+    expect(result.data.value).toEqual({ ok: true, title: "Fenced result" });
   });
 
   it.each([["STATUS_401", "LLM_AUTH_FAILED"], ["STATUS_429", "LLM_RATE_LIMITED"], ["STATUS_500", "LLM_SERVER_ERROR"]])("maps %s to %s", async (prompt, code) => {

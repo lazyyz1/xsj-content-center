@@ -7,6 +7,7 @@ import { db } from "@content-center/db";
 import { MockLLMProvider } from "@content-center/providers";
 import { createProject } from "../server/project-service";
 import { getUnifiedCreativeAnalysisState, runUnifiedCreativeAnalysis } from "../server/unified-analysis/service";
+import { unifiedCreativeAnalysisProviderSchema } from "../server/unified-analysis/schemas";
 
 describe("Unified Creative Analysis", () => {
   const suffix = randomUUID();
@@ -47,6 +48,25 @@ describe("Unified Creative Analysis", () => {
     expressionDirection: { description: "直接、具体、少口号。", rationale: "符合内容团队使用场景", classification: "AI_SUGGESTION" as const, sourceItemIds: [sourceId] },
     riskNotes: [{ text: "不要把来源观点写成已证实事实。", classification: "AI_INTERPRETATION" as const, sourceItemIds: [sourceId] }],
     titleReferences: [{ title: "为什么 AI 内容总在返工？", rationale: "用问题呈现成本", classification: "AI_SUGGESTION" as const, sourceItemIds: ["invented-source"] }],
+  });
+
+  it("normalizes a concise Kimi response and keeps non-core sections optional", () => {
+    const result = unifiedCreativeAnalysisProviderSchema.parse({
+      creativeUnderstanding: "应从事实边界切入。",
+      recommendations: [{ title: "先讲返工", recommendation: "说明无依据创作的成本。", extra: "ignored" }],
+      risks: "核对事实来源",
+      extraField: true,
+    });
+    expect(result.creativeInterpretation.text).toBe("应从事实边界切入。");
+    expect(result.angles).toHaveLength(1);
+    expect(result.riskNotes).toHaveLength(1);
+    expect(result.structure.sections).toEqual([]);
+    expect(result).not.toHaveProperty("extraField");
+  });
+
+  it("still rejects a response without core interpretation or a useful angle", () => {
+    expect(() => unifiedCreativeAnalysisProviderSchema.parse({ risks: [] })).toThrow();
+    expect(() => unifiedCreativeAnalysisProviderSchema.parse({ creativeUnderstanding: "有理解", recommendations: [] })).toThrow();
   });
 
   it("runs one structured analysis, preserves source facts, strips fake references and records provenance", async () => {

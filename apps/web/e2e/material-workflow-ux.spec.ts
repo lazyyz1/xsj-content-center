@@ -120,6 +120,9 @@ test("dashboard links, metadata refresh and processing polling use real persiste
   let processingRequests = 0;
   page.on("request", (request) => { if (request.url().includes(`/api/source-items/${source.id}/processing`)) processingRequests += 1; });
   await page.goto(`/library/${source.id}`);
+  for (const tab of ["信息", "创作", "处理", "整理"]) await page.getByRole("tab", { name: tab }).click();
+  expect(refreshCalls).toBe(0);
+  await page.getByRole("tab", { name: "处理" }).click();
   await expect(page.getByTestId("source-processing-status")).toContainText("处理中");
   await db.$transaction([
     db.ingestJob.update({ where: { id: transcriptionJob.id }, data: { status: "SUCCEEDED", metadata: { progressStage: "SUCCEEDED" }, startedAt: new Date(), finishedAt: new Date() } }),
@@ -137,6 +140,7 @@ test("dashboard links, metadata refresh and processing polling use real persiste
     jobs: await db.ingestJob.count({ where: { sourceItemId: source.id } }),
     transcripts: await db.transcript.count({ where: { sourceItemId: source.id } }),
   };
+  await page.getByRole("tab", { name: "信息" }).click();
   await page.getByRole("button", { name: "更新作品数据" }).click();
   await expect(page.getByText("作品数据已更新，不会重新下载或转写。")).toBeVisible();
   await expect(page.getByRole("heading", { name: "作品数据刷新后的标题" })).toBeVisible();

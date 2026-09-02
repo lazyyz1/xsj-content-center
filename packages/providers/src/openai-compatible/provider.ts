@@ -9,13 +9,23 @@ export type OpenAICompatibleOptions = { fetch?: typeof fetch; timeoutMs?: number
 type RequestCapabilities = {
   supportsTemperature: boolean;
   thinking?: { type: "disabled" };
+  timeoutMs: number;
 };
 
 function resolveRequestCapabilities(config: OpenAICompatibleConfig): RequestCapabilities {
   if (config.provider.toUpperCase() === "KIMI" && config.model === "kimi-k2.6") {
-    return { supportsTemperature: false, thinking: { type: "disabled" } };
+    return { supportsTemperature: false, thinking: { type: "disabled" }, timeoutMs: 120_000 };
   }
-  return { supportsTemperature: true };
+  return { supportsTemperature: true, timeoutMs: 30_000 };
+}
+
+function parseStructuredJson(text: string) {
+  try { return JSON.parse(text) as unknown; }
+  catch {
+    const fenced = text.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    if (!fenced?.[1]) throw new Error("INVALID_JSON");
+    return JSON.parse(fenced[1]) as unknown;
+  }
 }
 
 function endpoint(baseUrl: string) {
@@ -41,7 +51,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
   constructor(config: OpenAICompatibleConfig, options: OpenAICompatibleOptions = {}) {
     this.config = openAICompatibleConfigSchema.parse(config);
     this.fetcher = options.fetch ?? fetch;
-    this.timeoutMs = options.timeoutMs ?? 30_000;
+    this.timeoutMs = options.timeoutMs ?? resolveRequestCapabilities(this.config).timeoutMs;
     this.maxRetries = options.maxRetries ?? 1;
   }
 
@@ -62,7 +72,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
     const result = await this.generateText(input);
     let raw: unknown;
     try {
-      raw = JSON.parse(result.data.text);
+      raw = parseStructuredJson(result.data.text);
     } catch {
       throw new LLMError("LLM_INVALID_RESPONSE", "AI 模型没有返回有效 JSON。", false, { providerRequestId: result.data.providerRequestId });
     }
