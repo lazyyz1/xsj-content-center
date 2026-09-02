@@ -36,7 +36,7 @@ describe("Content Discovery D3", () => {
     async getSurging() { calls.surging += 1; return { items: [trend("DOUYIN", "SURGING", "surge", "AI 工作流", 3)] }; },
     async getDarkHorse() { calls.darkHorse += 1; return { items: [trend("XIAOHONGSHU", "DARK_HORSE", "horse", "AI 工具", 1)] }; },
   };
-  const now = new Date("2026-09-02T05:00:00.000Z");
+  const now = new Date();
   const supportingContent: ExternalContentInput = {
     externalId: "support-1", platform: "DOUYIN", contentType: "VIDEO", title: "AI 办公参考", description: "外部内容声明需要核实", authorId: "author", authorName: "创作者", authorAvatarUrl: null, coverUrl: null,
     originalUrl: "https://www.douyin.com/video/support-1", publishedAt: "2026-09-01T00:00:00.000Z", metrics: { views: null, likes: 10, comments: null, shares: null, favorites: null }, durationMs: null, sourceProvider: "REDFOX",

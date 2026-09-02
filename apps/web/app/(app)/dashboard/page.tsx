@@ -14,7 +14,7 @@ export default async function DashboardPage() {
     .map((integration) => integration.name);
   const metrics = [
     ["素材", counts.materials, "/library"],
-    ["内容项目", counts.projects, "/projects"],
+    ["我的创作", counts.projects, "/projects"],
     ["待审核", counts.pendingReview, "/projects?review=pending"],
     ["待发布", counts.pendingPublish, "/calendar?view=pending"],
   ] as const;
@@ -39,7 +39,7 @@ export default async function DashboardPage() {
         ))}
       </section>
       <Card className="mt-6 p-6">
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="font-semibold">开始一次内容创作</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">收录新素材，或新建一个内容项目。</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" asChild><Link href="/library"><LibraryBig size={16} />收录素材</Link></Button><Button asChild><Link href="/projects/new"><FolderPlus size={16} />新建项目</Link></Button></div></div>
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="font-semibold">开始一次内容创作</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">收录参考素材，或开始一条新的创作。</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" asChild><Link href="/library"><LibraryBig size={16} />收录素材</Link></Button><Button asChild><Link href="/projects/new"><FolderPlus size={16} />新建创作</Link></Button></div></div>
       </Card>
     </>
   );

@@ -20,4 +20,13 @@ describe("MaterialAnalysisToBriefMapper", () => {
     });
     expect(draft).toMatchObject({ topic: "", audience: "已有项目受众", coreQuestion: "", coreMessage: "", keyPoints: [], background: "", angle: "", structure: [], tone: "", risks: [] });
   });
+
+  it("keeps new material understanding out of the user's supplement", () => {
+    const draft = MaterialAnalysisToBriefMapper.map({
+      analysis: { id: "analysis-v2", version: 1, suggestedTitle: null, summary: "参考摘要", topic: "参考主题", tags: [], keywords: [], targetAudience: "参考受众", coreViewpoint: "参考观点", keyPoints: ["参考要点"], coreQuestion: "参考问题", understanding: { whatItSays: { summary: "参考摘要", keyPoints: [] }, reusable: [], doNotCopy: [], uncertain: [] } },
+      source: { id: "source-v2", title: "同行素材" },
+      project: { title: "我的创作", audience: null },
+    });
+    expect(draft).toMatchObject({ topic: "我的创作", audience: "", coreMessage: "", coreQuestion: "", background: "", keyPoints: [] });
+  });
 });

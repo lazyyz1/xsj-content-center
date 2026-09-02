@@ -33,7 +33,7 @@ describe("AI creation engine", () => {
     await saveCreatorProfile({ workspaceId: workspaceAId, userId: userAId, data: { displayName: "Creator A", positioning: "Practical creator", targetAudience: "Teams", tone: "Direct", preferredStyle: "Concrete", forbiddenStyle: "Empty slogans", coreTopics: ["AI workflow"], personalViews: ["Evidence before opinion"], brandTerms: ["Content Center"], forbiddenTerms: ["guaranteed"], hookPreferences: ["Question"], structurePreferences: ["Problem-solution"], ctaPreferences: ["Ask for feedback"], examplePhrases: ["先看证据"], notes: "" } });
     await saveCreatorProfile({ workspaceId: workspaceBId, userId: userBId, data: { displayName: "Creator B", positioning: "Private", targetAudience: "Private", tone: "Private", preferredStyle: "", forbiddenStyle: "", coreTopics: [], personalViews: [], brandTerms: [], forbiddenTerms: [], hookPreferences: [], structurePreferences: [], ctaPreferences: [], examplePhrases: [], notes: "" } });
     sourceId = (await db.sourceItem.create({ data: { workspaceId: workspaceAId, createdById: userAId, sourceType: "TEXT", sourcePlatform: "GENERIC", status: "READY", title: "Long source", rawText: "A".repeat(200) } })).id;
-    await db.materialAnalysis.create({ data: { workspaceId: workspaceAId, sourceItemId: sourceId, version: 1, status: "COMPLETED", summary: "Material summary", topic: "Reliable creation", tags: [], keywords: [], keyPoints: ["Material key point"], origin: "AI", transcriptUpdatedAtAtAnalysis: new Date(), createdById: userAId } });
+    await db.materialAnalysis.create({ data: { workspaceId: workspaceAId, sourceItemId: sourceId, version: 1, status: "COMPLETED", summary: "Material summary", topic: "Reliable creation", tags: [], keywords: [], keyPoints: ["Material key point"], understanding: { whatItSays: { summary: "Material summary", keyPoints: ["Material key point"] }, reusable: [{ content: "Transferable mechanism", whyUseful: "Useful" }], doNotCopy: [{ content: "当天成交13个", reason: "Original author case" }], uncertain: [{ content: "星加克", reason: "Uncertain entity" }] }, origin: "AI", transcriptUpdatedAtAtAnalysis: new Date(), createdById: userAId } });
     projectId = (await createProject({ workspaceId: workspaceAId, userId: userAId, title: "AI Project", goal: "Create a grounded draft", sourceItemId: sourceId })).id;
     failureProjectId = (await createProject({ workspaceId: workspaceAId, userId: userAId, title: "Failed mother project", sourceItemId: sourceId })).id;
     await db.unifiedCreativeAnalysis.create({ data: { workspaceId: workspaceAId, projectId, createdById: userAId, version: 1, status: "COMPLETED", inputFingerprint: `fp-${runId}`, output: { creativeInterpretation: { text: "Unified interpretation", classification: "AI_INTERPRETATION", sourceItemIds: [sourceId] }, groundingGaps: ["Unverified number"] }, provenance: { sourceItemIds: [sourceId] } } });
@@ -62,26 +62,31 @@ describe("AI creation engine", () => {
   it("selects action-specific context and records truncation", async () => {
     const builder = new ProjectContextBuilder({ perSourceChars: 20, totalSourceChars: 20, totalEvidenceChars: 20 });
     const analyze = await builder.build({ workspaceId: workspaceAId, userId: userAId, projectId, action: "ANALYZE_SOURCES" });
-    expect(analyze.context.sources[0]?.text).toHaveLength(20);
+    expect("sources" in analyze.context ? analyze.context.sources?.[0]?.text : undefined).toHaveLength(20);
     expect(analyze.contextTruncated).toBe(true);
     const mother = await builder.build({ workspaceId: workspaceAId, userId: userAId, projectId, action: "GENERATE_MOTHER_CONTENT" });
-    expect(mother.context.sources[0]?.materialAnalysis).toMatchObject({ summary: "Material summary", keyPoints: ["Material key point"] });
-    expect(mother.context.unifiedCreativeAnalysis).toMatchObject({ version: 1, output: expect.objectContaining({ creativeInterpretation: expect.any(Object) }) });
-    expect(mother.inputSummary).toMatchObject({ materialAnalysisCount: 1, hasUnifiedCreativeAnalysis: true, hasCreatorProfile: true });
+    const motherUnderstanding = "materialUnderstanding" in mother.context ? mother.context.materialUnderstanding?.[0]?.materialUnderstanding : null;
+    expect(motherUnderstanding).toMatchObject({ reusable: [{ content: "Transferable mechanism" }] });
+    expect(JSON.stringify(motherUnderstanding)).toContain("星加克");
+    expect(JSON.stringify(motherUnderstanding)).toContain("当天成交13个");
+    expect(JSON.stringify(mother.context)).not.toContain("Unified interpretation");
+    expect(JSON.stringify(mother.context)).not.toContain("A".repeat(50));
+    expect(mother.inputSummary).toMatchObject({ materialAnalysisCount: 1, hasUnifiedCreativeAnalysis: false, hasCreatorProfile: true });
     const rewrite = await builder.build({ workspaceId: workspaceAId, userId: userAId, projectId, action: "HUMANIZE" });
-    expect(rewrite.context.sources).toEqual([]);
-    expect(rewrite.context.evidence).toEqual([]);
+    expect("sources" in rewrite.context ? rewrite.context.sources : []).toEqual([]);
+    expect("evidence" in rewrite.context ? rewrite.context.evidence : []).toEqual([]);
     await expect(builder.build({ workspaceId: workspaceAId, userId: userAId, projectId: projectBId, action: "ANALYZE_SOURCES" })).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
   });
 
   it("keeps AI output in preview until explicit apply or discard", async () => {
     let motherPrompt = "";
+    let motherSystemPrompt = "";
     let motherCalls = 0;
-    const fixture = (input: { prompt: string }) => {
+    const fixture = (input: { prompt: string; systemPrompt?: string }) => {
       if (input.prompt.includes("EXTRACT_EVIDENCE")) return { items: [{ type: "FACT", excerpt: "Supported excerpt", claim: "Supported claim", note: "", sourceItemId: sourceId }] };
       if (input.prompt.includes("GENERATE_ANGLES")) return { angles: [{ title: "Evidence-first angle", angle: "Start from a failed shortcut", coreMessage: "Evidence improves originality", whyItWorks: "Concrete", targetAudience: "Teams", recommendedStructure: ["Failure", "Evidence", "Method"], risk: "Avoid absolutes", evidenceIds: [], sourceItemIds: [sourceId] }] };
       if (input.prompt.includes("GENERATE_BRIEF")) return { topic: "AI content workflow", angle: "Evidence first", audience: "Teams", coreMessage: "Build from evidence", keyPoints: ["Collect", "Verify", "Write"], structure: ["Hook", "Method", "CTA"], tone: "Direct", risks: ["No invented facts"], evidenceIds: [], sourceItemIds: [sourceId] };
-      if (input.prompt.includes("GENERATE_MOTHER_CONTENT")) { motherCalls += 1; motherPrompt = input.prompt; return { title: "Evidence before drafting", outline: ["Hook", "Method"], body: "Mother body", evidenceIds: [], sourceItemIds: [sourceId] }; }
+      if (input.prompt.includes("GENERATE_MOTHER_CONTENT")) { motherCalls += 1; motherPrompt = input.prompt; motherSystemPrompt = input.systemPrompt || ""; return { title: "Evidence before drafting", outline: ["Hook", "Method"], body: "Mother body", evidenceIds: [], sourceItemIds: [sourceId] }; }
       if (input.prompt.includes("HUMANIZE")) return { original: "Mother body", aiVersion: "A more natural mother body" };
       return { topics: ["AI workflow"], coreClaims: [], facts: [], cases: [], questions: [], hooks: [], structures: [], risks: [], reusableInsights: [] };
     };
@@ -96,15 +101,19 @@ describe("AI creation engine", () => {
     await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: briefRun.id, expectedVersion: 1 });
     const motherRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "GENERATE_MOTHER_CONTENT" }, { runtime });
     expect(motherCalls).toBe(1);
-    expect(motherPrompt).toContain("Material summary");
-    expect(motherPrompt).toContain("Unified interpretation");
-    expect(motherPrompt).toContain("not source paraphrasing");
-    expect(motherPrompt).toContain("Never invent the creator's personal experience");
-    expect(motherPrompt).toContain("Do not reproduce source speech inside quotation marks");
-    expect(motherPrompt).toContain("do not repeat its exact number");
+    expect(motherPrompt).not.toContain("Material summary");
+    expect(motherPrompt).toContain("prohibitedReferenceClaims");
+    expect(motherPrompt).not.toContain("Unified interpretation");
+    expect(motherPrompt).not.toContain("A".repeat(50));
+    expect(motherPrompt).toContain("mySupplement");
+    expect(motherPrompt).toContain("Never invent the creator's customers");
+    expect(motherPrompt).toContain("Never turn a reference author's business");
+    expect(motherPrompt).toContain("Exact numbers, amounts, percentages");
     expect(motherPrompt).toContain("External writing method");
     expect(motherPrompt).toContain("叙事机制指纹");
-    expect(motherPrompt).toContain("The external writing method above, for organization and expression only");
+    expect(motherPrompt).toContain("The external writing method, for organization and expression only");
+    expect(motherSystemPrompt).toContain("NON-NEGOTIABLE FACT BOUNDARY");
+    expect(motherSystemPrompt).toContain("很多人跟我聊");
     expect(motherPrompt).not.toMatch(/contract lifecycle|onboarding|growth|monetization/i);
     await expect(db.aIRun.findUniqueOrThrow({ where: { id: motherRun.id } })).resolves.toMatchObject({ metadata: expect.objectContaining({ writingMethodSource: "ip-strategist", writingMethodVersion: "v2.2.0", writingMethodSections: expect.any(Array) }) });
     await expect(db.motherContent.findUnique({ where: { projectId } })).resolves.toBeNull();

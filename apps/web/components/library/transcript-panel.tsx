@@ -27,7 +27,7 @@ export function TranscriptPanel({ sourceId, status, method, quality, processingT
   }
   const body = editing ? <textarea aria-label="编辑转写全文" value={draft} onChange={(event) => setDraft(event.target.value)} className="h-full min-h-[24rem] w-full resize-none bg-transparent p-4 text-sm leading-7 outline-none" /> : <p className="whitespace-pre-wrap p-4 text-sm leading-7">{fullText || "暂无转写内容"}</p>;
   return <Card className="p-5" data-testid="transcript-panel">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">视频转写</h2><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--text-secondary)]"><span>方式：{method}</span><span>质量：{quality}</span><span>耗时：{processingTime}</span></div></div><Badge>{status}</Badge></div>
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">转写文本</h2><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--text-secondary)]"><span>方式：{method}</span><span>质量：{quality}</span><span>耗时：{processingTime}</span></div></div><Badge>{status}</Badge></div>
     {message ? <p className="mt-4 text-sm text-[var(--text-secondary)]">{message}</p> : null}
     <div data-testid="transcript-scroll-region" className="mt-4 h-[28rem] overflow-y-auto rounded-xl border bg-[var(--surface-elevated)]">{body}</div>
     <div className="mt-4 flex flex-wrap gap-2">

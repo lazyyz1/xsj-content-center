@@ -1,5 +1,7 @@
 # Studio 产品收敛
 
+> 已被 [Product Simplification V1](./product-simplification-v1.md) 取代。本文记录旧版 Studio 收敛方案，仅供历史追踪；默认产品路径不再展示创作依据、统一分析、独立创作方案确认、Deep Content 或右侧 AI 助手。
+
 ## 核心产品概念
 
 Studio 阶段一只向普通创作者长期展示四个产品概念：

@@ -29,7 +29,7 @@ export const sourceStatusLabels: Record<string, string> = {
 export const projectStatusLabels: Record<string, string> = {
   DRAFT: "草稿",
   RESEARCHING: "研究中",
-  BRIEF_READY: "创作简报已就绪",
+  BRIEF_READY: "补充已准备",
   WRITING: "创作中",
   IN_REVIEW: "审核中",
   APPROVED: "已批准",
@@ -48,7 +48,7 @@ export const contentOriginLabels: Record<string, string> = {
 export const variantStatusLabels: Record<string, string> = {
   DRAFT: "草稿",
   READY: "待提交",
-  STALE: "母稿已更新",
+  STALE: "口播稿已更新",
   IN_REVIEW: "待审核",
   APPROVED: "已批准",
   ARCHIVED: "已归档",

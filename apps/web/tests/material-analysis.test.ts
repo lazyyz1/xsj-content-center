@@ -19,16 +19,10 @@ describe("V1.2B-1 smart material analysis", () => {
   let sourceBId = "";
 
   const output = {
-    suggestedTitle: "把素材先整理清楚，再开始创作",
-    summary: "这条素材讨论内容团队如何用结构化整理减少创作前的信息损耗。",
-    topic: "素材智能整理",
-    tags: ["内容工作流", "素材整理"],
-    keywords: ["素材库", "转写", "结构化"],
-    contentType: "方法讲解",
-    targetAudience: "需要处理大量视频素材的内容创作者",
-    coreViewpoint: "创作前先把原始素材的主题、观点与问题整理成可编辑结果。",
-    keyPoints: ["元数据与转写共同提供上下文", "整理结果需要人工可编辑", "AI 结果不能直接当成事实"],
-    coreQuestion: "如何让视频素材更快进入可靠的创作流程？",
+    whatItSays: { summary: "这条素材讨论内容团队如何减少创作前的信息损耗。", keyPoints: ["先整理素材", "人工确认结果"] },
+    reusable: [{ content: "先拆信息再表达", whyUseful: "这是可迁移的方法" }],
+    doNotCopy: [{ content: "当天成交13个", reason: "这是原作者案例，不是我们的事实" }],
+    uncertain: [{ content: "星加克", reason: "原转写中的实体无法确认" }],
   };
 
   beforeAll(async () => {
@@ -53,20 +47,23 @@ describe("V1.2B-1 smart material analysis", () => {
 
   it("accepts only the bounded material-understanding contract", () => {
     expect(materialAnalysisOutputSchema.parse(output)).toEqual(output);
-    expect(() => materialAnalysisOutputSchema.parse({ ...output, tags: Array.from({ length: 9 }, (_, index) => `标签${index}`) })).toThrow();
+    expect(() => materialAnalysisOutputSchema.parse({ ...output, reusable: [{ content: "缺少原因" }] })).toThrow();
     expect(() => materialAnalysisOutputSchema.parse({ ...output, hook: "不属于本阶段" })).toThrow();
-    expect(() => materialAnalysisOutputSchema.parse({ ...output, coreQuestion: undefined })).toThrow();
+    expect(() => materialAnalysisOutputSchema.parse({ ...output, uncertain: undefined })).toThrow();
     expect(() => materialAnalysisOutputSchema.parse("not-json")).toThrow();
   });
 
   it("runs one fixture LLM call through AIRun and stores a versioned DTO", async () => {
     let capturedPrompt = "";
-    const runtime = { provider: new MockLLMProvider(({ prompt }) => { capturedPrompt = prompt; return output; }), providerName: "FIXTURE", model: "fixture-kimi-2.6", productModel: "FIXTURE" as const, mode: "FIXTURE" as const };
+    let capturedSystemPrompt = "";
+    const runtime = { provider: new MockLLMProvider(({ prompt, systemPrompt }) => { capturedPrompt = prompt; capturedSystemPrompt = systemPrompt || ""; return output; }), providerName: "FIXTURE", model: "fixture-kimi-2.6", productModel: "FIXTURE" as const, mode: "FIXTURE" as const };
     const result = await analyzeMaterial({ workspaceId: workspaceAId, userId: userAId, sourceItemId: sourceAId }, { runtime });
-    expect(result).toMatchObject({ version: 1, status: "COMPLETED", topic: output.topic, origin: "AI", stale: false });
+    expect(result).toMatchObject({ version: 1, status: "COMPLETED", understanding: output, legacy: false, origin: "AI", stale: false });
     expect(capturedPrompt).toContain("ANALYZE_MATERIAL");
-    expect(capturedPrompt).toContain("Interaction metrics are market signals");
-    expect(capturedPrompt).toContain("Do not return hooks, structure");
+    expect(capturedPrompt).toContain("four small blocks");
+    expect(capturedPrompt).toContain("Do not return legacy classification fields");
+    expect(capturedSystemPrompt).toContain("Simplified Chinese");
+    expect(capturedSystemPrompt).toContain("零和博弈、话语移植、修辞装置、反讽间距、隐性矛盾");
     expect(await db.aIRun.count({ where: { workspaceId: workspaceAId, action: "ANALYZE_MATERIAL" } })).toBe(1);
     const usage = await db.apiUsage.findFirstOrThrow({ where: { workspaceId: workspaceAId, operation: "ANALYZE_MATERIAL", success: true } });
     expect(usage.metadata).toMatchObject({ productModel: "FIXTURE", latencyMs: expect.any(Number), sourceItemId: sourceAId });
@@ -82,11 +79,11 @@ describe("V1.2B-1 smart material analysis", () => {
     expect(await db.materialAnalysis.count({ where: { sourceItemId: sourceAId, status: "COMPLETED" } })).toBe(2);
   });
 
-  it("saves human edits, normalizes at most eight tags and marks stale after transcript changes", async () => {
+  it("saves human edits to the four-block result and marks stale after transcript changes", async () => {
     const current = (await getMaterialAnalysis({ workspaceId: workspaceAId, sourceItemId: sourceAId })).current!;
-    const edited = await updateMaterialAnalysis({ workspaceId: workspaceAId, userId: userAId, sourceItemId: sourceAId, analysisId: current.id, data: { ...output, topic: "人工确认主题", tags: ["内容 工作流", "素材整理", "内容 工作流"] } });
-    expect(edited).toMatchObject({ origin: "HUMAN", topic: "人工确认主题" });
-    expect(await db.sourceItemTag.count({ where: { sourceItemId: sourceAId } })).toBe(2);
+    const changed = { ...output, whatItSays: { ...output.whatItSays, summary: "人工确认后的摘要" } };
+    const edited = await updateMaterialAnalysis({ workspaceId: workspaceAId, userId: userAId, sourceItemId: sourceAId, analysisId: current.id, data: changed });
+    expect(edited).toMatchObject({ origin: "HUMAN", understanding: changed });
     await new Promise((resolve) => setTimeout(resolve, 5));
     await db.transcript.update({ where: { sourceItemId: sourceAId }, data: { fullText: "更新后的转写文本。" } });
     expect((await getMaterialAnalysis({ workspaceId: workspaceAId, sourceItemId: sourceAId })).current?.stale).toBe(true);
@@ -100,8 +97,8 @@ describe("V1.2B-1 smart material analysis", () => {
     expect(first).toMatchObject({ created: true, briefInitialized: true });
     await expect(db.projectSource.findFirst({ where: { projectId: first.projectId, sourceItemId: sourceAId } })).resolves.toBeTruthy();
     const initialBrief = await db.creativeBrief.findUniqueOrThrow({ where: { projectId: first.projectId } });
-    expect(initialBrief).toMatchObject({ topic: sourceAnalysis.topic, audience: sourceAnalysis.targetAudience, coreMessage: sourceAnalysis.coreViewpoint, coreQuestion: sourceAnalysis.coreQuestion, background: sourceAnalysis.summary, angle: "", structure: [], tone: "" });
-    expect(initialBrief.keyPoints).toEqual(sourceAnalysis.keyPoints);
+    expect(initialBrief).toMatchObject({ topic: "素材 A", audience: "", coreMessage: "", coreQuestion: "", background: "", angle: "", structure: [], tone: "" });
+    expect(initialBrief.keyPoints).toEqual([]);
     const provenance = readMaterialAnalysisBriefMetadata(initialBrief.metadata);
     expect(provenance).toMatchObject({ primarySourceItemId: sourceAId, initializedFromMaterialAnalysisId: sourceAnalysis.id, materialAnalysisVersion: sourceAnalysis.version });
     expect(await db.aIRun.count({ where: { workspaceId: workspaceAId } })).toBe(aiRunsBefore);
@@ -112,7 +109,7 @@ describe("V1.2B-1 smart material analysis", () => {
     await db.materialAnalysis.create({ data: { workspaceId: workspaceAId, sourceItemId: sourceAId, createdById: userAId, version: latest.version + 1, status: "COMPLETED", suggestedTitle: "新版标题", summary: "新版摘要", topic: "新版主题", tags: [], keywords: [], targetAudience: "新版受众", coreViewpoint: "新版观点", keyPoints: ["新版要点"], coreQuestion: "新版问题", transcriptUpdatedAtAtAnalysis: latest.transcriptUpdatedAtAtAnalysis } });
     const second = await createProjectFromMaterial({ workspaceId: workspaceAId, sourceItemId: sourceAId, userId: userAId });
     expect(second).toEqual({ projectId: first.projectId, created: false, briefInitialized: false });
-    await expect(db.creativeBrief.findUniqueOrThrow({ where: { id: initialBrief.id } })).resolves.toMatchObject({ audience: "人工修改受众", coreQuestion: "人工修改问题", topic: sourceAnalysis.topic });
+    await expect(db.creativeBrief.findUniqueOrThrow({ where: { id: initialBrief.id } })).resolves.toMatchObject({ audience: "人工修改受众", coreQuestion: "人工修改问题", topic: "素材 A" });
     expect(readMaterialAnalysisBriefMetadata((await db.creativeBrief.findUniqueOrThrow({ where: { id: initialBrief.id } })).metadata)?.materialAnalysisVersion).toBe(provenance?.materialAnalysisVersion);
   });
 

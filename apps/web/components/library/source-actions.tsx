@@ -107,7 +107,7 @@ export function SourceActions({
             await call(`/api/projects/${projectId}/sources`, "POST", { sourceItemId: sourceId, role: "REFERENCE" });
             router.push(`/projects/${projectId}/studio`);
           })}>
-            <select name="projectId" aria-label="选择内容项目" required defaultValue="" className="h-10 min-w-0 rounded-[var(--radius)] border bg-transparent px-3"><option value="" disabled>选择未关联的项目</option>{availableProjects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select>
+            <select name="projectId" aria-label="选择创作" required defaultValue="" className="h-10 min-w-0 rounded-[var(--radius)] border bg-transparent px-3"><option value="" disabled>选择未关联的创作</option>{availableProjects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select>
             <Button variant="secondary" disabled={busy || availableProjects.length === 0}>加入已有项目</Button>
           </form>
           </details>

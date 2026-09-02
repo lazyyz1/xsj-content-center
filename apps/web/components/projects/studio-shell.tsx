@@ -1,130 +1,82 @@
 "use client";
 
-import { Badge, Button, Card } from "@content-center/ui";
-import { useEffect, useState } from "react";
-import { BriefEditor } from "./brief-editor";
-import { EvidenceBoard } from "./evidence-board";
+import { Button, Card } from "@content-center/ui";
+import { useRef, useState } from "react";
+import { BriefEditor, type MySupplement } from "./brief-editor";
 import { MotherContentEditor } from "./mother-content-editor";
-import { ProjectStatusPanel } from "./project-status-panel";
 import { StudioSources, type ProjectSource } from "./studio-sources";
 import { StudioDrawer } from "./studio-drawer";
-import { AICreationPanel, type RewriteRequest, type UnifiedAnalysisView } from "./ai-creation-panel";
 import { PlatformContentFactory } from "./platform-content-factory";
 import { PLATFORM_LABELS, SUPPORTED_PLATFORMS, type PlatformVariantView, type SupportedPlatform } from "@/lib/platforms";
-import { DeepContentWorkspace, type MotherSnapshot, type PackageView } from "./deep-content-workspace";
 import type { CreativePlan } from "@/server/studio/creative-brief-prefill";
-import type { CreativeBasisSummary } from "@/server/studio/creative-basis";
 import type { MotherContentVersion } from "@/server/mother-content-service";
 
 type AvailableSource = { id: string; title: string | null; sourcePlatform: string; sourceType: string };
 type ProjectStatus = "DRAFT" | "RESEARCHING" | "BRIEF_READY" | "WRITING" | "IN_REVIEW" | "APPROVED" | "ARCHIVED";
+type MotherSnapshot = { title: string; body: string; outline: string[]; version: number; origin: "HUMAN" | "KIMI" | "GPT_WEB"; originNote: string | null };
 type CreativePlanHandoff = { plan: CreativePlan; storedPlan: CreativePlan; origins: string[]; autoPrefilled: boolean; titleReferences: string[]; stage: "PREPARING" | "WRITING" };
+type DraftWarning = { code: string; message: string };
 
 function object(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function text(value: unknown) { return typeof value === "string" ? value : ""; }
 function stringArray(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
 
-export function StudioShell({ project, availableSources, editable, ai }: {
-  project: {
-    id: string;
-    title: string;
-    status: ProjectStatus;
-    description: string | null;
-    goal: string | null;
-    audience: string | null;
-    sources: ProjectSource[];
-    creativeBasis: CreativeBasisSummary;
-    creativePlan: CreativePlanHandoff;
-    motherContent: MotherSnapshot;
-    motherHistory: MotherContentVersion[];
-    deepContentPackage: PackageView | null;
-    platformVariants: PlatformVariantView[];
-  };
+export function StudioShell({ project, availableSources, editable, ai, initialWarnings = [] }: {
+  project: { id: string; title: string; status: ProjectStatus; description: string | null; goal: string | null; audience: string | null; sources: ProjectSource[]; creativePlan: CreativePlanHandoff; motherContent: MotherSnapshot; motherHistory: MotherContentVersion[]; platformVariants: PlatformVariantView[] };
   availableSources: AvailableSource[];
   editable: boolean;
-  ai: { integrationStatus: "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "DISABLED" | "ERROR" | "MOCK"; creatorProfile: { displayName: string; positioning: string } | null; unifiedAnalysis: UnifiedAnalysisView | null; latestAnalysisStatus: string | null; latestAnalysisErrorCode: string | null };
+  ai: { integrationStatus: "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "DISABLED" | "ERROR" | "MOCK"; creatorProfile: { displayName: string; positioning: string } | null };
+  initialWarnings?: DraftWarning[];
 }) {
-  const [rewriteRequest, setRewriteRequest] = useState<RewriteRequest | null>(null);
-  const [appliedMotherContent, setAppliedMotherContent] = useState<typeof project.motherContent | null>(null);
-  const [savedMotherVersion, setSavedMotherVersion] = useState(project.motherContent.version);
-  const [contentTab, setContentTab] = useState<"MOTHER" | "PACKAGE" | SupportedPlatform>("MOTHER");
-  const [activePlatform, setActivePlatform] = useState<SupportedPlatform>("DOUYIN");
-  const [platformVariants, setPlatformVariants] = useState(project.platformVariants);
-  const [analysisInputChanged, setAnalysisInputChanged] = useState(false);
-  const [creationStage, setCreationStage] = useState(project.creativePlan.stage);
-  const [projectStatus, setProjectStatus] = useState(project.status);
-  const [planDrawerOpen, setPlanDrawerOpen] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const initialPlan = project.creativePlan.plan;
+  const briefVersion = useRef(initialPlan.version);
+  const [supplement, setSupplement] = useState<MySupplement>({ coreMessage: initialPlan.coreMessage, audience: initialPlan.audience, background: initialPlan.background, angle: initialPlan.angle });
+  const [supplementBusy, setSupplementBusy] = useState(false);
+  const [supplementMessage, setSupplementMessage] = useState("");
+  const [mother, setMother] = useState(project.motherContent);
   const [motherHistory, setMotherHistory] = useState(project.motherHistory);
   const [motherGenerating, setMotherGenerating] = useState(false);
   const [motherMessage, setMotherMessage] = useState("");
   const [motherError, setMotherError] = useState("");
-  const motherContent = appliedMotherContent ?? project.motherContent;
-  const currentMotherVersion = Math.max(motherContent.version, savedMotherVersion);
-  const currentCreativeVersion = motherHistory.find((item) => item.current)?.version ?? (motherContent.version > 0 ? 1 : 0);
-  const effectiveVariants = platformVariants.map((variant) => ({ ...variant, isStale: variant.sourceMotherVersion < currentMotherVersion }));
-  const staleCount = effectiveVariants.filter(({ isStale }) => isStale).length;
-  const unifiedOutput = ai.unifiedAnalysis?.output;
-  useEffect(() => { setProjectStatus(project.status); }, [project.status]);
-  useEffect(() => { setCreationStage(project.creativePlan.stage); }, [project.creativePlan.stage]);
-  function selectPlatform(platform: SupportedPlatform) { setActivePlatform(platform); setContentTab(platform); }
-  function platformStatus(platform: SupportedPlatform) { const variant = effectiveVariants.find((item) => item.platform === platform); return !variant ? "未生成" : variant.isStale ? "母稿已更新" : variant.status === "IN_REVIEW" ? "待审核" : variant.status === "APPROVED" ? "已批准" : "草稿"; }
-  function continueCreation() { document.getElementById(creationStage === "PREPARING" ? "creative-plan" : "mother-content")?.scrollIntoView({ behavior: "smooth", block: "start" }); }
-  async function generateMotherContent() {
-    if (motherGenerating || !editable || projectStatus === "ARCHIVED") return;
-    setMotherGenerating(true); setMotherError(""); setMotherMessage("");
+  const [warnings, setWarnings] = useState<DraftWarning[]>(initialWarnings);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [tab, setTab] = useState<"CREATE" | "PLATFORM">("CREATE");
+  const [activePlatform, setActivePlatform] = useState<SupportedPlatform>("DOUYIN");
+  const [variants, setVariants] = useState(project.platformVariants);
+  const editableProject = editable && project.status !== "ARCHIVED";
+  const configured = ai.integrationStatus === "CONFIGURED" || ai.integrationStatus === "MOCK";
+
+  async function saveSupplement(showMessage = true) {
+    setSupplementBusy(true); if (showMessage) setSupplementMessage("");
     try {
+      const response = await fetch(`/api/projects/${project.id}/brief`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ topic: initialPlan.topic || project.title, coreMessage: supplement.coreMessage, audience: supplement.audience, background: supplement.background, angle: supplement.angle, coreQuestion: initialPlan.coreQuestion, keyPoints: initialPlan.keyPoints, structure: initialPlan.structure, tone: initialPlan.tone, risks: initialPlan.risks, expectedVersion: briefVersion.current }) });
+      const result = await response.json().catch(() => ({})); if (!response.ok) throw new Error(result.message || result.error || "保存失败"); briefVersion.current = result.version; if (showMessage) setSupplementMessage("已保存"); return true;
+    } catch (cause) { setSupplementMessage(cause instanceof Error ? cause.message : "保存失败"); return false; }
+    finally { setSupplementBusy(false); }
+  }
+
+  async function generateMotherContent() {
+    if (motherGenerating || !editableProject) return;
+    setMotherGenerating(true); setMotherError(""); setMotherMessage(""); setWarnings([]);
+    try {
+      if (!await saveSupplement(false)) throw new Error("请先保存我的补充");
       const runResponse = await fetch(`/api/projects/${project.id}/ai/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "GENERATE_MOTHER_CONTENT" }) });
-      const run = await runResponse.json().catch(() => ({}));
-      if (!runResponse.ok) throw new Error(run.message || run.error || "核心母稿生成失败");
-      const applyResponse = await fetch(`/api/projects/${project.id}/ai/runs/${text(object(run).id)}/apply`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedVersion: currentMotherVersion, confirmReplace: Boolean(motherContent.body.trim()) }) });
-      const applied = object(await applyResponse.json().catch(() => ({})));
-      if (!applyResponse.ok) throw new Error(text(applied.message) || text(applied.error) || "核心母稿生成失败");
-      const result = object(applied.motherContent);
-      const next: MotherSnapshot = { title: text(result.title), body: text(result.body), outline: stringArray(result.outline), version: typeof result.version === "number" ? result.version : currentMotherVersion + 1, origin: "KIMI", originNote: typeof result.originNote === "string" ? result.originNote : null };
-      setAppliedMotherContent(next); setSavedMotherVersion(next.version);
-      const historyResponse = await fetch(`/api/projects/${project.id}/mother-content`);
-      if (historyResponse.ok) setMotherHistory(await historyResponse.json() as MotherContentVersion[]);
-      setMotherMessage(currentMotherVersion > 0 ? "新版本母稿已生成" : "第一版母稿已生成");
-    } catch (cause) { setMotherError(cause instanceof Error ? cause.message : "核心母稿生成失败"); }
+      const run = await runResponse.json().catch(() => ({})); if (!runResponse.ok) throw new Error(run.message || run.error || "口播稿生成失败");
+      const applyResponse = await fetch(`/api/projects/${project.id}/ai/runs/${text(object(run).id)}/apply`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedVersion: mother.version, confirmReplace: Boolean(mother.body.trim()) }) });
+      const applied = object(await applyResponse.json().catch(() => ({}))); if (!applyResponse.ok) throw new Error(text(applied.message) || text(applied.error) || "口播稿生成失败");
+      const result = object(applied.motherContent); const next: MotherSnapshot = { title: text(result.title), body: text(result.body), outline: stringArray(result.outline), version: typeof result.version === "number" ? result.version : mother.version + 1, origin: "KIMI", originNote: typeof result.originNote === "string" ? result.originNote : null };
+      setMother(next); setWarnings(Array.isArray(applied.warnings) ? applied.warnings.filter((item): item is DraftWarning => Boolean(item && typeof item === "object" && "message" in item)) : []);
+      const historyResponse = await fetch(`/api/projects/${project.id}/mother-content`); if (historyResponse.ok) setMotherHistory(await historyResponse.json() as MotherContentVersion[]);
+      setMotherMessage(mother.version ? "新版本口播稿已生成" : "第一版口播稿已生成");
+    } catch (cause) { setMotherError(cause instanceof Error ? cause.message : "口播稿生成失败"); }
     finally { setMotherGenerating(false); }
   }
-  async function startManualMother() {
-    if (!editable || projectStatus === "ARCHIVED") return;
-    setMotherError("");
-    const response = await fetch(`/api/projects/${project.id}/mother-content`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "", body: "", outline: [], expectedVersion: 0 }) });
-    const result = object(await response.json().catch(() => ({})));
-    if (!response.ok) { setMotherError(text(result.message) || text(result.error) || "无法开始写作"); return; }
-    const next: MotherSnapshot = { title: "", body: "", outline: [], version: typeof result.version === "number" ? result.version : 1, origin: "HUMAN", originNote: null };
-    setAppliedMotherContent(next); setSavedMotherVersion(next.version); setMotherHistory([{ ...next, version: 1, revision: next.version, createdAt: new Date().toISOString(), current: true }]);
-  }
 
-  return <>
-    <nav aria-label="创作步骤" className="mb-4 grid gap-1 rounded-xl border bg-[var(--surface)] p-1 sm:grid-cols-3">
-      <button className={`rounded-lg px-4 py-3 text-left text-sm ${contentTab === "MOTHER" ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`} onClick={() => setContentTab("MOTHER")}><span className="block font-medium">1 · 准备与核心母稿</span><span className="mt-1 block text-[10px] opacity-75">参考素材 → 创作方案 → 核心母稿</span></button>
-      <button className={`rounded-lg px-4 py-3 text-left text-sm ${contentTab === "PACKAGE" ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`} onClick={() => setContentTab("PACKAGE")}><span className="block font-medium">2 · 深度创作</span><span className="mt-1 block text-[10px] opacity-75">创作包 · GPT 网页成稿 · {project.deepContentPackage ? `v${project.deepContentPackage.version}` : "未生成"}</span></button>
-      <button className={`rounded-lg px-4 py-3 text-left text-sm ${contentTab !== "MOTHER" && contentTab !== "PACKAGE" ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`} onClick={() => selectPlatform(activePlatform)}><span className="block font-medium">3 · 平台内容与审核</span><span className="mt-1 block text-[10px] opacity-75">5 个平台 · 生成后逐一提交人工审核</span></button>
-    </nav>
-    {contentTab !== "MOTHER" && contentTab !== "PACKAGE" ? <nav aria-label="平台版本" className="mb-4 flex gap-1 overflow-x-auto rounded-xl border bg-[var(--surface)] p-1">{SUPPORTED_PLATFORMS.map((platform) => <button key={platform} className={`min-w-24 rounded-lg px-3 py-2 text-sm ${contentTab === platform ? "bg-[var(--surface-elevated)] text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`} onClick={() => selectPlatform(platform)}><span className="block font-medium">{PLATFORM_LABELS[platform]}</span><span className="mt-0.5 block text-[10px] opacity-75">{platformStatus(platform)}</span></button>)}</nav> : null}
-    {staleCount ? <p className="mb-4 text-sm text-[var(--warning)]">{staleCount} 个平台版本需要更新</p> : null}
+  function useReference(content: string) { setSupplement((current) => ({ ...current, coreMessage: [current.coreMessage.trim(), content].filter(Boolean).join("\n") })); setSupplementMessage("已放入“我的核心观点”，保存后生效"); }
+  const effectiveVariants = variants.map((variant) => ({ ...variant, isStale: variant.sourceMotherVersion < mother.version }));
 
-    <div className={contentTab === "MOTHER" ? "block" : "hidden"}>
-      <div className="grid items-start gap-5 min-[901px]:grid-cols-[minmax(0,1fr)_320px]">
-        <main className="grid min-w-0 gap-5">
-          <Card className="p-5"><StudioSources projectId={project.id} sources={project.sources} availableSources={availableSources} editable={editable} unifiedAnalysisOutput={unifiedOutput} /><div id="creative-basis"><EvidenceBoard projectId={project.id} summary={project.creativeBasis} editable={editable} /></div></Card>
-          {creationStage === "PREPARING" ? <Card className="p-5"><BriefEditor projectId={project.id} projectStatus={projectStatus} initial={project.creativePlan.plan} stored={project.creativePlan.storedPlan} origins={project.creativePlan.origins} autoPrefilled={project.creativePlan.autoPrefilled} titleReferences={project.creativePlan.titleReferences} editable={editable && projectStatus !== "ARCHIVED"} onSaved={() => setAnalysisInputChanged(true)} onConfirmed={() => { setCreationStage("WRITING"); setProjectStatus("WRITING"); }} /></Card> : <Card id="mother-content" className="p-5"><div className="mb-4 flex flex-wrap justify-end gap-2"><Button variant="ghost" className="h-8 px-2 text-xs" onClick={() => setPlanDrawerOpen(true)}>查看创作方案</Button>{motherContent.version > 0 ? <Button variant="ghost" className="h-8 px-2 text-xs" onClick={() => setHistoryOpen(true)}>查看历史版本</Button> : null}</div>{motherContent.version === 0 ? <MotherContentStart integrationStatus={ai.integrationStatus} editable={editable && projectStatus !== "ARCHIVED"} hasCreatorProfile={Boolean(ai.creatorProfile)} generating={motherGenerating} error={motherError} onGenerate={generateMotherContent} onManual={startManualMother} /> : <><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><p className="text-sm font-medium">核心母稿 · V{currentCreativeVersion}</p>{editable && projectStatus !== "ARCHIVED" && (ai.integrationStatus === "CONFIGURED" || ai.integrationStatus === "MOCK") ? <Button variant="secondary" disabled={motherGenerating} onClick={generateMotherContent}>{motherGenerating ? "正在生成核心母稿..." : "重新生成"}</Button> : null}</div>{motherMessage ? <p role="status" className="mb-3 text-sm text-[var(--success)]">✓ {motherMessage}</p> : null}{motherError ? <p role="alert" className="mb-3 text-sm text-[var(--danger)]">核心母稿生成失败：{motherError}</p> : null}<MotherContentEditor key={motherContent.version} projectId={project.id} initial={motherContent} editable={editable && projectStatus !== "ARCHIVED"} aiConfigured={ai.integrationStatus === "CONFIGURED" || ai.integrationStatus === "MOCK"} onRewriteRequest={setRewriteRequest} onSaved={setSavedMotherVersion} /></>}</Card>}
-        </main>
-        <aside className="min-w-0"><Card className="p-5 min-[901px]:sticky min-[901px]:top-5"><AICreationPanel projectId={project.id} integrationStatus={ai.integrationStatus} creatorProfile={ai.creatorProfile} editable={editable && projectStatus !== "ARCHIVED"} motherVersion={motherContent.version} motherReady={motherContent.version > 0} motherGenerating={motherGenerating} creativeBasis={project.creativeBasis} unifiedAnalysis={ai.unifiedAnalysis} latestStatus={ai.latestAnalysisStatus} latestErrorCode={ai.latestAnalysisErrorCode} inputChanged={analysisInputChanged} sourceCount={project.sources.length} organizedSourceCount={project.sources.filter(({ sourceItem }) => sourceItem.materialAnalysis).length} planConfirmed={creationStage === "WRITING"} planReady={Boolean(project.creativePlan.plan.topic && project.creativePlan.plan.coreMessage)} onAnalysisUpdated={() => setAnalysisInputChanged(false)} onContinue={continueCreation} onGenerateMother={generateMotherContent} rewriteRequest={rewriteRequest} onMotherContentApplied={(content) => { setAppliedMotherContent(content); setSavedMotherVersion(content.version); }} /><details className="mt-5 border-t pt-4"><summary className="cursor-pointer text-xs text-[var(--text-secondary)]">项目管理与高级状态</summary><ProjectStatusPanel project={{ ...project, status: projectStatus }} editable={editable} /></details></Card></aside>
-      </div>
-      <StudioDrawer title="创作方案" open={planDrawerOpen} onClose={() => setPlanDrawerOpen(false)}><BriefEditor projectId={project.id} projectStatus={projectStatus} initial={project.creativePlan.plan} stored={project.creativePlan.storedPlan} origins={project.creativePlan.origins} autoPrefilled={project.creativePlan.autoPrefilled} titleReferences={project.creativePlan.titleReferences} editable={false} /></StudioDrawer>
-      <StudioDrawer title="核心母稿历史版本" open={historyOpen} onClose={() => setHistoryOpen(false)}><div className="grid gap-3">{motherHistory.map((item) => <details key={`${item.version}-${item.createdAt}`} className="rounded-xl border p-4"><summary className="cursor-pointer text-sm font-medium">V{item.version} · {item.origin === "KIMI" ? "Kimi 生成" : item.origin === "GPT_WEB" ? "GPT 网页成稿" : "人工创作"}{item.current ? " · 当前版本" : ""}<span className="ml-2 text-xs font-normal text-[var(--text-secondary)]">{item.createdAt ? new Date(item.createdAt).toLocaleString("zh-CN") : ""}</span></summary><h3 className="mt-3 font-medium">{item.title || "未命名母稿"}</h3><p className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-[var(--text-secondary)]">{item.body || "空白草稿"}</p></details>)}</div></StudioDrawer>
-    </div>
-    <div className={contentTab === "PACKAGE" ? "block" : "hidden"}><DeepContentWorkspace projectId={project.id} initialPackage={project.deepContentPackage} editable={editable && projectStatus !== "ARCHIVED"} integrationStatus={ai.integrationStatus} motherContent={{ ...motherContent, version: currentMotherVersion }} onMotherImported={(content) => { setAppliedMotherContent(content); setSavedMotherVersion(content.version); setCreationStage("WRITING"); setContentTab("MOTHER"); }} /></div>
-    <div className={contentTab !== "MOTHER" && contentTab !== "PACKAGE" ? "block" : "hidden"}><PlatformContentFactory projectId={project.id} activePlatform={activePlatform} motherVersion={currentMotherVersion} variants={effectiveVariants} editable={editable && projectStatus !== "ARCHIVED"} integrationStatus={ai.integrationStatus} onSelectPlatform={selectPlatform} onVariantChange={(variant) => setPlatformVariants((current) => [...current.filter((item) => item.platform !== variant.platform), variant])} /></div>
+  return <><nav aria-label="创作区域" className="mb-5 flex gap-1 rounded-xl border bg-[var(--surface)] p-1"><button className={`rounded-lg px-4 py-2.5 text-sm ${tab === "CREATE" ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`} onClick={() => setTab("CREATE")}>创作</button><button className={`rounded-lg px-4 py-2.5 text-sm ${tab === "PLATFORM" ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`} onClick={() => setTab("PLATFORM")}>平台内容与审核</button></nav>
+    {tab === "CREATE" ? <main className="grid gap-5"><Card className="p-5"><StudioSources projectId={project.id} sources={project.sources} availableSources={availableSources} editable={editableProject} onUse={useReference} /></Card><Card className="p-5"><BriefEditor value={supplement} editable={editableProject} busy={supplementBusy} message={supplementMessage} onChange={setSupplement} onSave={() => void saveSupplement()} /></Card><Card id="mother-content" className="p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">3. 我的口播稿</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">AI 以你的补充为最高优先级，参考素材只提供机制和背景。</p></div>{mother.version ? <Button variant="ghost" className="h-8 px-2 text-xs" onClick={() => setHistoryOpen(true)}>历史版本</Button> : null}</div>{warnings.length ? <div className="mt-4 rounded-xl border border-[var(--warning)] p-3 text-sm text-[var(--warning)]">有 {warnings.length} 处需要确认</div> : null}{motherMessage ? <p role="status" className="mt-4 text-sm text-[var(--success)]">{motherMessage}</p> : null}{motherError ? <p role="alert" className="mt-4 text-sm text-[var(--danger)]">{motherError}</p> : null}{mother.version ? <><div className="my-4 flex justify-end">{configured && editableProject ? <Button variant="secondary" disabled={motherGenerating} onClick={generateMotherContent}>{motherGenerating ? "正在生成…" : "重新生成我的口播稿"}</Button> : null}</div><MotherContentEditor key={mother.version} projectId={project.id} initial={mother} editable={editableProject} onSaved={(version) => setMother((current) => ({ ...current, version }))} /></> : <section className="mt-5 rounded-xl border border-dashed p-6"><p className="text-sm text-[var(--text-secondary)]">补充你的观点后，生成一版可继续编辑的口播稿。不会把参考素材中的经历当成你的经历。</p>{configured && editableProject ? <Button className="mt-5" disabled={motherGenerating} onClick={generateMotherContent}>{motherGenerating ? "正在生成我的口播稿…" : "生成我的口播稿"}</Button> : <p className="mt-4 text-sm">AI 服务不可用，请先检查 Kimi 配置。</p>}</section>}</Card></main> : <section><nav aria-label="平台版本" className="mb-4 flex gap-1 overflow-x-auto rounded-xl border bg-[var(--surface)] p-1">{SUPPORTED_PLATFORMS.map((platform) => <button key={platform} className={`min-w-24 rounded-lg px-3 py-2 text-sm ${activePlatform === platform ? "bg-[var(--surface-elevated)]" : "text-[var(--text-secondary)]"}`} onClick={() => setActivePlatform(platform)}>{PLATFORM_LABELS[platform]}</button>)}</nav><PlatformContentFactory projectId={project.id} activePlatform={activePlatform} motherVersion={mother.version} variants={effectiveVariants} editable={editableProject} integrationStatus={ai.integrationStatus} onSelectPlatform={setActivePlatform} onVariantChange={(variant) => setVariants((current) => [...current.filter((item) => item.platform !== variant.platform), variant])} /></section>}
+    <StudioDrawer title="口播稿历史版本" open={historyOpen} onClose={() => setHistoryOpen(false)}><div className="grid gap-3">{motherHistory.map((item) => <details key={`${item.version}-${item.createdAt}`} className="rounded-xl border p-4"><summary className="cursor-pointer text-sm font-medium">V{item.version}{item.current ? " · 当前版本" : ""}</summary><h3 className="mt-3 font-medium">{item.title || "未命名口播稿"}</h3><p className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-[var(--text-secondary)]">{item.body || "空白草稿"}</p></details>)}</div></StudioDrawer>
   </>;
-}
-
-function MotherContentStart({ integrationStatus, editable, hasCreatorProfile, generating, error, onGenerate, onManual }: { integrationStatus: "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "DISABLED" | "ERROR" | "MOCK"; editable: boolean; hasCreatorProfile: boolean; generating: boolean; error: string; onGenerate: () => void; onManual: () => void }) {
-  const configured = integrationStatus === "CONFIGURED" || integrationStatus === "MOCK";
-  return <section className="rounded-xl border border-dashed p-6 sm:p-8"><div className="flex items-center gap-2"><h2 className="text-lg font-semibold">核心母稿</h2><Badge>AI First</Badge></div><p className="mt-3 text-sm text-[var(--text-secondary)]">创作方案已准备完成。AI 将结合参考素材、智能整理、统一创作分析、创作方案、已采用创作依据{hasCreatorProfile ? "和创作者画像" : ""}，生成第一版核心母稿。</p><ul className="mt-4 grid gap-2 text-sm"><li>✓ 参考素材与智能整理</li><li>✓ 统一创作分析与创作方案</li><li>✓ 已采用创作依据</li>{hasCreatorProfile ? <li>✓ 创作者画像</li> : <li className="text-[var(--text-secondary)]">完善创作者画像后，内容会更贴近个人表达。</li>}</ul>{configured && editable ? <Button className="mt-6" disabled={generating} onClick={onGenerate}>{generating ? "正在生成核心母稿..." : "AI 生成核心母稿"}</Button> : <div className="mt-6 rounded-lg border border-dashed p-3 text-sm"><p>AI 创作服务当前不可用。</p><a className="mt-2 inline-block text-[var(--accent)]" href="/settings/integrations">检查 Kimi 配置</a></div>}{editable ? <Button className="mt-3 sm:ml-3" variant="secondary" disabled={generating} onClick={onManual}>手动开始写</Button> : null}{generating ? <p role="status" className="mt-4 text-sm text-[var(--text-secondary)]">正在生成核心母稿，请稍候…</p> : null}{error ? <div role="alert" className="mt-4 text-sm text-[var(--danger)]"><p>核心母稿生成失败</p><p className="mt-1">{error}</p></div> : null}</section>;
 }

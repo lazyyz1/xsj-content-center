@@ -30,6 +30,7 @@ type MaterialAnalysis = {
   coreViewpoint: string | null;
   keyPoints: unknown;
   coreQuestion: string | null;
+  understanding?: unknown;
 };
 type Source = { sourceItem: { id: string; title: string | null; materialAnalyses: MaterialAnalysis[] } };
 
@@ -48,7 +49,7 @@ export class CreativeBriefPrefillService {
     project: { title: string; audience: string | null; status: string };
     sources: Source[];
     existingBrief: ExistingBrief | null;
-    unifiedAnalysisOutput: unknown;
+    unifiedAnalysisOutput?: unknown;
     hasMotherContent: boolean;
   }) {
     const metadata = readMaterialAnalysisBriefMetadata(input.existingBrief?.metadata);

@@ -12,6 +12,7 @@ type AnalysisForBrief = {
   coreViewpoint: string | null;
   keyPoints: unknown;
   coreQuestion: string | null;
+  understanding?: unknown;
 };
 
 type SourceForBrief = { id: string; title: string | null };
@@ -62,14 +63,15 @@ export class MaterialAnalysisToBriefMapper {
       keywords: strings(input.analysis.keywords),
       referenceTags: strings(input.analysis.tags),
     };
+    const hasNewUnderstanding = Boolean(input.analysis.understanding && typeof input.analysis.understanding === "object");
     return {
-      topic: text(input.analysis.topic),
+      topic: hasNewUnderstanding ? text(input.project.title) : text(input.analysis.topic),
       angle: "",
-      audience: text(input.analysis.targetAudience) || text(input.project.audience),
-      coreMessage: text(input.analysis.coreViewpoint),
-      coreQuestion: text(input.analysis.coreQuestion),
-      background: text(input.analysis.summary),
-      keyPoints: strings(input.analysis.keyPoints),
+      audience: hasNewUnderstanding ? text(input.project.audience) : text(input.analysis.targetAudience) || text(input.project.audience),
+      coreMessage: hasNewUnderstanding ? "" : text(input.analysis.coreViewpoint),
+      coreQuestion: hasNewUnderstanding ? "" : text(input.analysis.coreQuestion),
+      background: hasNewUnderstanding ? "" : text(input.analysis.summary),
+      keyPoints: hasNewUnderstanding ? [] : strings(input.analysis.keyPoints),
       structure: [],
       tone: "",
       risks: [],

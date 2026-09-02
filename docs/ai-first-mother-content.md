@@ -1,5 +1,7 @@
 # AI-first 核心母稿
 
+> 默认产品路径已被 [Product Simplification V1](./product-simplification-v1.md) 取代。用户界面现称“我的口播稿”，生成上下文不再依赖 Unified Creative Analysis、完整 Transcript 或 Deep Content Package。
+
 ## 产品原则
 
 核心母稿采用“AI 从 0 到 80%，人从 80% 到 100%”的协作方式。创作方案确认后，页面先展示生成准备状态，主操作是“AI 生成核心母稿”，同时保留“手动开始写”。打开 Studio、查看创作依据或历史版本都不会调用外部模型；只有用户明确点击生成、重新生成或既有局部 AI 编辑动作时才会发起调用。

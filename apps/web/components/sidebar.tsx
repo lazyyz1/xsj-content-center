@@ -13,10 +13,10 @@ import { LogoutButton } from "./logout-button";
 type NavItem = { label: string; icon: LucideIcon; href: string };
 
 const links: NavItem[] = [
-  { label: "工作台", href: "/dashboard", icon: LayoutDashboard },
-  { label: "内容发现", href: "/discovery", icon: Compass },
+  { label: "首页", href: "/dashboard", icon: LayoutDashboard },
+  { label: "发现内容", href: "/discovery", icon: Compass },
   { label: "素材库", href: "/library", icon: Library },
-  { label: "内容项目", href: "/projects", icon: FolderKanban },
+  { label: "我的创作", href: "/projects", icon: FolderKanban },
   { label: "发布中心", href: "/calendar", icon: CalendarDays },
   { label: "设置", href: "/settings", icon: Settings },
 ];

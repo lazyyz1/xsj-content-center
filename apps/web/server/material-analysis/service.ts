@@ -1,6 +1,5 @@
 import "server-only";
 
-import { slugifyTag } from "@content-center/core";
 import { db, type MaterialAnalysis, type Prisma } from "@content-center/db";
 import { LLMError } from "@content-center/providers";
 import { executeStructuredAIRun } from "../ai/ai-run-service";
@@ -38,6 +37,8 @@ export type MaterialAnalysisDTO = {
   coreViewpoint: string | null;
   keyPoints: string[];
   coreQuestion: string | null;
+  understanding: MaterialAnalysisOutput | null;
+  legacy: boolean;
   errorCode: string | null;
   errorMessage: string | null;
   stale: boolean;
@@ -46,6 +47,7 @@ export type MaterialAnalysisDTO = {
 };
 
 export function toMaterialAnalysisDTO(row: MaterialAnalysis, transcriptUpdatedAt?: Date | null): MaterialAnalysisDTO {
+  const parsedUnderstanding = materialAnalysisOutputSchema.safeParse(row.understanding);
   return {
     id: row.id,
     sourceItemId: row.sourceItemId,
@@ -62,6 +64,8 @@ export function toMaterialAnalysisDTO(row: MaterialAnalysis, transcriptUpdatedAt
     coreViewpoint: row.coreViewpoint,
     keyPoints: strings(row.keyPoints),
     coreQuestion: row.coreQuestion,
+    understanding: parsedUnderstanding.success ? parsedUnderstanding.data : null,
+    legacy: !parsedUnderstanding.success,
     errorCode: row.errorCode,
     errorMessage: row.errorMessage,
     stale: Boolean(transcriptUpdatedAt && transcriptUpdatedAt > row.transcriptUpdatedAtAtAnalysis),
@@ -119,6 +123,7 @@ export async function analyzeMaterial(input: { workspaceId: string; sourceItemId
   const reserved = await reserveAnalysis({ workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, userId: input.userId, transcriptUpdatedAt: built.source.transcript!.updatedAt });
   try {
     const prompt = `${renderPrompt(template.template, built.context)}${materialAnalysisOutputInstruction}`;
+    const systemPrompt = `${template.systemPrompt}\n\nProduct language requirements:\n- You are a 同行内容二创整理助手, not a critic, researcher, or marketing analyst.\n- Every natural-language value in the JSON must be written in concise, plain Simplified Chinese.\n- Use words an internal content creator can understand immediately. Avoid academic or research language such as 零和博弈、话语移植、修辞装置、反讽间距、隐性矛盾.\n- Describe source-author claims as claims, not verified objective facts.\n- Keep uncertain names exactly as transcribed; never silently correct them.`;
     const run = await executeStructuredAIRun<MaterialAnalysisOutput>({
       workspaceId: input.workspaceId,
       userId: input.userId,
@@ -129,10 +134,10 @@ export async function analyzeMaterial(input: { workspaceId: string; sourceItemId
       inputSummary: built.inputSummary,
       auditMetadata: { sourceItemId: input.sourceItemId, materialAnalysisId: reserved.id, materialAnalysisVersion: reserved.version },
       contextTruncated: built.contextTruncated,
-      generate: (provider) => provider.generateStructured({ systemPrompt: template.systemPrompt, prompt }, materialAnalysisOutputSchema),
+      generate: (provider) => provider.generateStructured({ systemPrompt, prompt }, materialAnalysisOutputSchema),
     }, { runtime });
     const output = materialAnalysisOutputSchema.parse(run.output);
-    const completed = await db.materialAnalysis.update({ where: { id: reserved.id }, data: { ...output, tags: json(output.tags), keywords: json(output.keywords), keyPoints: json(output.keyPoints), status: "COMPLETED", aiRunId: run.id } });
+    const completed = await db.materialAnalysis.update({ where: { id: reserved.id }, data: { understanding: json(output), summary: output.whatItSays.summary, keyPoints: json(output.whatItSays.keyPoints), tags: [], keywords: [], status: "COMPLETED", aiRunId: run.id } });
     return toMaterialAnalysisDTO(completed, built.source.transcript!.updatedAt);
   } catch (error) {
     const code = error instanceof LLMError ? error.code : "MATERIAL_ANALYSIS_FAILED";
@@ -144,17 +149,12 @@ export async function analyzeMaterial(input: { workspaceId: string; sourceItemId
 
 export async function updateMaterialAnalysis(input: { workspaceId: string; sourceItemId: string; analysisId: string; userId: string; data: unknown }) {
   const parsed = materialAnalysisEditSchema.safeParse(input.data);
-  if (!parsed.success) throw new MaterialAnalysisError("INVALID_INPUT", "请检查整理字段、标签数量和内容长度。");
+  if (!parsed.success) throw new MaterialAnalysisError("INVALID_INPUT", "请检查整理内容和字段长度。");
   const source = await scopedSource(input.workspaceId, input.sourceItemId);
   const analysis = await db.materialAnalysis.findFirst({ where: { id: input.analysisId, workspaceId: input.workspaceId, sourceItemId: source.id } });
   if (!analysis) throw new MaterialAnalysisError("ANALYSIS_NOT_FOUND", "整理结果不存在。");
-  const tagNames = [...new Map(parsed.data.tags.map((name) => [slugifyTag(name), name])).entries()].filter(([slug]) => slug).slice(0, 8);
   const updated = await db.$transaction(async (tx) => {
-    const row = await tx.materialAnalysis.update({ where: { id: analysis.id }, data: { ...parsed.data, tags: json(parsed.data.tags), keywords: json(parsed.data.keywords), keyPoints: json(parsed.data.keyPoints), status: "COMPLETED", origin: "HUMAN", errorCode: null, errorMessage: null } });
-    for (const [slug, name] of tagNames) {
-      const tag = await tx.contentTag.upsert({ where: { workspaceId_slug: { workspaceId: input.workspaceId, slug } }, create: { workspaceId: input.workspaceId, name, slug }, update: {} });
-      await tx.sourceItemTag.upsert({ where: { sourceItemId_tagId: { sourceItemId: source.id, tagId: tag.id } }, create: { sourceItemId: source.id, tagId: tag.id }, update: {} });
-    }
+    const row = await tx.materialAnalysis.update({ where: { id: analysis.id }, data: { understanding: json(parsed.data), summary: parsed.data.whatItSays.summary, keyPoints: json(parsed.data.whatItSays.keyPoints), status: "COMPLETED", origin: "HUMAN", errorCode: null, errorMessage: null } });
     await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "material_analysis.updated", resourceType: "material_analysis", resourceId: analysis.id, metadata: { sourceItemId: source.id, version: analysis.version } } });
     return row;
   });
@@ -192,8 +192,8 @@ export async function createProjectFromMaterial(input: { workspaceId: string; so
     const briefInitialized = await initializeExistingProjectBrief({ workspaceId: input.workspaceId, projectId: existing.project.id, sourceItemId: source.id, userId: input.userId, draft });
     return { projectId: existing.project.id, created: false, briefInitialized };
   }
-  const title = latest?.suggestedTitle || source.title || "未命名内容项目";
-  const audience = latest?.targetAudience || undefined;
+  const title = source.title || latest?.suggestedTitle || "未命名内容项目";
+  const audience = undefined;
   const initialBrief = latest ? MaterialAnalysisToBriefMapper.map({ analysis: latest, source, project: { title, audience: audience ?? null } }) : undefined;
   const project = await createProject({ workspaceId: input.workspaceId, userId: input.userId, sourceItemId: source.id, title, description: latest?.summary || undefined, audience, initialBrief });
   return { projectId: project.id, created: true, briefInitialized: Boolean(initialBrief) };

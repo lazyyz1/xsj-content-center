@@ -847,6 +847,7 @@ model MaterialAnalysis {
   coreViewpoint                 String?
   keyPoints                     Json
   coreQuestion                  String?
+  understanding                Json?
   origin                        MaterialAnalysisOrigin @default(AI)
   aiRunId                       String?                @unique
   transcriptUpdatedAtAtAnalysis DateTime
