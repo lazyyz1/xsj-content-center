@@ -6,6 +6,18 @@ import { chatCompletionResponseSchema, openAICompatibleConfigSchema, type OpenAI
 
 export type OpenAICompatibleOptions = { fetch?: typeof fetch; timeoutMs?: number; maxRetries?: 0 | 1 };
 
+type RequestCapabilities = {
+  supportsTemperature: boolean;
+  thinking?: { type: "disabled" };
+};
+
+function resolveRequestCapabilities(config: OpenAICompatibleConfig): RequestCapabilities {
+  if (config.provider.toUpperCase() === "KIMI" && config.model === "kimi-k2.6") {
+    return { supportsTemperature: false, thinking: { type: "disabled" } };
+  }
+  return { supportsTemperature: true };
+}
+
 function endpoint(baseUrl: string) {
   const normalized = baseUrl.replace(/\/+$/, "");
   return normalized.endsWith("/chat/completions") ? normalized : `${normalized}/chat/completions`;
@@ -69,6 +81,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
 
   private async request(input: LLMGenerateInput): Promise<ProviderResult<LLMTextResult>> {
     let response: Response;
+    const capabilities = resolveRequestCapabilities(this.config);
     try {
       response = await this.fetcher(endpoint(this.config.baseUrl), {
         method: "POST",
@@ -79,7 +92,8 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
             ...(input.systemPrompt ? [{ role: "system", content: input.systemPrompt }] : []),
             { role: "user", content: input.prompt },
           ],
-          temperature: input.temperature ?? 0.4,
+          ...(capabilities.supportsTemperature ? { temperature: input.temperature ?? 0.4 } : {}),
+          ...(capabilities.thinking ? { thinking: capabilities.thinking } : {}),
           response_format: { type: "json_object" },
         }),
         signal: AbortSignal.timeout(this.timeoutMs),
