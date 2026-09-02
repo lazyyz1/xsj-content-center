@@ -57,6 +57,10 @@ AI tags 首先只保存在 `MaterialAnalysis`。用户明确保存编辑结果�
 
 映射只覆盖有直接来源的事实字段：选题、目标受众、核心问题、素材核心观点、关键要点和参考内容摘要。切入角度、内容结构、语气与风险点保持空白，交给创作者填写。完整映射、来源追踪和不覆盖规则见 [material-studio-handoff.md](./material-studio-handoff.md)。
 
+Studio 展示层再由 `CreativeBriefPrefillService` 把这份来源理解与已保存的 `UnifiedCreativeAnalysis` 建议组合成一份待确认的“创作方案”。已有 CreativeBrief 的非空字段始终优先；统一分析只补充尚未确认的角度、结构、表达方向、风险与标题参考。该组合是确定性读取，不调用 Kimi、不调用 RedFox，也不在页面加载时写入或覆盖 CreativeBrief。用户保存或点击“确认并开始创作”后，才把最终方案写入 Brief。
+
+素材原文、Transcript、MaterialAnalysis 和统一分析中对该素材的引用在 Studio 素材详情 Drawer 中按需查看，不再长期占据主创作区域。Evidence 同样保留底层模型和编辑能力，但通过“查看素材依据”二级入口使用。
+
 ## 后续 Structure Analysis
 
 未来结构分析只能读取已校验的 `MaterialAnalysisDTO` 和明确的来源数据，使用新的业务对象与 PromptType；不得把 Hook、结构、CTA 或二创方案回填进本对象。

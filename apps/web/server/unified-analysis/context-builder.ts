@@ -27,7 +27,8 @@ export class UnifiedCreativeAnalysisContextBuilder {
     });
     if (!project) throw new ProjectServiceError("PROJECT_NOT_FOUND");
     const briefMetadata = readMaterialAnalysisBriefMetadata(project.creativeBrief?.metadata);
-    const primary = briefMetadata ? project.sources.find(({ sourceItemId }) => sourceItemId === briefMetadata.primarySourceItemId) : null;
+    const primary = (briefMetadata ? project.sources.find(({ sourceItemId }) => sourceItemId === briefMetadata.primarySourceItemId) : null)
+      ?? project.sources.find(({ sourceItem }) => Boolean(sourceItem.materialAnalyses[0]));
     const primaryAnalysis = primary?.sourceItem.materialAnalyses[0];
     const sourceClassification = primaryAnalysis ? "SOURCE_FACT" as const : "USER_INPUT" as const;
     const sourceItemIds = primaryAnalysis && primary ? [primary.sourceItemId] : [];

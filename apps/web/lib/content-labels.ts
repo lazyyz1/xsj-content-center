@@ -69,7 +69,7 @@ export const evidenceTypeLabels: Record<string, string> = {
   CASE: "案例",
   DATA: "数据",
   QUOTE: "引用",
-  EXPERIENCE: "经验",
+  EXPERIENCE: "经历",
   QUESTION: "问题",
   OTHER: "其他",
 };

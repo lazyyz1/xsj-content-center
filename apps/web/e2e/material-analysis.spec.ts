@@ -110,23 +110,26 @@ test("material detail supports analyze, edit, tags, reanalysis, project handoff 
   const projectId = page.url().match(/\/projects\/([^/]+)\/studio$/)?.[1];
   expect(projectId).toBeTruthy();
   expect(calls).toBe(callsBeforeProject);
-  await expect(page.getByText("已智能整理", { exact: true }).first()).toBeVisible();
-  await page.locator("summary").filter({ hasText: "待整理视频" }).first().click();
-  await expect(page.getByText(/主题：素材智能整理/)).toBeVisible();
-  await expect(page.getByText("创作准备已完成", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("选题")).toHaveValue("素材智能整理");
+  await expect(page.getByText("已整理", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: /待整理视频/ }).click();
+  await expect(page.getByRole("dialog", { name: "待整理视频" })).toContainText("素材智能整理");
+  await page.getByRole("button", { name: "关闭" }).click();
+  await expect(page.getByText("已保存", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "编辑方案" }).click();
+  await expect(page.getByLabel("主题")).toHaveValue("素材智能整理");
   await expect(page.getByLabel("目标受众")).toHaveValue("内容创作者");
   await expect(page.getByLabel("核心问题")).toHaveValue("如何减少素材进入创作流程前的信息损耗？");
   await expect(page.getByLabel("素材核心观点")).toHaveValue("原始素材应先变成可编辑、可追溯的理解结果。");
   await expect(page.getByLabel("关键要点（每行一点）")).toContainText("元数据提供市场信号");
   await expect(page.getByLabel("参考内容摘要")).toHaveValue("这条素材说明了创作前进行结构化整理的价值。");
-  await expect(page.getByLabel("切入角度")).toHaveValue("");
+  await expect(page.getByLabel("建议切入角度")).toHaveValue("");
 
   await page.getByLabel("目标受众").fill("人工调整后的受众");
   await page.getByLabel("核心问题").fill("人工确认后真正要解决什么？");
-  await page.getByRole("button", { name: "保存创作简报" }).click();
-  await expect(page.getByRole("status")).toHaveText("已保存");
+  await page.getByRole("button", { name: "保存创作方案" }).click();
+  await expect(page.getByRole("status")).toHaveText("创作方案已保存");
   await page.reload();
+  await page.getByRole("button", { name: "编辑方案" }).click();
   await expect(page.getByLabel("目标受众")).toHaveValue("人工调整后的受众");
   await expect(page.getByLabel("核心问题")).toHaveValue("人工确认后真正要解决什么？");
 
@@ -136,13 +139,13 @@ test("material detail supports analyze, edit, tags, reanalysis, project handoff 
   await expect.poll(() => db.materialAnalysis.count({ where: { sourceItemId: source.id, status: "COMPLETED" } })).toBe(3);
   await expect(page.getByTestId("material-analysis-card")).toContainText("第二版：先整理素材，再开始创作");
   await page.goto(`/projects/${projectId}/studio`);
-  await expect(page.getByText("素材整理已更新，已保留你当前的创作简报，不会自动覆盖。")).toBeVisible();
+  await expect(page.getByText("素材整理已有新版本，当前方案不会被自动覆盖。")).toBeVisible();
+  await page.getByRole("button", { name: "编辑方案" }).click();
   await expect(page.getByLabel("目标受众")).toHaveValue("人工调整后的受众");
   await expect(page.getByLabel("核心问题")).toHaveValue("人工确认后真正要解决什么？");
 
   await page.setViewportSize({ width: 375, height: 812 });
-  await page.getByRole("button", { name: "AI 与创作简报" }).click();
-  await expect(page.getByText("创作准备已完成", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI 创作助手" })).toBeVisible();
   await expect(page.getByLabel("目标受众")).toHaveValue("人工调整后的受众");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -170,5 +173,6 @@ test("unconfigured Kimi is explicit and never creates a fake analysis", async ({
   await page.goto(`/projects/${oldProject.id}/studio`);
   await expect(page.getByRole("heading", { name: "旧项目兼容性" })).toBeVisible();
   await expect(page.getByText("创作准备已完成", { exact: true })).toHaveCount(0);
-  await expect(page.getByLabel("选题")).toHaveValue("");
+  await page.getByRole("button", { name: "编辑方案" }).click();
+  await expect(page.getByLabel("主题")).toHaveValue("");
 });

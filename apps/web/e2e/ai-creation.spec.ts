@@ -7,6 +7,7 @@ import { expect, test } from "@playwright/test";
 const runId = randomUUID();
 const email = `unified-analysis-${runId}@example.test`;
 const unconfiguredEmail = `unified-analysis-unconfigured-${runId}@example.test`;
+const legacyEmail = `unified-analysis-legacy-${runId}@example.test`;
 const password = "safe-e2e-password";
 let fixture: Server;
 let fixtureOrigin = "";
@@ -45,7 +46,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await new Promise<void>((resolve) => fixture.close(() => resolve()));
-  const users = await db.user.findMany({ where: { email: { in: [email, unconfiguredEmail] } }, select: { id: true } });
+  const users = await db.user.findMany({ where: { email: { in: [email, unconfiguredEmail, legacyEmail] } }, select: { id: true } });
   const userIds = users.map(({ id }) => id);
   if (userIds.length) await db.workspace.deleteMany({ where: { members: { some: { userId: { in: userIds } } } } });
   await db.user.deleteMany({ where: { id: { in: userIds } } });
@@ -71,47 +72,79 @@ test("one unified AI action returns a grounded analysis, caches identical input,
   await new IntegrationService().saveIntegrationConfig({ workspaceId: membership.workspaceId, userId: user.id, provider: "LLM", mode: "FIXTURE", config: { provider: "fixture-openai-compatible", baseUrl: fixtureOrigin, apiKey: "unified-analysis-key", model: "kimi-2.6-fixture" } });
   const source = await db.sourceItem.create({ data: { workspaceId: membership.workspaceId, createdById: user.id, sourceType: "TEXT", sourcePlatform: "GENERIC", status: "READY", title: "统一分析素材", rawText: "可靠创作需要明确问题、绑定来源，并保留人工判断。" } });
   fixtureSourceId = source.id;
+  await db.materialAnalysis.create({ data: { workspaceId: membership.workspaceId, sourceItemId: source.id, version: 1, status: "COMPLETED", suggestedTitle: "可靠创作", summary: "先整理来源，再进入创作。", topic: "可靠 AI 创作", tags: [], keywords: [], contentType: "口播", targetAudience: "内容团队", coreViewpoint: "可靠创作需要来源约束。", keyPoints: ["来源可追溯", "人工保留判断"], coreQuestion: "如何减少无依据返工？", transcriptUpdatedAtAtAnalysis: source.updatedAt, createdById: user.id } });
   const created = await page.request.post("/api/projects", { data: { title: "统一创作分析项目", goal: "减少无依据创作", audience: "内容团队", sourceItemId: source.id } });
   expect(created.status()).toBe(201);
   const projectId = (await created.json() as { id: string }).id;
   expect(calls).toBe(0);
 
   await page.setViewportSize({ width: 1280, height: 900 });
+  expect(await db.aIRun.count({ where: { projectId } })).toBe(0);
+  expect(await db.apiUsage.count({ where: { workspaceId: membership.workspaceId } })).toBe(0);
   await page.goto(`/projects/${projectId}/studio`);
   expect(calls).toBe(0);
-  await expect(page.getByRole("button", { name: "AI 深度分析" })).toHaveCount(1);
-  for (const label of ["生成结构", "分析角度", "分析风险", "生成标题建议", "生成创作角度", "生成创作简报"]) await expect(page.getByRole("button", { name: label })).toHaveCount(0);
+  expect(await db.aIRun.count({ where: { projectId } })).toBe(0);
+  expect(await db.apiUsage.count({ where: { workspaceId: membership.workspaceId } })).toBe(0);
+  await expect(page.getByRole("heading", { name: "参考素材" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "创作方案" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "核心母稿" })).toHaveCount(0);
+  await expect(page.getByLabel("观点或结论")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "开始 AI 分析" })).toHaveCount(1);
+  for (const label of ["分析素材", "提取观点/证据", "生成角度", "生成创作简报", "生成核心母稿"]) await expect(page.getByRole("button", { name: label, exact: true })).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath("studio-preparing.png"), fullPage: true });
 
-  await page.getByRole("button", { name: "AI 深度分析" }).click();
+  await page.getByRole("button", { name: "开始 AI 分析" }).click();
   await expect(page.getByRole("status")).toContainText("AI 分析完成");
-  await expect(page.getByRole("heading", { name: "创作理解" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "可选切入角度" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "结构建议" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "素材依据" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "风险提醒" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "标题参考" })).toBeVisible();
-  await expect(page.getByText("为什么 AI 内容总在返工？")).toBeVisible();
+  await page.getByRole("button", { name: "查看完整分析" }).click();
+  const analysisDialog = page.getByRole("dialog", { name: "完整 AI 创作分析" });
+  await expect(analysisDialog.getByRole("heading", { name: "创作理解" })).toBeVisible();
+  await expect(analysisDialog.getByRole("heading", { name: "可选切入角度" })).toBeVisible();
+  await expect(analysisDialog.getByRole("heading", { name: "结构建议" })).toBeVisible();
+  await expect(analysisDialog.getByRole("heading", { name: "素材依据" })).toBeVisible();
+  await expect(analysisDialog.getByRole("heading", { name: "风险提醒" })).toBeVisible();
+  await expect(analysisDialog.getByRole("heading", { name: "标题参考" })).toBeVisible();
+  await expect(analysisDialog.getByText("先整理来源，再进入创作。", { exact: true })).toBeVisible();
+  await expect(analysisDialog.getByText("如何减少无依据返工？", { exact: true })).toBeVisible();
+  await expect(analysisDialog.getByText("为什么 AI 内容总在返工？")).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("studio-analysis-drawer.png"), fullPage: true });
   expect(calls).toBe(1);
-  await expect(page.getByLabel("目标受众")).toHaveValue("");
+  await page.getByRole("button", { name: "关闭" }).click();
+  await expect(page.getByText("可靠 AI 创作", { exact: true })).toBeVisible();
 
   await page.reload();
-  await expect(page.getByText("AI 分析已是最新 · v1")).toBeVisible();
+  await expect(page.getByText(/分析于 .* · v1/)).toBeVisible();
   expect(calls).toBe(1);
+  expect(await db.aIRun.count({ where: { projectId } })).toBe(1);
+  expect(await db.apiUsage.count({ where: { workspaceId: membership.workspaceId } })).toBe(1);
   const cached = await page.request.post(`/api/projects/${projectId}/ai/run`, { data: { action: "UNIFIED_CREATIVE_ANALYSIS" } });
   expect(cached.status()).toBe(201);
   expect((await cached.json() as { cached: boolean }).cached).toBe(true);
   expect(calls).toBe(1);
 
+  await page.getByRole("button", { name: "编辑方案" }).click();
   await page.getByLabel("目标受众").fill("人工确认后的受众");
-  await page.getByRole("button", { name: "保存创作简报" }).click();
-  await expect(page.getByText("创作信息已更新，可更新 AI 分析。旧分析不会覆盖当前创作简报。")).toBeVisible();
-  await page.getByRole("button", { name: "更新 AI 分析" }).click();
+  await page.getByLabel("核心问题").fill("人工确认后的核心问题");
+  await page.screenshot({ path: test.info().outputPath("studio-plan-editing.png"), fullPage: true });
+  await page.getByRole("button", { name: "保存创作方案" }).click();
+  await expect(page.getByText("创作内容已发生变化，建议更新分析；不会自动调用 AI。")).toBeVisible();
+  expect(calls).toBe(1);
+  await page.getByRole("button", { name: "更新分析" }).click();
   await expect(page.getByText("AI 分析完成", { exact: true })).toBeVisible();
   expect(calls).toBe(2);
+  await page.getByRole("button", { name: "编辑方案" }).click();
   await expect(page.getByLabel("目标受众")).toHaveValue("人工确认后的受众");
+  await expect(page.getByLabel("核心问题")).toHaveValue("人工确认后的核心问题");
+  await page.getByRole("button", { name: "取消" }).click();
+
+  await page.getByRole("button", { name: "确认并开始创作" }).click();
+  await expect(page.getByRole("heading", { name: "核心母稿" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "创作方案" })).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath("studio-writing.png"), fullPage: true });
+  await page.getByRole("button", { name: "查看创作方案" }).click();
+  await expect(page.getByRole("dialog", { name: "创作方案" })).toContainText("人工确认后的受众");
+  await page.getByRole("button", { name: "关闭" }).click();
 
   await page.setViewportSize({ width: 375, height: 812 });
-  await page.getByRole("button", { name: "AI 与创作简报" }).click();
   await expect(page.getByTestId("unified-creative-analysis")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 
@@ -126,5 +159,18 @@ test("unconfigured LLM is explicit and exposes no active AI analysis action", as
   const project = await db.contentProject.create({ data: { workspaceId, createdById: user.id, title: "No LLM Project" } });
   await page.goto(`/projects/${project.id}/studio`);
   await expect(page.getByText("尚未配置 AI 模型", { exact: true }).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "AI 深度分析" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "开始 AI 分析" })).toHaveCount(0);
+});
+
+test("legacy project with a mother content opens directly in writing without MaterialAnalysis", async ({ page }) => {
+  const user = await register(page, legacyEmail, "Legacy Studio Owner");
+  const workspaceId = user.workspaceMemberships[0]!.workspaceId;
+  const project = await db.contentProject.create({ data: { workspaceId, createdById: user.id, title: "旧项目", status: "WRITING", creativeBrief: { create: { workspaceId, createdById: user.id, topic: "旧主题", angle: "旧角度", audience: "旧受众", coreMessage: "旧判断", keyPoints: [], structure: [], tone: "", risks: [] } }, motherContent: { create: { workspaceId, createdById: user.id, title: "已有母稿", body: "旧项目已有正文。", outline: [] } } } });
+  await page.goto(`/projects/${project.id}/studio`);
+  await expect(page.getByRole("heading", { name: "核心母稿" })).toBeVisible();
+  await expect(page.getByLabel("母稿正文")).toHaveValue("旧项目已有正文。");
+  await expect(page.getByRole("heading", { name: "创作方案" })).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath("studio-legacy.png"), fullPage: true });
+  await page.getByRole("button", { name: "查看创作方案" }).click();
+  await expect(page.getByRole("dialog", { name: "创作方案" })).toContainText("旧主题");
 });

@@ -52,20 +52,25 @@ test("V1 UI happy path: 素材 → 创作 → 审核 → 排期 → 人工发布
   await page.getByRole("button", { name: "用此素材新建项目" }).click();
   await expect(page).toHaveURL(/\/projects\/[^/]+\/studio$/);
 
+  await page.getByRole("button", { name: "查看素材依据" }).click();
+  await page.getByRole("dialog", { name: "素材依据" }).locator("summary").filter({ hasText: "新增素材依据" }).click();
   await page.getByLabel("内容类型").selectOption("VIEWPOINT");
   await page.getByLabel("关联素材").selectOption({ label: "老板用 AI 最容易犯的一个错" });
   await page.getByLabel("原文摘录").fill("很多老板把 AI 当作答案生成器，却没有先定义经营问题。");
   await page.getByLabel("观点或结论").fill("AI 应该放大经营判断，而不是替代老板判断。");
-  await page.getByRole("button", { name: "新增观点 / 证据" }).click();
+  await page.getByRole("button", { name: "新增素材依据" }).click();
+  await page.getByRole("button", { name: "关闭" }).click();
 
-  await page.getByLabel("选题").fill("老板如何正确使用 AI");
-  await page.getByLabel("切入角度").fill("从经营问题而不是工具功能切入");
+  await page.getByRole("button", { name: "编辑方案" }).click();
+  await page.getByLabel("主题").fill("老板如何正确使用 AI");
+  await page.getByLabel("建议切入角度").fill("从经营问题而不是工具功能切入");
   await page.getByLabel("目标受众").fill("企业老板、管理层");
-  await page.getByLabel("核心观点").fill("AI 应该放大经营判断，而不是替代老板判断。");
+  await page.getByLabel("素材核心观点").fill("AI 应该放大经营判断，而不是替代老板判断。");
   await page.getByLabel("关键要点（每行一点）").fill("先定义经营问题\n区分事实和假设\n人工校验输出");
-  await page.getByLabel("内容结构（每行一点）").fill("判断\n原因\n方法\n提醒");
-  await page.getByRole("button", { name: "保存创作简报" }).click();
-  await expect(page.getByText("已保存", { exact: true })).toBeVisible();
+  await page.getByLabel("建议结构（每行一点）").fill("判断\n原因\n方法\n提醒");
+  await page.getByRole("button", { name: "保存创作方案" }).click();
+  await expect(page.getByRole("status")).toHaveText("创作方案已保存");
+  await page.getByRole("button", { name: "确认并开始创作" }).click();
 
   await page.getByRole("button", { name: /2 · 深度创作/ }).click();
   await expect(page.locator("span:visible").filter({ hasText: "MOCK MODE" }).first()).toBeVisible();
