@@ -68,13 +68,13 @@ test("CreatorProfile → angles preview/apply → brief preview/apply → mother
   await page.getByRole("button", { name: "保存创作画像" }).click();
   await expect(page.getByRole("status")).toHaveText("已保存");
 
-  await new IntegrationService().saveIntegrationConfig({ workspaceId, userId: user.id, provider: "LLM", config: { provider: "fixture-openai-compatible", baseUrl: fixtureOrigin, apiKey: "fixture-api-key", model: "fixture-model" } });
+  await new IntegrationService().saveIntegrationConfig({ workspaceId, userId: user.id, provider: "LLM", mode: "FIXTURE", config: { provider: "fixture-openai-compatible", baseUrl: fixtureOrigin, apiKey: "fixture-api-key", model: "fixture-model" } });
   const source = await db.sourceItem.create({ data: { workspaceId, createdById: user.id, sourceType: "TEXT", sourcePlatform: "GENERIC", status: "READY", title: "AI 创作素材", rawText: "可靠内容需要来源、证据和明确的创作者判断。" } });
   const created = await page.request.post("/api/projects", { data: { title: "阶段五 AI 项目", goal: "生成可靠母稿", audience: "内容团队", sourceItemId: source.id } });
   expect(created.status()).toBe(201);
   const projectId = (await created.json() as { id: string }).id;
   await page.goto(`/projects/${projectId}/studio`);
-  await expect(page.getByText("CONFIGURED", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("MOCK MODE", { exact: true }).first()).toBeVisible();
 
   await page.getByRole("button", { name: "生成创作角度" }).click();
   await expect(page.getByRole("heading", { name: "生成创作角度预览" })).toBeVisible();

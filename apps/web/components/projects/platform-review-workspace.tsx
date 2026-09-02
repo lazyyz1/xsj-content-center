@@ -36,7 +36,7 @@ function aiSummary(records: ReviewRecordView[]) {
   return "";
 }
 
-export function PlatformReviewWorkspace({ initial, integrationStatus }: { initial: PlatformReviewView; integrationStatus: "CONFIGURED" | "UNCONFIGURED" | "DISABLED" | "ERROR" | "MOCK" }) {
+export function PlatformReviewWorkspace({ initial, integrationStatus }: { initial: PlatformReviewView; integrationStatus: "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "DISABLED" | "ERROR" | "MOCK" }) {
   const router = useRouter();
   const [issues, setIssues] = useState(initial.records[0]?.result === "PENDING" ? initial.records[0].issues : initial.quality.issues);
   const [summary, setSummary] = useState(aiSummary(initial.records));

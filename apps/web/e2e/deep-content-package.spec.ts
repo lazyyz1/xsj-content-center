@@ -67,7 +67,7 @@ test("Deep Package → copy GPT task → manual import → Mother GPT_WEB → pl
 
   const user = await db.user.findUniqueOrThrow({ where: { email }, include: { workspaceMemberships: true } });
   const membership = user.workspaceMemberships[0]!;
-  await new IntegrationService().saveIntegrationConfig({ workspaceId: membership.workspaceId, userId: user.id, provider: "LLM", config: { provider: "fixture-openai-compatible", baseUrl: fixtureOrigin, apiKey: "deep-fixture-key", model: "workspace-fixture-model" } });
+  await new IntegrationService().saveIntegrationConfig({ workspaceId: membership.workspaceId, userId: user.id, provider: "LLM", mode: "FIXTURE", config: { provider: "fixture-openai-compatible", baseUrl: fixtureOrigin, apiKey: "deep-fixture-key", model: "workspace-fixture-model" } });
   const profile = await db.creatorProfile.create({ data: { workspaceId: membership.workspaceId, userId: user.id, displayName: "Deep Creator", positioning: "可靠内容方法", targetAudience: "内容团队", tone: "直接、具体", preferredStyle: "自然", forbiddenStyle: "口号", coreTopics: [], personalViews: ["证据先于写作"], brandTerms: [], forbiddenTerms: ["保证成功"], hookPreferences: [], structurePreferences: [], ctaPreferences: [], examplePhrases: ["先看证据"] } });
   const source = await db.sourceItem.create({ data: { workspaceId: membership.workspaceId, createdById: user.id, sourceType: "TEXT", sourcePlatform: "GENERIC", status: "READY", title: "研究素材", rawText: "正式素材正文" } });
   sourceId = source.id;

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CURRENT_KIMI_PRODUCT_MODEL, KIMI_INTEGRATION_TYPE } from "./kimi-model-policy";
 
 export const CONFIGURABLE_INTEGRATION_PROVIDERS = ["REDFOX", "DOUBAO_ASR", "TRANSCRIPTION", "LLM"] as const;
 export type ConfigurableIntegrationProvider = (typeof CONFIGURABLE_INTEGRATION_PROVIDERS)[number];
@@ -76,25 +77,29 @@ export const transcriptionConfigSchema = z
 
 export const llmConfigSchema = z
   .object({
-    provider: z.string().trim().min(1).max(100),
+    integrationType: z.literal(KIMI_INTEGRATION_TYPE),
+    productModel: z.literal(CURRENT_KIMI_PRODUCT_MODEL),
     baseUrl: z.string().trim().url().max(2_000),
     apiKey: optionalText(10_000),
-    label: optionalText(100),
-    modelId: optionalText(200),
-    model: optionalText(200),
+    apiModelId: optionalText(200),
+  })
+  .strict();
+
+const fixtureLLMConfigSchema = z
+  .object({
+    provider: z.literal("fixture-openai-compatible"),
+    baseUrl: z.string().trim().url().max(2_000),
+    apiKey: optionalText(10_000),
+    model: z.string().trim().min(1).max(200),
   })
   .strict()
-  .superRefine((config, context) => {
-    if (!config.modelId && !config.model) {
-      context.addIssue({ code: "custom", path: ["modelId"], message: "Model ID is required." });
-    }
-  })
   .transform((config) => ({
+    integrationType: "FIXTURE" as const,
+    productModel: "FIXTURE" as const,
     provider: config.provider,
     baseUrl: config.baseUrl,
     ...(config.apiKey ? { apiKey: config.apiKey } : {}),
-    label: config.label ?? "自定义模型",
-    modelId: config.modelId ?? config.model!,
+    apiModelId: config.model,
   }));
 
 export const providerConfigSchemas = {
@@ -118,7 +123,7 @@ export const providerConfigFields: Record<
     publicFields: ["source", "qualityMode", "selectionMode", "manualModel", "fallbackToDoubao", "endpoint"],
     secretFields: [],
   },
-  LLM: { publicFields: ["provider", "baseUrl", "label", "modelId"], secretFields: ["apiKey"], primarySecret: "apiKey" },
+  LLM: { publicFields: ["integrationType", "productModel", "provider", "baseUrl", "apiModelId"], secretFields: ["apiKey"], primarySecret: "apiKey" },
 };
 
 export function normalizePublicProviderConfig(
@@ -126,14 +131,7 @@ export function normalizePublicProviderConfig(
   config: Record<string, unknown>,
 ) {
   if (provider === "LLM") {
-    const modelId = typeof config.modelId === "string" ? config.modelId : config.model;
-    const rest = { ...config };
-    delete rest.model;
-    return {
-      ...rest,
-      label: typeof config.label === "string" ? config.label : "自定义模型",
-      ...(typeof modelId === "string" ? { modelId } : {}),
-    };
+    return config;
   }
   if (provider !== "DOUBAO_ASR") return config;
   const authMode = config.authMode === "LEGACY_APP_TOKEN" || (!config.authMode && config.appId)
@@ -165,7 +163,14 @@ export function isConfigurableIntegrationProvider(value: string): value is Confi
   return CONFIGURABLE_INTEGRATION_PROVIDERS.includes(value as ConfigurableIntegrationProvider);
 }
 
-export function parseProviderConfig(provider: ConfigurableIntegrationProvider, input: unknown) {
+export function parseProviderConfig(
+  provider: ConfigurableIntegrationProvider,
+  input: unknown,
+  options: { allowFixture?: boolean } = {},
+) {
+  if (provider === "LLM" && options.allowFixture) {
+    return fixtureLLMConfigSchema.parse(input) as Record<string, unknown>;
+  }
   return providerConfigSchemas[provider].parse(input) as Record<string, unknown>;
 }
 

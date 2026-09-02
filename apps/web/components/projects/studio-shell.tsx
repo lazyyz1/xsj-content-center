@@ -37,7 +37,7 @@ export function StudioShell({ project, availableSources, editable, ai }: {
   };
   availableSources: AvailableSource[];
   editable: boolean;
-  ai: { integrationStatus: "CONFIGURED" | "UNCONFIGURED" | "DISABLED" | "ERROR" | "MOCK"; hasCreatorProfile: boolean; recentRuns: Array<{ id: string; action: AIAction; status: string; outputJson?: unknown; contextTruncated?: boolean; errorCode?: string | null; appliedAt?: string | null; discardedAt?: string | null }> };
+  ai: { integrationStatus: "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "DISABLED" | "ERROR" | "MOCK"; hasCreatorProfile: boolean; recentRuns: Array<{ id: string; action: AIAction; status: string; outputJson?: unknown; contextTruncated?: boolean; errorCode?: string | null; appliedAt?: string | null; discardedAt?: string | null }> };
 }) {
   const [tab, setTab] = useState<"research" | "writing" | "brief">("writing");
   const [rewriteRequest, setRewriteRequest] = useState<RewriteRequest | null>(null);

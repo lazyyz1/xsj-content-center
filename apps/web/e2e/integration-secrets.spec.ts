@@ -50,10 +50,12 @@ test("API Configuration Center securely configures RedFox, Doubao, and Kimi", as
   await expect(doubao.getByText("已配置", { exact: true })).toBeVisible();
 
   const kimi = page.getByLabel("Kimi AI 配置");
+  await expect(kimi.getByText("当前模型：Kimi 2.6")).toBeVisible();
+  await expect(kimi.getByText("Kimi 2.7")).toHaveCount(0);
+  await expect(kimi.getByText("自定义模型")).toHaveCount(0);
   await kimi.getByLabel("Kimi AI Base URL").fill("https://kimi.example.invalid/v1");
   await kimi.getByLabel("Kimi AI API Key").fill(kimiSecret);
-  await kimi.getByLabel("Kimi AI 模型显示名称").fill("Kimi 2.7");
-  await kimi.getByLabel("Kimi AI Model ID").fill("confirmed-kimi-model-id");
+  await kimi.getByLabel("Kimi AI API Model ID").fill("confirmed-kimi-model-id");
   await kimi.getByRole("button", { name: "保存配置" }).click();
   await expect(kimi.getByText("已配置", { exact: true })).toBeVisible();
 
@@ -73,8 +75,7 @@ test("API Configuration Center securely configures RedFox, Doubao, and Kimi", as
   });
   expect(storedKimiBefore.encryptedConfig).not.toContain(kimiSecret);
 
-  await page.getByLabel("Kimi AI 配置").getByLabel("Kimi AI 模型显示名称").fill("自定义模型");
-  await page.getByLabel("Kimi AI 配置").getByLabel("Kimi AI Model ID").fill("updated-kimi-model-id");
+  await page.getByLabel("Kimi AI 配置").getByLabel("Kimi AI API Model ID").fill("updated-kimi-model-id");
   const kimiUpdateResponse = page.waitForResponse((response) => response.url().endsWith("/api/integrations/LLM") && response.request().method() === "PUT");
   await page.getByLabel("Kimi AI 配置").getByRole("button", { name: "保存配置" }).click();
   expect((await kimiUpdateResponse).status()).toBe(200);
@@ -82,6 +83,9 @@ test("API Configuration Center securely configures RedFox, Doubao, and Kimi", as
   await expect(service.getDecryptedIntegrationConfig(membership.workspaceId, "LLM")).resolves.toMatchObject({ apiKey: kimiSecret, model: "updated-kimi-model-id" });
   await expect(page.getByLabel("Kimi AI 配置").getByLabel("Kimi AI 已保存凭证")).toContainText(kimiSecret.slice(-4));
   expect(await page.content()).not.toContain(kimiSecret);
+
+  const modelOverride = await page.request.put("/api/integrations/llm", { data: { config: { integrationType: "KIMI", productModel: "KIMI_2_6", baseUrl: "https://kimi.example.invalid/v1", apiModelId: "approved-id", model: "browser-override" } } });
+  expect(modelOverride.status()).toBe(400);
 
   const redfoxPublicUpdate = await page.request.put("/api/integrations/redfox", { data: { config: { baseUrl: "https://changed-redfox.example.invalid" } } });
   expect(redfoxPublicUpdate.status()).toBe(200);
@@ -99,9 +103,11 @@ test("API Configuration Center securely configures RedFox, Doubao, and Kimi", as
   expect(editorUpdate.status()).toBe(403);
   const editorRead = await page.request.get("/api/integrations/redfox");
   expect(await editorRead.json()).toMatchObject({ status: "CONFIGURED", publicConfig: {}, lastFour: null });
+  await page.reload();
+  await expect(page.getByLabel("Kimi AI API Model ID")).toHaveCount(0);
 
   await db.workspaceMember.update({ where: { id: membership.id }, data: { role: "VIEWER" } });
-  const viewerUpdate = await page.request.put("/api/integrations/llm", { data: { config: { provider: "kimi", baseUrl: "https://forbidden.invalid", apiKey: "viewer-must-not-save", label: "自定义模型", modelId: "forbidden" } } });
+  const viewerUpdate = await page.request.put("/api/integrations/llm", { data: { config: { integrationType: "KIMI", productModel: "KIMI_2_6", baseUrl: "https://forbidden.invalid", apiKey: "viewer-must-not-save", apiModelId: "forbidden" } } });
   expect(viewerUpdate.status()).toBe(403);
 
   const otherUser = await db.user.create({ data: { name: "Other Configuration User", email: otherEmail } });

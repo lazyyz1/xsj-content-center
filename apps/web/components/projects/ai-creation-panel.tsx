@@ -17,7 +17,7 @@ function object(value: unknown): Record<string, unknown> { return value && typeo
 function array(value: unknown): unknown[] { return Array.isArray(value) ? value : []; }
 function text(value: unknown) { return typeof value === "string" ? value : ""; }
 
-export function AICreationPanel({ projectId, integrationStatus, hasCreatorProfile, editable, briefVersion, motherVersion, motherHasContent, recentRuns, rewriteRequest, onMotherContentApplied }: { projectId: string; integrationStatus: "CONFIGURED" | "UNCONFIGURED" | "DISABLED" | "ERROR" | "MOCK"; hasCreatorProfile: boolean; editable: boolean; briefVersion: number; motherVersion: number; motherHasContent: boolean; recentRuns: Run[]; rewriteRequest: RewriteRequest | null; onMotherContentApplied: (content: MotherContentSnapshot) => void }) {
+export function AICreationPanel({ projectId, integrationStatus, hasCreatorProfile, editable, briefVersion, motherVersion, motherHasContent, recentRuns, rewriteRequest, onMotherContentApplied }: { projectId: string; integrationStatus: "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "DISABLED" | "ERROR" | "MOCK"; hasCreatorProfile: boolean; editable: boolean; briefVersion: number; motherVersion: number; motherHasContent: boolean; recentRuns: Run[]; rewriteRequest: RewriteRequest | null; onMotherContentApplied: (content: MotherContentSnapshot) => void }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

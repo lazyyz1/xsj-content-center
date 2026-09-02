@@ -9,7 +9,7 @@ import {
 } from "@content-center/integrations";
 import { REDFOX_DEFAULT_BASE_URL } from "@content-center/providers";
 
-export type IntegrationDisplayStatus = "CONFIGURED" | "UNCONFIGURED" | "ERROR" | "DISABLED" | "MOCK";
+export type IntegrationDisplayStatus = "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "ERROR" | "DISABLED" | "MOCK";
 
 export type IntegrationDisplay = {
   provider: ConfigurableIntegrationProvider | "STORAGE";
@@ -51,7 +51,7 @@ const providerDetails: Record<ConfigurableIntegrationProvider, { name: string; d
     name: "Kimi AI",
     description: "用于素材分析、深度创作包、多平台内容生成和 AI 内容检查。",
     usage: ["内容拆解", "深度创作包", "多平台生成", "AI 审核"],
-    defaults: { provider: "kimi" },
+    defaults: { integrationType: "KIMI", productModel: "KIMI_2_6" },
   },
 };
 

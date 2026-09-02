@@ -19,7 +19,7 @@ export function DeepContentWorkspace({ projectId, initialPackage, editable, inte
   projectId: string;
   initialPackage: PackageView | null;
   editable: boolean;
-  integrationStatus: "CONFIGURED" | "UNCONFIGURED" | "DISABLED" | "ERROR" | "MOCK";
+  integrationStatus: "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "DISABLED" | "ERROR" | "MOCK";
   motherContent: MotherSnapshot;
   onMotherImported: (content: MotherSnapshot) => void;
 }) {

@@ -101,7 +101,7 @@ test("trend → related evidence → candidate preview → idea references → p
   const workspaceId = membership.workspaceId;
   const integrations = new IntegrationService();
   await integrations.saveIntegrationConfig({ workspaceId, userId: user.id, provider: "REDFOX", config: { baseUrl: fixtureOrigin, apiKey: "trend-redfox-key" } });
-  await integrations.saveIntegrationConfig({ workspaceId, userId: user.id, provider: "LLM", config: { provider: "fixture-openai-compatible", baseUrl: `${fixtureOrigin}/v1`, apiKey: "trend-llm-key", model: "fixture-topic-model" } });
+  await integrations.saveIntegrationConfig({ workspaceId, userId: user.id, provider: "LLM", mode: "FIXTURE", config: { provider: "fixture-openai-compatible", baseUrl: `${fixtureOrigin}/v1`, apiKey: "trend-llm-key", model: "fixture-topic-model" } });
 
   await page.goto("/discovery/trends");
   await expect(page.getByRole("heading", { name: "趋势机会" })).toBeVisible();

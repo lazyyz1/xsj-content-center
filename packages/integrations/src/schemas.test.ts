@@ -33,19 +33,37 @@ describe("provider config schemas", () => {
     expect(splitProviderConfig("DOUBAO_ASR", parsed).secretConfig).toEqual({ accessToken: "legacy-token" });
   });
 
-  it("keeps the Kimi display label separate from its API model ID", () => {
+  it("accepts only the frozen Kimi 2.6 product policy and a separately configured API model ID", () => {
     expect(parseProviderConfig("LLM", {
-      provider: "kimi",
+      integrationType: "KIMI",
+      productModel: "KIMI_2_6",
       baseUrl: "https://example.invalid/v1",
       apiKey: "fake-key",
-      label: "Kimi 2.7",
-      modelId: "confirmed-model-id",
-    })).toMatchObject({ provider: "kimi", label: "Kimi 2.7", modelId: "confirmed-model-id" });
-    expect(parseProviderConfig("LLM", {
-      provider: "legacy-compatible",
+      apiModelId: "confirmed-model-id",
+    })).toMatchObject({ integrationType: "KIMI", productModel: "KIMI_2_6", apiModelId: "confirmed-model-id" });
+    expect(() => parseProviderConfig("LLM", {
+      integrationType: "KIMI",
+      productModel: "KIMI_2_6",
       baseUrl: "https://example.invalid/v1",
-      model: "legacy-model-id",
-    })).toMatchObject({ label: "自定义模型", modelId: "legacy-model-id" });
+      apiModelId: "attempted-override",
+      model: "browser-override",
+    })).toThrow();
+    expect(() => parseProviderConfig("LLM", {
+      integrationType: "KIMI",
+      productModel: "KIMI_2_7",
+      baseUrl: "https://example.invalid/v1",
+      apiModelId: "unapproved-model",
+    })).toThrow();
+  });
+
+  it("allows the OpenAI-compatible fixture only through the explicit internal fixture mode", () => {
+    const fixture = { provider: "fixture-openai-compatible", baseUrl: "http://127.0.0.1:4311/v1", apiKey: "fixture-key", model: "fixture-model" };
+    expect(() => parseProviderConfig("LLM", fixture)).toThrow();
+    expect(parseProviderConfig("LLM", fixture, { allowFixture: true })).toMatchObject({
+      integrationType: "FIXTURE",
+      productModel: "FIXTURE",
+      apiModelId: "fixture-model",
+    });
   });
 
   it("stores product-level transcription choices without exposing model routing", () => {

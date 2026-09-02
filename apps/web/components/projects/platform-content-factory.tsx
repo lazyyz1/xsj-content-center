@@ -6,7 +6,7 @@ import { useRef, useState } from "react";
 import { PLATFORM_LABELS, SUPPORTED_PLATFORMS, type PlatformParameters, type PlatformVariantView, type SupportedPlatform } from "@/lib/platforms";
 import { AddToPublishingButton } from "@/components/publishing/add-to-publishing-button";
 
-type IntegrationStatus = "CONFIGURED" | "UNCONFIGURED" | "DISABLED" | "ERROR" | "MOCK";
+type IntegrationStatus = "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "DISABLED" | "ERROR" | "MOCK";
 type PreviewRun = { id: string; platform: SupportedPlatform; output: unknown; sourceMotherVersion: number; contextTruncated?: boolean };
 type Draft = { title: string; body: string; hook: string; summary: string; hashtags: string; mediaPlan: string; metadata: string };
 

@@ -1,5 +1,6 @@
 import { db, type Prisma } from "@content-center/db";
 import { decryptConfig, encryptConfig, parseMasterEncryptionKey, secretLastFour } from "./encryption";
+import { classifyLLMConfig, kimiRuntimeConfig } from "./kimi-model-policy";
 import {
   type ConfigurableIntegrationProvider,
   isConfigurableIntegrationProvider,
@@ -42,12 +43,24 @@ function inputJson(value: Record<string, unknown>): Prisma.InputJsonValue {
 
 export type PublicIntegrationConfig = {
   provider: ConfigurableIntegrationProvider;
-  status: "CONFIGURED" | "UNCONFIGURED" | "ERROR" | "DISABLED" | "MOCK";
+  status: "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "ERROR" | "DISABLED" | "MOCK";
   configured: boolean;
   publicConfig: Record<string, unknown>;
   lastFour: string | null;
   updatedAt: Date | null;
 };
+
+function llmDisplayStatus(
+  publicConfig: Record<string, unknown>,
+  storedStatus: "CONFIGURED" | "UNCONFIGURED" | "ERROR" | "DISABLED" | "MOCK",
+): PublicIntegrationConfig["status"] {
+  if (storedStatus === "DISABLED" || storedStatus === "ERROR") return storedStatus;
+  const policyState = classifyLLMConfig(publicConfig);
+  if (policyState === "NEEDS_RECONFIGURATION") return "NEEDS_RECONFIGURATION";
+  if (policyState === "FIXTURE") return "MOCK";
+  if (policyState === "UNCONFIGURED") return "UNCONFIGURED";
+  return storedStatus === "CONFIGURED" ? "CONFIGURED" : "UNCONFIGURED";
+}
 
 export class IntegrationService {
   constructor(
@@ -65,11 +78,13 @@ export class IntegrationService {
     if (!row) {
       return { provider, status: "UNCONFIGURED", configured: false, publicConfig: {}, lastFour: null, updatedAt: null };
     }
+    const publicConfig = normalizePublicProviderConfig(provider, jsonObject(row.publicConfig));
+    const status = provider === "LLM" ? llmDisplayStatus(publicConfig, row.status) : row.status;
     return {
       provider,
-      status: row.status,
-      configured: row.status === "CONFIGURED",
-      publicConfig: normalizePublicProviderConfig(provider, jsonObject(row.publicConfig)),
+      status,
+      configured: status === "CONFIGURED",
+      publicConfig,
       lastFour: row.lastFour,
       updatedAt: row.updatedAt,
     };
@@ -83,17 +98,13 @@ export class IntegrationService {
     const row = await this.prisma.integrationConfig.findUnique({
       where: { workspaceId_provider: { workspaceId, provider } },
     });
-    if (!row || row.status !== "CONFIGURED") return null;
+    if (!row || (row.status !== "CONFIGURED" && row.status !== "MOCK")) return null;
     const secretConfig = row.encryptedConfig
       ? decryptConfig(row.encryptedConfig, parseMasterEncryptionKey(this.keySource()))
       : {};
     const publicConfig = normalizePublicProviderConfig(provider, jsonObject(row.publicConfig));
     if (provider === "LLM") {
-      const runtimeConfig = { ...publicConfig };
-      const modelId = runtimeConfig.modelId;
-      delete runtimeConfig.label;
-      delete runtimeConfig.modelId;
-      return { ...runtimeConfig, ...secretConfig, model: modelId };
+      return kimiRuntimeConfig(publicConfig, secretConfig);
     }
     return { ...publicConfig, ...secretConfig };
   }
@@ -103,8 +114,9 @@ export class IntegrationService {
     userId: string;
     provider: ConfigurableIntegrationProvider;
     config: unknown;
+    mode?: "FIXTURE";
   }) {
-    const parsed = parseProviderConfig(input.provider, input.config);
+    const parsed = parseProviderConfig(input.provider, input.config, { allowFixture: input.mode === "FIXTURE" });
     const requiresSecret = providerRequiresSecret(input.provider);
     const key = requiresSecret ? parseMasterEncryptionKey(this.keySource()) : null;
     const existing = await this.prisma.integrationConfig.findUnique({
@@ -119,10 +131,14 @@ export class IntegrationService {
     if (requiresSecret && (typeof primaryValue !== "string" || !primaryValue)) {
       throw new IntegrationServiceError("INTEGRATION_SECRET_REQUIRED", `${primarySecret} is required.`);
     }
-    const configured = requiresSecret ? typeof primaryValue === "string" && primaryValue.length > 0 : true;
+    const secretConfigured = requiresSecret ? typeof primaryValue === "string" && primaryValue.length > 0 : true;
+    const llmPolicyState = input.provider === "LLM" ? classifyLLMConfig(publicConfig) : null;
+    const configured = input.provider === "LLM"
+      ? secretConfigured && llmPolicyState === "CURRENT"
+      : secretConfigured;
     const encryptedConfig = Object.keys(secretConfig).length > 0 && key ? encryptConfig(secretConfig, key) : null;
     const changedFields = Object.keys(parsed).sort();
-    const status = configured ? "CONFIGURED" : "UNCONFIGURED";
+    const status = llmPolicyState === "FIXTURE" ? "MOCK" : configured ? "CONFIGURED" : "UNCONFIGURED";
 
     return this.prisma.$transaction(async (tx) => {
       const row = await tx.integrationConfig.upsert({
@@ -134,7 +150,7 @@ export class IntegrationService {
           configured,
           publicConfig: inputJson(publicConfig),
           encryptedConfig,
-          lastFour: requiresSecret && configured ? secretLastFour(primaryValue as string) : null,
+          lastFour: requiresSecret && secretConfigured ? secretLastFour(primaryValue as string) : null,
           encryptionKeyVersion: 1,
         },
         update: {
@@ -142,7 +158,7 @@ export class IntegrationService {
           configured,
           publicConfig: inputJson(publicConfig),
           encryptedConfig,
-          lastFour: requiresSecret && configured ? secretLastFour(primaryValue as string) : null,
+          lastFour: requiresSecret && secretConfigured ? secretLastFour(primaryValue as string) : null,
           encryptionKeyVersion: 1,
         },
       });
@@ -159,7 +175,7 @@ export class IntegrationService {
       return {
         provider: input.provider,
         status: row.status,
-        configured: row.status === "CONFIGURED",
+        configured: status === "CONFIGURED",
         publicConfig,
         lastFour: row.lastFour,
         updatedAt: row.updatedAt,
@@ -192,7 +208,16 @@ export class IntegrationService {
       const primarySecret = primarySecretField(input.provider, { ...publicConfig, ...secrets });
       configured = Boolean(primarySecret && typeof secrets[primarySecret] === "string");
     }
-    const status = enabled ? (configured ? "CONFIGURED" : "UNCONFIGURED") : "DISABLED";
+    const publicConfig = normalizePublicProviderConfig(input.provider, jsonObject(existing.publicConfig));
+    const llmPolicyState = input.provider === "LLM" ? classifyLLMConfig(publicConfig) : null;
+    if (input.provider === "LLM") configured = configured && llmPolicyState === "CURRENT";
+    const status = !enabled
+      ? "DISABLED"
+      : llmPolicyState === "FIXTURE"
+        ? "MOCK"
+        : configured
+          ? "CONFIGURED"
+          : "UNCONFIGURED";
     await this.prisma.$transaction([
       this.prisma.integrationConfig.update({
         where: { id: existing.id },

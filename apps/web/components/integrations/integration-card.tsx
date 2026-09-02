@@ -8,7 +8,7 @@ import { useState } from "react";
 type Integration = {
   provider: "REDFOX" | "DOUBAO_ASR" | "TRANSCRIPTION" | "LLM" | "STORAGE";
   name: string;
-  status: "CONFIGURED" | "UNCONFIGURED" | "ERROR" | "DISABLED" | "MOCK";
+  status: "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "ERROR" | "DISABLED" | "MOCK";
   configured: boolean;
   publicConfig: Record<string, unknown>;
   lastFour: string | null;
@@ -23,6 +23,7 @@ type Integration = {
 const statusLabel = {
   CONFIGURED: "已配置",
   UNCONFIGURED: "未配置",
+  NEEDS_RECONFIGURATION: "需重新配置",
   ERROR: "配置异常",
   DISABLED: "已禁用",
   MOCK: "MOCK MODE",
@@ -31,6 +32,7 @@ const statusLabel = {
 const statusColor = {
   CONFIGURED: "border-[color-mix(in_srgb,var(--success)_30%,transparent)] text-[var(--success)]",
   UNCONFIGURED: "text-[var(--text-secondary)]",
+  NEEDS_RECONFIGURATION: "border-[color-mix(in_srgb,var(--warning)_30%,transparent)] text-[var(--warning)]",
   ERROR: "border-[color-mix(in_srgb,var(--danger)_30%,transparent)] text-[var(--danger)]",
   DISABLED: "text-[var(--text-secondary)]",
   MOCK: "border-[color-mix(in_srgb,var(--warning)_30%,transparent)] text-[var(--warning)]",
@@ -51,6 +53,10 @@ function friendlyError(error: IntegrationClientError) {
     return "密钥加密服务尚未配置，请联系系统管理员。";
   }
   if (error.code === "INTEGRATION_SECRET_REQUIRED") return "请填写当前认证方式需要的 API 密钥。";
+  if (error.code === "KIMI_NOT_CONFIGURED") return "Kimi 2.6 尚未配置，请联系管理员完成设置。";
+  if (error.code === "KIMI_MODEL_ID_MISSING") return "请填写 Kimi 2.6 对应的 API Model ID。";
+  if (error.code === "KIMI_AUTH_FAILED") return "Kimi 2.6 认证失败，请检查 API 配置。";
+  if (error.code === "KIMI_MODEL_UNAVAILABLE") return "当前 Kimi 2.6 模型配置不可用，请检查 Model ID。";
   if (error.code === "INVALID_INTEGRATION_CONFIG") return "配置内容格式不正确，请检查必填项和地址格式。";
   if (error.code === "FORBIDDEN") return "当前账户没有修改服务配置的权限。";
   return "配置保存失败，请稍后重试。";
@@ -140,11 +146,11 @@ export function IntegrationCard({ integration, canManage, encryptionConfigured }
       };
     }
     return {
-      provider: value(integration.publicConfig, "provider") || integration.defaults.provider,
+      integrationType: "KIMI",
+      productModel: "KIMI_2_6",
       baseUrl: String(formData.get("baseUrl") || ""),
       ...(secret ? { apiKey: secret } : {}),
-      label: String(formData.get("label") || "自定义模型"),
-      modelId: String(formData.get("modelId") || ""),
+      apiModelId: String(formData.get("apiModelId") || ""),
     };
   }
 
@@ -207,16 +213,18 @@ export function IntegrationCard({ integration, canManage, encryptionConfigured }
 
           {integration.provider === "LLM" ? (
             <>
+              <div className="grid gap-1 rounded-xl bg-[var(--surface-elevated)] p-4 text-sm">
+                <p className="font-medium">当前模型：Kimi 2.6</p>
+                <p className="text-xs leading-5 text-[var(--text-secondary)]">当前版本统一使用 Kimi 2.6，模型切换暂未开放。</p>
+              </div>
+              {integration.status === "NEEDS_RECONFIGURATION" ? <p className="rounded-xl border border-[color-mix(in_srgb,var(--warning)_35%,transparent)] bg-[color-mix(in_srgb,var(--warning)_8%,transparent)] p-4 text-sm text-[var(--warning)]">当前版本仅支持 Kimi 2.6，请重新确认模型配置。已保存的 API Key 不会被删除。</p> : null}
               <label className="grid gap-1.5 text-sm">Base URL<Input name="baseUrl" type="url" aria-label="Kimi AI Base URL" required defaultValue={value(integration.publicConfig, "baseUrl")} placeholder="填写 Kimi 控制台提供的 API 地址" /></label>
               {!editingSecret && integration.lastFour ? <SavedSecret name={integration.name} lastFour={integration.lastFour} onReplace={() => setEditingSecret(true)} /> : null}
               {editingSecret ? <SecretInput label="API Key" ariaLabel="Kimi AI API Key" value={secret} onChange={setSecret} required={!integration.lastFour} placeholder={integration.lastFour ? "输入新的 API Key" : "输入 API Key"} /> : null}
-              <label className="grid gap-1.5 text-sm">模型显示名称<Input name="label" list="kimi-model-labels" aria-label="Kimi AI 模型显示名称" defaultValue={value(integration.publicConfig, "label") || "自定义模型"} /><datalist id="kimi-model-labels"><option value="Kimi 2.6" /><option value="Kimi 2.7" /><option value="自定义模型" /></datalist></label>
-              <label className="grid gap-1.5 text-sm">Model ID<Input name="modelId" aria-label="Kimi AI Model ID" required defaultValue={value(integration.publicConfig, "modelId")} placeholder="请填写 Kimi 控制台提供的模型 ID" /></label>
-              <div className="grid gap-2 rounded-xl bg-[var(--surface-elevated)] p-4 text-xs leading-5 text-[var(--text-secondary)]">
-                <p><span className="font-medium text-[var(--text-primary)]">Kimi 2.6</span>：推荐日常分析、内容拆解、审核和多平台适配。</p>
-                <p><span className="font-medium text-[var(--text-primary)]">Kimi 2.7</span>：推荐复杂多素材研究和深度观点整理。</p>
-                <p>系统始终使用当前内容空间填写的 Model ID，不会自动切换模型。</p>
-              </div>
+              <details className="rounded-xl border border-[color-mix(in_srgb,var(--border)_65%,transparent)] p-4" open>
+                <summary className="cursor-pointer text-sm font-medium">高级配置</summary>
+                <label className="mt-4 grid gap-1.5 text-sm">API Model ID<Input name="apiModelId" aria-label="Kimi AI API Model ID" required defaultValue={value(integration.publicConfig, "apiModelId")} placeholder="填写 Kimi 控制台中的实际 Model ID" /><span className="text-xs leading-5 text-[var(--text-secondary)]">请填写 Kimi 控制台中与 Kimi 2.6 对应的实际 Model ID。系统不会猜测或自动填写。</span></label>
+              </details>
             </>
           ) : null}
 

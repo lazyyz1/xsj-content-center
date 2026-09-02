@@ -24,7 +24,7 @@ type LocalStatus = {
 };
 
 type Integration = {
-  status: "CONFIGURED" | "UNCONFIGURED" | "ERROR" | "DISABLED" | "MOCK";
+  status: "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "ERROR" | "DISABLED" | "MOCK";
   publicConfig: Record<string, unknown>;
 };
 

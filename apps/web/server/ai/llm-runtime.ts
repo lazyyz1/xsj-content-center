@@ -1,9 +1,16 @@
 import "server-only";
 
-import { IntegrationService } from "@content-center/integrations";
+import { classifyLLMConfig, IntegrationService } from "@content-center/integrations";
 import { LLMError, MockLLMProvider, OpenAICompatibleLLMProvider, openAICompatibleConfigSchema, type LLMProvider } from "@content-center/providers";
 
-export type LLMRuntime = { provider: LLMProvider; providerName: string; model: string };
+export type LLMRuntime = {
+  provider: LLMProvider;
+  providerName: string;
+  model: string;
+  productModel?: "KIMI_2_6" | "FIXTURE" | "MOCK";
+  apiModelId?: string;
+  mode?: "REAL" | "FIXTURE" | "MOCK";
+};
 
 function mockFixture(prompt: string) {
   if (prompt.includes("Action: GENERATE_TOPIC_CANDIDATES")) return { candidates: Array.from({ length: 3 }, (_, index) => ({ title: `MOCK MODE 候选选题 ${index + 1}`, angle: "MOCK MODE：仅用于显式开发测试。", targetAudience: "测试用户", coreConflict: "测试冲突", whyNow: "来自显式 MOCK MODE 趋势上下文", differenceFromSources: "不复述来源标题", supportingReferences: [], riskNotes: ["MOCK MODE：不得当作真实趋势结论"], recommendedFormat: null })) };
@@ -35,12 +42,24 @@ function mockFixture(prompt: string) {
 export async function loadLLMRuntime(workspaceId: string, service = new IntegrationService()): Promise<LLMRuntime> {
   const status = await service.getIntegrationStatus(workspaceId, "LLM");
   if (status.status === "DISABLED") throw new LLMError("LLM_DISABLED", "AI 模型已禁用。", false);
-  if (status.status !== "CONFIGURED") {
-    if (process.env.MOCK_MODE === "true") return { provider: new MockLLMProvider(({ prompt }) => mockFixture(prompt)), providerName: "MOCK", model: "mock-llm" };
-    throw new LLMError("LLM_NOT_CONFIGURED", "尚未配置 AI 模型。", false);
+  if (status.status !== "CONFIGURED" && status.status !== "MOCK") {
+    if (process.env.MOCK_MODE === "true") return { provider: new MockLLMProvider(({ prompt }) => mockFixture(prompt)), providerName: "MOCK", model: "mock-llm", productModel: "MOCK", apiModelId: "mock-llm", mode: "MOCK" };
+    const policyState = classifyLLMConfig(status.publicConfig);
+    if (policyState === "UNCONFIGURED" && status.publicConfig.integrationType === "KIMI") {
+      throw new LLMError("KIMI_MODEL_ID_MISSING", "请填写 Kimi 2.6 对应的 API Model ID。", false);
+    }
+    throw new LLMError("KIMI_NOT_CONFIGURED", "Kimi 2.6 尚未配置，请联系管理员完成设置。", false);
   }
   const config = await service.getDecryptedIntegrationConfig(workspaceId, "LLM");
   const parsed = openAICompatibleConfigSchema.safeParse(config);
-  if (!parsed.success) throw new LLMError("LLM_NOT_CONFIGURED", "AI 模型配置不完整。", false);
-  return { provider: new OpenAICompatibleLLMProvider(parsed.data), providerName: parsed.data.provider, model: parsed.data.model };
+  if (!parsed.success) throw new LLMError("KIMI_NOT_CONFIGURED", "Kimi 2.6 尚未配置，请联系管理员完成设置。", false);
+  const metadata = config as { productModel?: "KIMI_2_6" | "FIXTURE"; apiModelId?: string; mode?: "REAL" | "FIXTURE" };
+  return {
+    provider: new OpenAICompatibleLLMProvider(parsed.data),
+    providerName: metadata.mode === "REAL" ? "KIMI" : parsed.data.provider,
+    model: parsed.data.model,
+    productModel: metadata.productModel,
+    apiModelId: metadata.apiModelId ?? parsed.data.model,
+    mode: metadata.mode,
+  };
 }

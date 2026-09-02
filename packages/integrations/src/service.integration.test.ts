@@ -71,10 +71,11 @@ describe("IntegrationService integration", () => {
       userId,
       provider: "LLM",
       config: {
-        provider: "openai-compatible",
+        integrationType: "KIMI",
+        productModel: "KIMI_2_6",
         baseUrl: "https://example.invalid/v1",
         apiKey: "must-never-be-stored",
-        model: "example-model",
+        apiModelId: "example-model",
       },
     })).rejects.toThrow("Secret encryption is not configured");
     await expect(db.integrationConfig.findUnique({
@@ -163,30 +164,93 @@ describe("IntegrationService integration", () => {
     expect(JSON.stringify(audits)).not.toContain(replacementSecret);
   });
 
-  it("stores Kimi label and model ID while adapting the model ID for the existing LLM runtime", async () => {
+  it("stores the frozen Kimi product model and adapts the admin-provided model ID for the provider", async () => {
     const apiKey = `kimi-${randomUUID()}`;
     const result = await service.saveIntegrationConfig({
       workspaceId,
       userId,
       provider: "LLM",
       config: {
-        provider: "kimi",
+        integrationType: "KIMI",
+        productModel: "KIMI_2_6",
         baseUrl: "https://kimi.example.invalid/v1",
         apiKey,
-        label: "Kimi 2.7",
-        modelId: "workspace-confirmed-model-id",
+        apiModelId: "workspace-confirmed-model-id",
       },
     });
     expect(result).toMatchObject({
-      publicConfig: { provider: "kimi", label: "Kimi 2.7", modelId: "workspace-confirmed-model-id" },
+      publicConfig: { integrationType: "KIMI", productModel: "KIMI_2_6", apiModelId: "workspace-confirmed-model-id" },
       lastFour: apiKey.slice(-4),
     });
     expect(JSON.stringify(result)).not.toContain(apiKey);
     await expect(service.getDecryptedIntegrationConfig(workspaceId, "LLM")).resolves.toEqual({
-      provider: "kimi",
+      provider: "KIMI",
       baseUrl: "https://kimi.example.invalid/v1",
       apiKey,
       model: "workspace-confirmed-model-id",
+      integrationType: "KIMI",
+      productModel: "KIMI_2_6",
+      apiModelId: "workspace-confirmed-model-id",
+      mode: "REAL",
+    });
+  });
+
+  it("keeps a missing API model ID unconfigured without discarding the encrypted secret", async () => {
+    const result = await service.saveIntegrationConfig({
+      workspaceId,
+      userId,
+      provider: "LLM",
+      config: {
+        integrationType: "KIMI",
+        productModel: "KIMI_2_6",
+        baseUrl: "https://kimi.example.invalid/v1",
+        apiModelId: "",
+      },
+    });
+    expect(result).toMatchObject({ status: "UNCONFIGURED", configured: false, lastFour: expect.any(String) });
+    await expect(service.getDecryptedIntegrationConfig(workspaceId, "LLM")).resolves.toBeNull();
+  });
+
+  it("marks legacy alternate/custom configuration for reconfiguration without deleting its secret", async () => {
+    const before = await db.integrationConfig.findUniqueOrThrow({
+      where: { workspaceId_provider: { workspaceId, provider: "LLM" } },
+    });
+    await db.integrationConfig.update({
+      where: { id: before.id },
+      data: {
+        status: "CONFIGURED",
+        configured: true,
+        publicConfig: { provider: "kimi", label: "legacy-alternate", modelId: "legacy-model-id" },
+      },
+    });
+    await expect(service.getIntegrationStatus(workspaceId, "LLM")).resolves.toMatchObject({
+      status: "NEEDS_RECONFIGURATION",
+      configured: false,
+    });
+    await expect(service.getDecryptedIntegrationConfig(workspaceId, "LLM")).resolves.toBeNull();
+    const after = await db.integrationConfig.findUniqueOrThrow({ where: { id: before.id } });
+    expect(after.encryptedConfig).toBe(before.encryptedConfig);
+  });
+
+  it("keeps an explicit fixture in MOCK state instead of presenting it as real Kimi", async () => {
+    const result = await service.saveIntegrationConfig({
+      workspaceId,
+      userId,
+      provider: "LLM",
+      mode: "FIXTURE",
+      config: {
+        provider: "fixture-openai-compatible",
+        baseUrl: "http://127.0.0.1:4311/v1",
+        apiKey: "fixture-secret",
+        model: "fixture-model",
+      },
+    });
+    expect(result).toMatchObject({ status: "MOCK", configured: false, publicConfig: { integrationType: "FIXTURE", productModel: "FIXTURE" } });
+    await expect(service.getDecryptedIntegrationConfig(workspaceId, "LLM")).resolves.toMatchObject({
+      provider: "fixture-openai-compatible",
+      model: "fixture-model",
+      productModel: "FIXTURE",
+      mode: "FIXTURE",
     });
   });
 
