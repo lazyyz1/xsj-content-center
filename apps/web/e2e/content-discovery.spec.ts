@@ -119,12 +119,18 @@ test("discovery search → idea/library/project/benchmark stays explicit and iso
 
   await page.goto("/discovery");
   await expect(page.getByRole("heading", { name: "内容发现" })).toBeVisible();
+  expect(await db.apiUsage.count({ where: { workspaceId } })).toBe(0);
+  expect(calls["/story/api/dyData/searchArticle"]).toBeUndefined();
   await page.getByRole("button", { name: "抖音", exact: true }).click();
 
   await page.getByLabel("搜索内容").fill("选题测试");
   await page.getByRole("button", { name: "搜索", exact: true }).click();
   const ideaCard = page.getByTestId("content-card-DOUYIN-idea-e2e");
   await expect(ideaCard).toContainText("发现内容 idea-e2e");
+  for (const viewport of [{ width: 375, height: 812 }, { width: 430, height: 932 }]) { await page.setViewportSize(viewport); expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true); }
+  await page.setViewportSize({ width: 375, height: 812 }); await ideaCard.getByRole("button", { name: "加入选题" }).click();
+  const mobileDialog = page.getByRole("dialog"); await expect(mobileDialog).toBeVisible(); expect(await mobileDialog.evaluate((element) => { const rect = element.getBoundingClientRect(); return rect.left >= 0 && rect.right <= window.innerWidth && rect.top >= 0 && rect.bottom <= window.innerHeight; })).toBe(true); await mobileDialog.getByRole("button", { name: "关闭" }).click();
+  await page.setViewportSize({ width: 1280, height: 900 });
   expect(calls["/story/api/dyData/searchArticle"]).toBe(1);
   await page.getByRole("button", { name: "搜索", exact: true }).click();
   await expect(ideaCard).toBeVisible();
@@ -181,7 +187,7 @@ test("discovery search → idea/library/project/benchmark stays explicit and iso
   await expect(page.getByRole("heading", { name: "对标账号作品" })).toBeVisible();
   expect(await db.sourceItem.count({ where: { workspaceId, externalId: { in: ["benchmark-work-e2e", "benchmark-uncollected-e2e"] } } })).toBe(0);
   const benchmarkWork = page.getByRole("heading", { name: "对标账号作品" }).locator("..");
-  await benchmarkWork.getByRole("button", { name: "收录" }).click();
+  await benchmarkWork.getByRole("button", { name: "收录素材" }).click();
   await expect.poll(() => db.sourceItem.count({ where: { workspaceId, externalId: "benchmark-work-e2e" } })).toBe(1);
   expect(await db.sourceItem.count({ where: { workspaceId, externalId: "benchmark-uncollected-e2e" } })).toBe(0);
 

@@ -20,8 +20,8 @@ export default async function DiscoveryPage() {
     configured={integration?.status === "CONFIGURED"}
     canWrite={role !== "VIEWER"}
     canManageBenchmarks={role === "OWNER" || role === "ADMIN"}
-    initialBenchmarks={benchmarks.map((item) => ({ ...item, createdAt: undefined, updatedAt: undefined, lastSyncedAt: item.lastSyncedAt?.toISOString() ?? null }))}
-    initialIdeas={ideas.map((item) => ({ id: item.id, title: item.title, status: item.status, updatedAt: item.updatedAt.toISOString(), referenceCount: item._count.references, sourceCount: item.references.length }))}
+    initialBenchmarks={benchmarks.map((item) => ({ id: item.id, name: item.name, platform: item.platform, avatarUrl: item.avatarUrl, bio: item.bio, lastSyncedAt: item.lastSyncedAt?.toISOString() ?? null, latestContent: item.contentSnapshots[0] ? { title: item.contentSnapshots[0].title, observedAt: item.contentSnapshots[0].observedAt.toISOString() } : null }))}
+    initialIdeas={ideas.map((item) => ({ id: item.id, title: item.title, status: item.status, projectId: item.projectId, updatedAt: item.updatedAt.toISOString(), referenceCount: item._count.references, sourceCount: item.references.length }))}
     recentSources={recentSources.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() }))}
     initialTrends={trends.map(publicTrendOpportunity)}
     initialRecommendationBatch={recommendationBatch ? publicRecommendationBatch(recommendationBatch) : null}

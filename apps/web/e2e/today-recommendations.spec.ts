@@ -25,7 +25,10 @@ test("today recommendation → evidence → idea/project, deterministic copy and
   await page.goto("/discovery"); await expect(page.getByRole("heading", { name: "今日内容线索", exact: true })).toBeVisible(); await expect(page.getByText("AI 推荐", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "生成今日线索" }).click(); await expect(page.getByRole("heading", { name: "AI 内容团队正在重做工作流" })).toBeVisible();
   expect(await db.apiUsage.count({ where: { workspaceId, provider: "REDFOX" } })).toBe(0); expect(await db.aIRun.count({ where: { workspaceId, action: "GENERATE_TODAY_RECOMMENDATIONS" } })).toBe(0);
-  await page.getByRole("link", { name: /查看依据/ }).first().click(); await expect(page.getByRole("heading", { name: "真实依据" })).toBeVisible(); await page.getByRole("button", { name: "开始创作" }).click(); await expect(page).toHaveURL(/\/projects\/[^/]+\/studio$/);
+  await page.getByRole("link", { name: /查看依据/ }).first().click(); await expect(page.getByRole("heading", { name: "真实依据" })).toBeVisible();
+  expect(await db.apiUsage.count({ where: { workspaceId, provider: "REDFOX" } })).toBe(0); expect(await db.aIRun.count({ where: { workspaceId, action: "GENERATE_TODAY_RECOMMENDATIONS" } })).toBe(0);
+  for (const viewport of [{ width: 375, height: 812 }, { width: 430, height: 932 }]) { await page.setViewportSize(viewport); expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true); }
+  await page.setViewportSize({ width: 1280, height: 900 }); await page.getByRole("button", { name: "开始创作" }).click(); await expect(page).toHaveURL(/\/projects\/[^/]+\/studio$/);
   await page.goto("/discovery"); await Promise.all([page.waitForResponse((response) => response.url().includes("/api/discovery/recommendations/") && response.request().method() === "POST"), page.getByRole("button", { name: "加入选题" }).first().click()]); await expect(page.getByRole("link", { name: "查看选题" })).toHaveCount(2);
   const saved = await db.recommendationItem.findFirstOrThrow({ where: { workspaceId, status: "SAVED" } }); expect(saved.contentIdeaId).toBeTruthy();
 

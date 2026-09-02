@@ -277,7 +277,12 @@ export async function getBenchmarkWorks(input: { workspaceId: string; userId: st
 }
 
 export function listBenchmarks(workspaceId: string, take = 12) {
-  return db.benchmarkAccount.findMany({ where: { workspaceId, enabled: true }, orderBy: { updatedAt: "desc" }, take });
+  return db.benchmarkAccount.findMany({
+    where: { workspaceId, enabled: true },
+    orderBy: { updatedAt: "desc" },
+    take,
+    include: { contentSnapshots: { orderBy: { observedAt: "desc" }, take: 1, select: { title: true, observedAt: true } } },
+  });
 }
 
 export async function addBenchmark(input: { workspaceId: string; userId: string; account: ExternalAccountInput }) {

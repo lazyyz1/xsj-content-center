@@ -116,6 +116,9 @@ test("trend → related evidence → candidate preview → idea references → p
   await page.getByRole("link", { name: "#AI 办公" }).first().click();
   await expect(page.getByText("真实依据", { exact: true })).toBeVisible();
   await expect(page.getByText("多个平台都出现了相同的明确关键词。")).toBeVisible();
+  expect(calls["/story/api/dy/search/likesRank"]).toBe(1);
+  expect(calls["/story/api/cozeSkill/getXhsCozeSkillDataOne"]).toBe(1);
+  expect(calls["/story/api/hotKeyword/list"]).toBe(1);
   await page.getByRole("button", { name: "查看相关内容" }).click();
   await expect(page.getByText("AI 办公流程案例")).toBeVisible();
   await expect(page.getByText("AI 办公不是工具堆叠")).toBeVisible();
