@@ -59,6 +59,18 @@ enum ContentIdeaStatus {
   ARCHIVED
 }
 
+enum TrendPlatform {
+  DOUYIN
+  XIAOHONGSHU
+  GLOBAL
+}
+
+enum TrendType {
+  HOT
+  SURGING
+  DARK_HORSE
+}
+
 enum SourceItemStatus {
   PENDING
   PROCESSING
@@ -142,6 +154,7 @@ enum PromptType {
   ADAPT_PLATFORM
   GENERATE_DEEP_CONTENT_PACKAGE
   REVIEW_PLATFORM_CONTENT
+  GENERATE_TOPIC_CANDIDATES
 }
 
 enum ReviewResult {
@@ -305,6 +318,7 @@ model Workspace {
   publishTasks        PublishTask[]
   benchmarkAccounts   BenchmarkAccount[]
   contentIdeas        ContentIdea[]
+  trendSnapshots      TrendSnapshot[]
 }
 
 model WorkspaceMember {
@@ -599,6 +613,7 @@ model ContentIdea {
   projectId        String?            @unique
   title            String
   description      String?
+  aiRationale      Json?
   status           ContentIdeaStatus @default(INBOX)
   createdById      String
   createdAt        DateTime          @default(now())
@@ -625,12 +640,38 @@ model ContentIdeaReference {
   coverUrl         String?
   metadataSnapshot Json?
   sourceItemId     String?
+  trendSnapshotId  String?
   createdAt        DateTime       @default(now())
   idea             ContentIdea    @relation(fields: [ideaId], references: [id], onDelete: Cascade)
   sourceItem       SourceItem?     @relation(fields: [sourceItemId], references: [id], onDelete: SetNull)
+  trendSnapshot    TrendSnapshot?  @relation(fields: [trendSnapshotId], references: [id], onDelete: SetNull)
 
   @@unique([ideaId, platform, externalId])
+  @@unique([ideaId, trendSnapshotId])
   @@index([sourceItemId])
+  @@index([trendSnapshotId])
+}
+
+model TrendSnapshot {
+  id             String          @id @default(cuid())
+  workspaceId    String
+  provider       String
+  platform       TrendPlatform
+  trendType      TrendType
+  externalKey    String
+  title          String
+  keyword        String?
+  rank           Int?
+  metrics        Json
+  windowStart    DateTime
+  windowEnd      DateTime
+  observedAt     DateTime        @default(now())
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ideaReferences ContentIdeaReference[]
+
+  @@index([workspaceId, platform, trendType, observedAt])
+  @@index([workspaceId, externalKey, observedAt])
+  @@index([workspaceId, windowStart, windowEnd])
 }
 
 model ProjectSource {
@@ -910,7 +951,7 @@ model PublishTask {
 model AIRun {
   id                 String            @id @default(cuid())
   workspaceId        String
-  projectId          String
+  projectId          String?
   userId             String
   action             PromptType
   provider           String
@@ -934,7 +975,7 @@ model AIRun {
   appliedAt          DateTime?
   discardedAt        DateTime?
   workspace          Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project            ContentProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project            ContentProject?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
   user               User              @relation("AIRunUser", fields: [userId], references: [id], onDelete: Restrict)
   promptTemplate     PromptTemplate?   @relation(fields: [promptTemplateId], references: [id], onDelete: Restrict)
   platformTemplate   PlatformTemplate? @relation(fields: [platformTemplateId], references: [id], onDelete: Restrict)

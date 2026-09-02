@@ -6,6 +6,7 @@ import { LLMError, MockLLMProvider, OpenAICompatibleLLMProvider, openAICompatibl
 export type LLMRuntime = { provider: LLMProvider; providerName: string; model: string };
 
 function mockFixture(prompt: string) {
+  if (prompt.includes("Action: GENERATE_TOPIC_CANDIDATES")) return { candidates: Array.from({ length: 3 }, (_, index) => ({ title: `MOCK MODE 候选选题 ${index + 1}`, angle: "MOCK MODE：仅用于显式开发测试。", targetAudience: "测试用户", coreConflict: "测试冲突", whyNow: "来自显式 MOCK MODE 趋势上下文", differenceFromSources: "不复述来源标题", supportingReferences: [], riskNotes: ["MOCK MODE：不得当作真实趋势结论"], recommendedFormat: null })) };
   if (prompt.includes("Action: ANALYZE_SOURCES")) return { topics: ["MOCK MODE 主题"], coreClaims: [], facts: [], cases: [], questions: [], hooks: [], structures: [], risks: [], reusableInsights: [] };
   if (prompt.includes("Action: EXTRACT_EVIDENCE")) return { items: [{ type: "FACT", excerpt: "MOCK MODE 摘录", claim: "MOCK MODE 观点", note: "仅用于显式开发模式", sourceItemId: null }] };
   if (prompt.includes("Action: GENERATE_ANGLES")) return { angles: Array.from({ length: 5 }, (_, index) => ({ title: `MOCK MODE 角度 ${index + 1}`, angle: `MOCK MODE 差异化视角 ${index + 1}`, coreMessage: "MOCK MODE 核心观点", whyItWorks: "显式开发测试", targetAudience: "测试用户", recommendedStructure: ["开头", "论证", "结尾"], risk: "MOCK MODE", evidenceIds: [], sourceItemIds: [] })) };

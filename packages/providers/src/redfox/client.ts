@@ -58,17 +58,30 @@ export class RedFoxClient {
     if (!config.apiKey.trim()) throw new RedFoxError("REDFOX_NOT_CONFIGURED", "RedFox 尚未配置。", false);
   }
 
-  private async post(path: string, body: Record<string, unknown>, authHeader: "x-api-key" | "REDFOX_API_KEY"): Promise<RedFoxApiResult> {
+  private async request(input: {
+    path: string;
+    method: "GET" | "POST";
+    values: Record<string, unknown>;
+    authHeader: "x-api-key" | "REDFOX_API_KEY";
+  }): Promise<RedFoxApiResult> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? REDFOX_DEFAULT_TIMEOUT_MS);
     let response: Response;
     try {
       response = await (this.config.fetch ?? fetch)(
-        new URL(path, this.config.baseUrl ?? REDFOX_DEFAULT_BASE_URL),
+        (() => {
+          const url = new URL(input.path, this.config.baseUrl ?? REDFOX_DEFAULT_BASE_URL);
+          if (input.method === "GET") {
+            for (const [key, value] of Object.entries(input.values)) {
+              if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
+            }
+          }
+          return url;
+        })(),
         {
-          method: "POST",
-          headers: { "content-type": "application/json", [authHeader]: this.config.apiKey },
-          body: JSON.stringify(body),
+          method: input.method,
+          headers: { "content-type": "application/json", [input.authHeader]: this.config.apiKey },
+          body: input.method === "POST" ? JSON.stringify(input.values) : undefined,
           signal: controller.signal,
         },
       );
@@ -105,6 +118,14 @@ export class RedFoxClient {
       throw new RedFoxError("REDFOX_EMPTY_DATA", "RedFox 未返回作品数据。", false, response.status, providerCode, providerRequestId);
     }
     return { data: parsed.data.data, providerRequestId, providerCode };
+  }
+
+  private post(path: string, body: Record<string, unknown>, authHeader: "x-api-key" | "REDFOX_API_KEY") {
+    return this.request({ path, method: "POST", values: body, authHeader });
+  }
+
+  private get(path: string, query: Record<string, unknown>, authHeader: "x-api-key" | "REDFOX_API_KEY") {
+    return this.request({ path, method: "GET", values: query, authHeader });
   }
 
   async parseWork(url: string): Promise<RedFoxParseResult> {
@@ -160,5 +181,29 @@ export class RedFoxClient {
       ? { workId: input.externalId, workUrl: input.url }
       : { workId: input.externalId, workLink: input.url };
     return this.post(path, data, "REDFOX_API_KEY");
+  }
+
+  getDouyinHot(input: { startDate?: string; endDate?: string }) {
+    return this.post("/story/api/dy/search/likesRank", { type: "全部", startTime: input.startDate, endTime: input.endDate }, "REDFOX_API_KEY");
+  }
+
+  getDouyinSurging(input: { window: "TODAY" | "SEVEN_DAYS"; startDate?: string }) {
+    const path = input.window === "TODAY" ? "/story/api/dy/search/getDailyRank" : "/story/api/dy/search/getWeeklyRank";
+    return this.post(path, { type: "全部", startTime: input.startDate }, "REDFOX_API_KEY");
+  }
+
+  getXiaohongshuHot(input: { window: "TODAY" | "SEVEN_DAYS"; rankDate: string }) {
+    const path = input.window === "TODAY"
+      ? "/story/api/cozeSkill/getXhsCozeSkillDataOne"
+      : "/story/api/cozeSkill/getXhsCozeSkillDataSeven";
+    return this.get(path, { rankDate: input.rankDate, category: "综合全部" }, "REDFOX_API_KEY");
+  }
+
+  getXiaohongshuDarkHorse(input: { keyword: string; startDate: string }) {
+    return this.post("/story/api/cozeSkill/getLowPowderExplosiveArticle", { keyword: input.keyword, startDate: input.startDate }, "REDFOX_API_KEY");
+  }
+
+  getGlobalHotspot(input: { startDate: string; endDate: string }) {
+    return this.post("/story/api/hotKeyword/list", { startDate: input.startDate, endDate: input.endDate }, "REDFOX_API_KEY");
   }
 }

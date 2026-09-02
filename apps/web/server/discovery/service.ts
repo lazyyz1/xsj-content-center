@@ -300,7 +300,7 @@ export function listIdeas(workspaceId: string, take = 20) {
 }
 
 export function getIdea(workspaceId: string, ideaId: string) {
-  return db.contentIdea.findFirst({ where: { id: ideaId, workspaceId }, include: { references: { orderBy: { createdAt: "desc" } }, project: { select: { id: true } } } });
+  return db.contentIdea.findFirst({ where: { id: ideaId, workspaceId }, include: { references: { orderBy: { createdAt: "desc" }, include: { trendSnapshot: true } }, project: { select: { id: true } } } });
 }
 
 export async function createIdea(input: { workspaceId: string; userId: string; title: string; description?: string; reference?: ExternalContentInput }) {
@@ -322,7 +322,7 @@ function referenceData(ideaId: string, reference: ExternalContentInput) {
     url: reference.originalUrl,
     authorName: reference.authorName,
     coverUrl: reference.coverUrl,
-    metadataSnapshot: inputJson({ contentType: reference.contentType, metrics: reference.metrics, publishedAt: reference.publishedAt }),
+    metadataSnapshot: inputJson({ referenceType: "EXTERNAL_CONTENT", contentType: reference.contentType, metrics: reference.metrics, publishedAt: reference.publishedAt }),
   };
 }
 
@@ -381,7 +381,7 @@ export async function startIdeaProject(input: { workspaceId: string; userId: str
   const idea = await getIdea(input.workspaceId, input.ideaId);
   if (!idea) throw new DiscoveryServiceError("DISCOVERY_NOT_FOUND", "选题不存在。");
   if (idea.project) return { projectId: idea.project.id, existing: true as const };
-  const missing = idea.references.filter((reference) => !reference.sourceItemId);
+  const missing = idea.references.filter((reference) => !reference.sourceItemId && !reference.trendSnapshotId);
   if (missing.length && !input.collectMissing) throw new DiscoveryServiceError("IDEA_REFERENCES_REQUIRE_COLLECTION", "该选题有尚未收录的参考内容，请确认后再开始创作。");
   const sourceIds = idea.references.flatMap((reference) => reference.sourceItemId ? [reference.sourceItemId] : []);
   if (input.collectMissing) {

@@ -7,3 +7,6 @@ export * from "./normalize";
 export * from "./platform";
 export * from "./provider";
 export * from "./schemas";
+export * from "./trends";
+export * from "./trend-normalize";
+export * from "./trend-provider";

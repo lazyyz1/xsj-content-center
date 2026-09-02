@@ -22,7 +22,7 @@ function publicError(error: unknown) { return error instanceof LLMError ? error 
 export async function executeStructuredAIRun<T>(input: {
   workspaceId: string;
   userId: string;
-  projectId: string;
+  projectId?: string;
   action: import("@content-center/db").PromptType;
   operation: string;
   promptVersion: number;
@@ -38,7 +38,7 @@ export async function executeStructuredAIRun<T>(input: {
   const safeAuditMetadata = { action: input.action, promptVersion: input.promptVersion, contextTruncated: input.contextTruncated, ...input.auditMetadata };
   const run = await db.$transaction(async (tx) => {
     const created = await tx.aIRun.create({ data: { workspaceId: input.workspaceId, projectId: input.projectId, userId: input.userId, action: input.action, provider: runtime.providerName, model: runtime.model, promptTemplateId: input.promptTemplateId, platformTemplateId: input.platformTemplateId, promptVersion: input.promptVersion, status: "RUNNING", inputSummary: json(input.inputSummary), metadata: input.metadata === undefined ? undefined : json(input.metadata), contextTruncated: input.contextTruncated } });
-    await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_started", resourceType: "ai_run", resourceId: created.id, metadata: { projectId: input.projectId, ...safeAuditMetadata } } });
+    await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_started", resourceType: "ai_run", resourceId: created.id, metadata: json({ ...(input.projectId ? { projectId: input.projectId } : {}), ...safeAuditMetadata }) } });
     return created;
   });
   try {
@@ -47,7 +47,7 @@ export async function executeStructuredAIRun<T>(input: {
     await db.$transaction([
       db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(result.data.value), providerRequestId: result.data.providerRequestId, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, finishedAt: new Date() } }),
       db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: "LLM", operation: input.operation, requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, metadata: json({ airRunId: run.id, promptVersion: input.promptVersion, contextTruncated: input.contextTruncated, ...input.auditMetadata }) } }),
-      db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_succeeded", resourceType: "ai_run", resourceId: run.id, metadata: { projectId: input.projectId, ...safeAuditMetadata } } }),
+      db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_succeeded", resourceType: "ai_run", resourceId: run.id, metadata: json({ ...(input.projectId ? { projectId: input.projectId } : {}), ...safeAuditMetadata }) } }),
     ]);
     return { id: run.id, action: input.action, status: "SUCCEEDED" as const, output: result.data.value, contextTruncated: input.contextTruncated, provider: runtime.providerName, model: result.data.model, usage };
   } catch (error) {
@@ -55,7 +55,7 @@ export async function executeStructuredAIRun<T>(input: {
     await db.$transaction([
       db.aIRun.update({ where: { id: run.id }, data: { status: "FAILED", errorCode: failure.code, errorMessage: failure.message, finishedAt: new Date() } }),
       db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: "LLM", operation: input.operation, requestId: run.id, success: false, units: 1, cost: null, metadata: json({ airRunId: run.id, errorCode: failure.code, promptVersion: input.promptVersion, ...input.auditMetadata }) } }),
-      db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_failed", resourceType: "ai_run", resourceId: run.id, metadata: { projectId: input.projectId, errorCode: failure.code, ...safeAuditMetadata } } }),
+      db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_failed", resourceType: "ai_run", resourceId: run.id, metadata: json({ ...(input.projectId ? { projectId: input.projectId } : {}), errorCode: failure.code, ...safeAuditMetadata }) } }),
     ]);
     throw failure;
   }

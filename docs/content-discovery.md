@@ -76,6 +76,41 @@ Adapter 可在服务端保留 `rawProviderMetadata` 供调试，对前端输出�
 - 所有路由使用既有 Workspace RBAC；数据查询必须带 `workspaceId`。VIEWER 只读，EDITOR 可搜索/收录/选题/建项目，OWNER/ADMIN 管理共享对标。
 - RedFox 返回的媒体 URL 仍经过原有 SSRF、redirect、MIME 和大小限制，不因数据来源而绕过安全检查。
 
-## D3 / D4 边界
+## D3 Trends
 
-V1 不包含热点趋势、上升话题、“今日值得做”、AI 选题推荐、CreatorMemory、对标自动同步或 Cron 监控。D3 可在真实排名/趋势数据和成本策略验证后单独进入下一阶段；D4 再把趋势、对标、历史内容与 CreatorProfile 组合成可解释的推荐。
+D3 增加“趋势机会”，只回答当前哪些内容值得进一步研究，以及这些趋势可以转成哪些候选选题。它不提供“今日最推荐你做”、爆款概率或自动决策。
+
+```text
+RedFoxTrendProvider
+  → normalize
+  → TrendSnapshot
+  → TrendOpportunity read model
+  → Supporting ExternalContent（用户显式加载）
+  → CandidateTopic preview（用户显式调用 AI）
+  → ContentIdea（用户显式保存）
+  → ContentProject（用户显式开始创作）
+```
+
+### TrendSnapshot 与 TrendOpportunity
+
+`TrendSnapshot` 是 Workspace 隔离的轻量历史记录，保存来源、平台、趋势类型、外部键、标题/关键词、真实排名、可用指标和观察时间。它不保存完整 Provider raw response。
+
+`TrendOpportunity` 是按“今天 / 近 7 天”即时计算的 read model，不是长期业务对象。它比较当前与较早快照，显式表达新出现、正在上升、持续热门或黑马。`rankDelta = previousRank - currentRank`；没有历史基线时保持 `null`，不显示假上涨。只有经过确定性规范化后完全相同、且确实来自多个平台的关键词才形成跨平台趋势。
+
+### CandidateTopic 与 AI provenance
+
+`GENERATE_TOPIC_CANDIDATES` 复用 Workspace LLM、PromptTemplate、AIRun 和 ApiUsage。输入只包含当前趋势、最多 5 条用户选择的相关内容、当前 CreatorProfile，以及有限数量的近期选题/项目标题。Prompt 明确把榜单和外部内容视为不可信输入，模型只生成角度、冲突、差异化方向与待核实风险，不负责证明趋势或直接写最终文案。
+
+候选结果是 3–5 条结构化 Preview，不自动创建任何业务数据。用户点击“加入我的选题”后才创建 `ContentIdea`，并通过 `ContentIdeaReference` 分别记录真实 `TrendSnapshot` 依据、用户实际选中的 ExternalContent 快照和 AIRun 建议来源。选题详情把“真实依据”和“AI 建议”分开展示。
+
+### 成本与权限
+
+- 趋势数据只由“加载趋势 / 刷新”触发，进程内缓存 20 分钟；读取页面和切换到已有快照不调用 Provider。
+- 相关内容继续使用既有 5 分钟 Discovery 缓存，只有点击“查看相关内容”才查询。
+- RedFox 趋势调用分别记录 `TREND_DOUYIN_HOT`、`TREND_DOUYIN_SURGE`、`TREND_XHS_HOT`、`TREND_XHS_DARK_HORSE`、`TREND_GLOBAL`；无可靠价格时 `cost = null`。
+- VIEWER 可读取已有快照，但不能刷新、查询相关外部内容、调用 AI 或保存选题；EDITOR、ADMIN、OWNER 可执行这些显式动作。
+- Kimi 未配置时，趋势读取、相关内容和人工加入选题仍然可用，UI 明确提示未配置。
+
+## D4 边界
+
+D3 不包含 D4 Today Recommendation、CreatorMemory、个性化每日任务、自动趋势监控、Cron、自动对标同步、通知、爆款预测、自动评分、自动创建选题或自动创建项目。D4 必须作为独立阶段验证。
