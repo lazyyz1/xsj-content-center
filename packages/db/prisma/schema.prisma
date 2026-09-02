@@ -142,6 +142,7 @@ enum EvidenceType {
 
 enum PromptType {
   ANALYZE_MATERIAL
+  UNIFIED_CREATIVE_ANALYSIS
   ANALYZE_SOURCES
   EXTRACT_EVIDENCE
   GENERATE_ANGLES
@@ -168,6 +169,12 @@ enum MaterialAnalysisStatus {
 enum MaterialAnalysisOrigin {
   AI
   HUMAN
+}
+
+enum UnifiedCreativeAnalysisStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
 }
 
 enum RecommendationMode {
@@ -276,6 +283,7 @@ model User {
   createdContentIdeas     ContentIdea[]          @relation("ContentIdeaCreatedBy")
   createdRecommendationBatches RecommendationBatch[] @relation("RecommendationBatchCreatedBy")
   createdMaterialAnalyses MaterialAnalysis[]           @relation("MaterialAnalysisCreatedBy")
+  createdUnifiedCreativeAnalyses UnifiedCreativeAnalysis[] @relation("UnifiedCreativeAnalysisCreatedBy")
 }
 
 model Session {
@@ -360,6 +368,7 @@ model Workspace {
   recommendationItems RecommendationItem[]
   recommendationEvidence RecommendationEvidence[]
   materialAnalyses       MaterialAnalysis[]
+  unifiedCreativeAnalyses UnifiedCreativeAnalysis[]
 }
 
 model WorkspaceMember {
@@ -618,6 +627,7 @@ model ContentProject {
   publishTasks        PublishTask[]
   contentIdea         ContentIdea?
   recommendationItems RecommendationItem[]
+  unifiedCreativeAnalyses UnifiedCreativeAnalysis[]
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
@@ -1153,10 +1163,38 @@ model AIRun {
   reviewRecords      ReviewRecord[]
   recommendationBatch RecommendationBatch?
   materialAnalysis    MaterialAnalysis?
+  unifiedCreativeAnalysis UnifiedCreativeAnalysis?
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, projectId, createdAt])
   @@index([projectId, action, createdAt])
   @@index([userId])
   @@index([platformTemplateId])
+}
+
+model UnifiedCreativeAnalysis {
+  id               String                        @id @default(cuid())
+  workspaceId      String
+  projectId        String
+  createdById      String
+  aiRunId          String?                       @unique
+  version          Int
+  schemaVersion    String                        @default("unified-creative-analysis-v1")
+  status           UnifiedCreativeAnalysisStatus @default(PROCESSING)
+  inputFingerprint String
+  output           Json?
+  provenance       Json
+  errorCode        String?
+  errorMessage     String?
+  createdAt        DateTime                      @default(now())
+  updatedAt        DateTime                      @updatedAt
+  workspace        Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project          ContentProject                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy        User                          @relation("UnifiedCreativeAnalysisCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  aiRun            AIRun?                        @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, version])
+  @@unique([projectId, inputFingerprint])
+  @@index([workspaceId, projectId, status])
+  @@index([createdById])
 }

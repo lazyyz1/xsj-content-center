@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 type Brief = { topic: string; angle: string; audience: string; coreMessage: string; coreQuestion: string; background: string; keyPoints: string[]; structure: string[]; tone: string; risks: string[]; version: number; initializedFromMaterialAnalysis: boolean; analysisUpdateAvailable: boolean };
 
-export function BriefEditor({ projectId, initial, editable }: { projectId: string; initial: Brief; editable: boolean }) {
+export function BriefEditor({ projectId, initial, editable, onSaved }: { projectId: string; initial: Brief; editable: boolean; onSaved?: () => void }) {
   const version = useRef(initial.version);
   const [draft, setDraft] = useState(initial);
   const [busy, setBusy] = useState(false);
@@ -25,6 +25,7 @@ export function BriefEditor({ projectId, initial, editable }: { projectId: strin
       if (!response.ok) throw new Error(result.message || result.error || "保存失败");
       version.current = result.version;
       setMessage("已保存");
+      onSaved?.();
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : "保存失败"); }
     finally { setBusy(false); }
   }

@@ -7,7 +7,7 @@ import { EvidenceBoard } from "./evidence-board";
 import { MotherContentEditor } from "./mother-content-editor";
 import { ProjectStatusPanel } from "./project-status-panel";
 import { StudioSources } from "./studio-sources";
-import { AICreationPanel, type AIAction, type RewriteRequest } from "./ai-creation-panel";
+import { AICreationPanel, type RewriteRequest, type UnifiedAnalysisView } from "./ai-creation-panel";
 import { PlatformContentFactory } from "./platform-content-factory";
 import { PLATFORM_LABELS, SUPPORTED_PLATFORMS, type PlatformVariantView, type SupportedPlatform } from "@/lib/platforms";
 import { DeepContentWorkspace, type MotherSnapshot, type PackageView } from "./deep-content-workspace";
@@ -37,7 +37,7 @@ export function StudioShell({ project, availableSources, editable, ai }: {
   };
   availableSources: AvailableSource[];
   editable: boolean;
-  ai: { integrationStatus: "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "DISABLED" | "ERROR" | "MOCK"; hasCreatorProfile: boolean; recentRuns: Array<{ id: string; action: AIAction; status: string; outputJson?: unknown; contextTruncated?: boolean; errorCode?: string | null; appliedAt?: string | null; discardedAt?: string | null }> };
+  ai: { integrationStatus: "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "DISABLED" | "ERROR" | "MOCK"; hasCreatorProfile: boolean; unifiedAnalysis: UnifiedAnalysisView | null };
 }) {
   const [tab, setTab] = useState<"research" | "writing" | "brief">("writing");
   const [rewriteRequest, setRewriteRequest] = useState<RewriteRequest | null>(null);
@@ -46,6 +46,7 @@ export function StudioShell({ project, availableSources, editable, ai }: {
   const [contentTab, setContentTab] = useState<"MOTHER" | "PACKAGE" | SupportedPlatform>("MOTHER");
   const [activePlatform, setActivePlatform] = useState<SupportedPlatform>("DOUYIN");
   const [platformVariants, setPlatformVariants] = useState(project.platformVariants);
+  const [analysisInputChanged, setAnalysisInputChanged] = useState(false);
   const motherContent = appliedMotherContent ?? project.motherContent;
   const currentMotherVersion = Math.max(motherContent.version, savedMotherVersion);
   const effectiveVariants = platformVariants.map((variant) => ({ ...variant, isStale: variant.sourceMotherVersion < currentMotherVersion }));
@@ -78,9 +79,9 @@ export function StudioShell({ project, availableSources, editable, ai }: {
           <MotherContentEditor key={motherContent.version} projectId={project.id} initial={motherContent} editable={editable && project.status !== "ARCHIVED"} aiConfigured={ai.integrationStatus === "CONFIGURED" || ai.integrationStatus === "MOCK"} onRewriteRequest={(request) => { setRewriteRequest(request); setTab("brief"); }} onSaved={setSavedMotherVersion} />
         </Card>
         <Card className={`${tab === "brief" ? "block" : "hidden"} p-4 xl:block`}>
-          <AICreationPanel projectId={project.id} integrationStatus={ai.integrationStatus} hasCreatorProfile={ai.hasCreatorProfile} editable={editable && project.status !== "ARCHIVED"} briefVersion={project.creativeBrief.version} motherVersion={motherContent.version} motherHasContent={Boolean(motherContent.body.trim())} recentRuns={ai.recentRuns} rewriteRequest={rewriteRequest} onMotherContentApplied={(content) => { setAppliedMotherContent(content); setSavedMotherVersion(content.version); }} />
+          <AICreationPanel projectId={project.id} integrationStatus={ai.integrationStatus} hasCreatorProfile={ai.hasCreatorProfile} editable={editable && project.status !== "ARCHIVED"} motherVersion={motherContent.version} unifiedAnalysis={ai.unifiedAnalysis} inputChanged={analysisInputChanged} onAnalysisUpdated={() => setAnalysisInputChanged(false)} rewriteRequest={rewriteRequest} onMotherContentApplied={(content) => { setAppliedMotherContent(content); setSavedMotherVersion(content.version); }} />
           <div className="my-6 border-t" />
-          <BriefEditor key={project.creativeBrief.version} projectId={project.id} initial={project.creativeBrief} editable={editable && project.status !== "ARCHIVED"} />
+          <BriefEditor key={project.creativeBrief.version} projectId={project.id} initial={project.creativeBrief} editable={editable && project.status !== "ARCHIVED"} onSaved={() => setAnalysisInputChanged(true)} />
           <ProjectStatusPanel project={project} editable={editable} />
         </Card>
       </div>

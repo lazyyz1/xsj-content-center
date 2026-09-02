@@ -56,6 +56,7 @@ export async function executeStructuredAIRun<T>(input: {
   metadata?: unknown;
   auditMetadata?: Record<string, string | number | boolean>;
   contextTruncated: boolean;
+  onRunCreated?: (runId: string) => Promise<void>;
   generate: (provider: LLMProvider) => Promise<ProviderResult<LLMStructuredResult<T>>>;
 }, dependencies: { runtime?: LLMRuntime } = {}) {
   const runtime = dependencies.runtime ?? await loadLLMRuntime(input.workspaceId);
@@ -68,6 +69,7 @@ export async function executeStructuredAIRun<T>(input: {
   });
   const requestStartedAt = Date.now();
   try {
+    await input.onRunCreated?.(run.id);
     const result = await input.generate(runtime.provider);
     const usage = result.data.usage;
     const latencyMs = Date.now() - requestStartedAt;

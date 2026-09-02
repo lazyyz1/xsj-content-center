@@ -8,10 +8,10 @@ import { getProjectForUser } from "@/server/project-service";
 import { db } from "@content-center/db";
 import { IntegrationService } from "@content-center/integrations";
 import { getCreatorProfile } from "@/server/creator-profile-service";
-import { getRecentAIRuns } from "@/server/ai/ai-run-service";
 import { deepContentPackageSchema } from "@/server/deep-content/schemas";
 import { projectStatusLabels } from "@/lib/content-labels";
 import { readMaterialAnalysisBriefMetadata } from "@/server/material-analysis/brief-mapper";
+import { getUnifiedCreativeAnalysisState } from "@/server/unified-analysis/service";
 
 function stringArray(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
 
@@ -21,11 +21,11 @@ export default async function ProjectStudioPage({ params }: { params: Promise<{ 
   const project = await getProjectForUser({ userId: session.user.id, workspaceId: workspace.id, projectId: id });
   if (!project) notFound();
   const sourceIds = project.sources.map(({ sourceItemId }) => sourceItemId);
-  const [availableSources, llm, ownProfile, recentRuns] = await Promise.all([
+  const [availableSources, llm, ownProfile, unifiedAnalysis] = await Promise.all([
     db.sourceItem.findMany({ where: { workspaceId: workspace.id, status: "READY", ...(sourceIds.length ? { id: { notIn: sourceIds } } : {}) }, select: { id: true, title: true, sourcePlatform: true, sourceType: true }, orderBy: { createdAt: "desc" }, take: 100 }),
     new IntegrationService().getIntegrationStatus(workspace.id, "LLM"),
     getCreatorProfile(workspace.id, session.user.id),
-    getRecentAIRuns({ workspaceId: workspace.id, userId: session.user.id, projectId: project.id }),
+    getUnifiedCreativeAnalysisState({ workspaceId: workspace.id, userId: session.user.id, projectId: project.id }),
   ]);
   const brief = project.creativeBrief;
   const briefMetadata = readMaterialAnalysisBriefMetadata(brief?.metadata);
@@ -47,6 +47,6 @@ export default async function ProjectStudioPage({ params }: { params: Promise<{ 
     deepContentPackage: deepPackage,
     platformVariants: project.platformVariants.map((variant) => ({ id: variant.id, platform: variant.platform, version: variant.version, title: variant.title, body: variant.body, hook: variant.hook, summary: variant.summary, hashtags: stringArray(variant.hashtags), mediaPlan: variant.mediaPlan, metadata: variant.metadata, status: variant.status, sourceMotherVersion: variant.sourceMotherVersion, isStale: variant.sourceMotherVersion < (mother?.version ?? 0) })),
   };
-  const ai = { integrationStatus: llm.status !== "CONFIGURED" && process.env.MOCK_MODE === "true" ? "MOCK" as const : llm.status, hasCreatorProfile: Boolean(project.creatorProfile || ownProfile), recentRuns: recentRuns.map((run) => ({ ...run, createdAt: run.createdAt.toISOString(), appliedAt: run.appliedAt?.toISOString() ?? null, discardedAt: run.discardedAt?.toISOString() ?? null })) };
+  const ai = { integrationStatus: llm.status !== "CONFIGURED" && process.env.MOCK_MODE === "true" ? "MOCK" as const : llm.status, hasCreatorProfile: Boolean(project.creatorProfile || ownProfile), unifiedAnalysis: unifiedAnalysis.analysis };
   return <><header className="mb-5 flex flex-wrap items-start justify-between gap-4"><div><Link href={`/projects/${project.id}`} className="mb-3 inline-flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"><ArrowLeft size={16} />返回项目详情</Link><h1 className="text-2xl font-semibold tracking-tight">{project.title}</h1><p className="mt-1 text-sm text-[var(--text-secondary)]">创作工作台</p></div><Badge>{projectStatusLabels[project.status] || project.status}</Badge></header><StudioShell project={studioProject} availableSources={availableSources} editable={role !== "VIEWER"} ai={ai} /></>;
 }

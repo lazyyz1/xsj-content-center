@@ -2,30 +2,31 @@
 
 import { Badge, Button } from "@content-center/ui";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 type AIAction = "ANALYZE_SOURCES" | "EXTRACT_EVIDENCE" | "GENERATE_ANGLES" | "GENERATE_BRIEF" | "GENERATE_MOTHER_CONTENT" | "REWRITE_SELECTION" | "SHORTEN" | "EXPAND" | "ADD_PERSONAL_VIEW" | "HUMANIZE";
 type RewriteRequest = { id: number; action: AIAction; selectedText: string; selectionStart: number; selectionEnd: number };
-type Run = { id: string; action: AIAction; status: string; output?: unknown; outputJson?: unknown; contextTruncated?: boolean; errorCode?: string | null; appliedAt?: string | Date | null; discardedAt?: string | Date | null };
+type Run = { id: string; action: AIAction; status: string; output?: unknown; outputJson?: unknown; contextTruncated?: boolean };
 type MotherContentSnapshot = { title: string; body: string; outline: string[]; version: number; origin: "HUMAN" | "KIMI" | "GPT_WEB"; originNote: string | null };
+type UnifiedAnalysisView = { id: string; version: number; schemaVersion: string; status: string; inputFingerprint: string; output: unknown; errorCode: string | null; errorMessage: string | null; cached: boolean; isStale: boolean; createdAt: string; updatedAt: string };
 
-const labels: Record<AIAction, string> = { ANALYZE_SOURCES: "分析素材", EXTRACT_EVIDENCE: "提取观点 / 证据", GENERATE_ANGLES: "生成创作角度", GENERATE_BRIEF: "生成创作简报", GENERATE_MOTHER_CONTENT: "生成核心母稿", REWRITE_SELECTION: "改写", SHORTEN: "缩短", EXPAND: "扩写", ADD_PERSONAL_VIEW: "增加个人观点", HUMANIZE: "表达自然化" };
-const actions: AIAction[] = ["ANALYZE_SOURCES", "EXTRACT_EVIDENCE", "GENERATE_ANGLES", "GENERATE_BRIEF", "GENERATE_MOTHER_CONTENT"];
-
+const rewriteLabels: Partial<Record<AIAction, string>> = { REWRITE_SELECTION: "改写", SHORTEN: "缩短", EXPAND: "扩写", ADD_PERSONAL_VIEW: "增加个人观点", HUMANIZE: "表达自然化" };
 function object(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function array(value: unknown): unknown[] { return Array.isArray(value) ? value : []; }
 function text(value: unknown) { return typeof value === "string" ? value : ""; }
 
-export function AICreationPanel({ projectId, integrationStatus, hasCreatorProfile, editable, briefVersion, motherVersion, motherHasContent, recentRuns, rewriteRequest, onMotherContentApplied }: { projectId: string; integrationStatus: "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "DISABLED" | "ERROR" | "MOCK"; hasCreatorProfile: boolean; editable: boolean; briefVersion: number; motherVersion: number; motherHasContent: boolean; recentRuns: Run[]; rewriteRequest: RewriteRequest | null; onMotherContentApplied: (content: MotherContentSnapshot) => void }) {
+export function AICreationPanel({ projectId, integrationStatus, hasCreatorProfile, editable, motherVersion, unifiedAnalysis, inputChanged, onAnalysisUpdated, rewriteRequest, onMotherContentApplied }: { projectId: string; integrationStatus: "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "DISABLED" | "ERROR" | "MOCK"; hasCreatorProfile: boolean; editable: boolean; motherVersion: number; unifiedAnalysis: UnifiedAnalysisView | null; inputChanged: boolean; onAnalysisUpdated: () => void; rewriteRequest: RewriteRequest | null; onMotherContentApplied: (content: MotherContentSnapshot) => void }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [current, setCurrent] = useState<Run | null>(null);
-  const [selectedEvidence, setSelectedEvidence] = useState<number[]>([]);
+  const [analysis, setAnalysis] = useState(unifiedAnalysis);
+  const [rewriteRun, setRewriteRun] = useState<Run | null>(null);
   const lastRewrite = useRef(0);
   const currentRewrite = useRef<RewriteRequest | null>(null);
+
+  useEffect(() => { setAnalysis(unifiedAnalysis); }, [unifiedAnalysis]);
 
   async function call(path: string, body?: unknown) {
     const response = await fetch(path, { method: "POST", headers: body ? { "content-type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
@@ -33,72 +34,96 @@ export function AICreationPanel({ projectId, integrationStatus, hasCreatorProfil
     if (!response.ok) throw new Error(result.message || result.error || "AI 操作失败");
     return result;
   }
-  async function execute(action: AIAction, selection?: RewriteRequest) {
-    setBusy(true); setError(""); setMessage(""); setSelectedEvidence([]);
+
+  async function executeUnified() {
+    setBusy(true); setError(""); setMessage("");
     try {
-      const run = await call(`/api/projects/${projectId}/ai/run`, { action, ...(selection ? { selectedText: selection.selectedText } : {}) });
-      currentRewrite.current = selection ?? null;
-      setCurrent(run);
+      const result = await call(`/api/projects/${projectId}/ai/run`, { action: "UNIFIED_CREATIVE_ANALYSIS" }) as UnifiedAnalysisView;
+      setAnalysis(result);
+      onAnalysisUpdated();
+      setMessage(result.cached ? "已复用相同输入的分析结果" : "AI 分析完成");
+      router.refresh();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "AI 分析暂时失败"); }
+    finally { setBusy(false); }
+  }
+
+  async function executeRewrite(selection: RewriteRequest) {
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const run = await call(`/api/projects/${projectId}/ai/run`, { action: selection.action, selectedText: selection.selectedText });
+      currentRewrite.current = selection;
+      setRewriteRun(run);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "AI 操作失败"); }
     finally { setBusy(false); }
   }
+
   useEffect(() => {
     if (!rewriteRequest || rewriteRequest.id === lastRewrite.current || (integrationStatus !== "CONFIGURED" && integrationStatus !== "MOCK")) return;
     lastRewrite.current = rewriteRequest.id;
-    void execute(rewriteRequest.action, rewriteRequest);
+    void executeRewrite(rewriteRequest);
   }, [rewriteRequest, integrationStatus]);
 
-  async function apply(body: Record<string, unknown>) {
-    if (!current) return;
+  async function applyRewrite(mode: "REPLACE" | "INSERT_AFTER") {
+    if (!rewriteRun || !currentRewrite.current) return;
     setBusy(true); setError("");
     try {
-      const result = object(await call(`/api/projects/${projectId}/ai/runs/${current.id}/apply`, body));
-      const appliedMother = object(result.motherContent);
-      if (result.target === "mother_content") onMotherContentApplied({ title: text(appliedMother.title), body: text(appliedMother.body), outline: array(appliedMother.outline).filter((item): item is string => typeof item === "string"), version: typeof appliedMother.version === "number" ? appliedMother.version : motherVersion + 1, origin: appliedMother.origin === "GPT_WEB" || appliedMother.origin === "HUMAN" ? appliedMother.origin : "KIMI", originNote: typeof appliedMother.originNote === "string" ? appliedMother.originNote : null });
-      setMessage("AI 结果已应用"); setCurrent(null); router.refresh();
-    }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "应用失败"); }
+      const result = object(await call(`/api/projects/${projectId}/ai/runs/${rewriteRun.id}/apply`, { expectedVersion: motherVersion, selectionStart: currentRewrite.current.selectionStart, selectionEnd: currentRewrite.current.selectionEnd, mode }));
+      const mother = object(result.motherContent);
+      onMotherContentApplied({ title: text(mother.title), body: text(mother.body), outline: array(mother.outline).filter((item): item is string => typeof item === "string"), version: typeof mother.version === "number" ? mother.version : motherVersion + 1, origin: mother.origin === "GPT_WEB" || mother.origin === "HUMAN" ? mother.origin : "KIMI", originNote: typeof mother.originNote === "string" ? mother.originNote : null });
+      setRewriteRun(null); setMessage("AI 结果已应用"); router.refresh();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "应用失败"); }
     finally { setBusy(false); }
   }
-  async function discard() {
-    if (!current) return;
+
+  async function discardRewrite() {
+    if (!rewriteRun) return;
     setBusy(true); setError("");
-    try { await call(`/api/projects/${projectId}/ai/runs/${current.id}/discard`); setCurrent(null); setMessage("已放弃本次 AI 结果"); router.refresh(); }
+    try { await call(`/api/projects/${projectId}/ai/runs/${rewriteRun.id}/discard`); setRewriteRun(null); setMessage("已放弃本次 AI 结果"); router.refresh(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "放弃失败"); }
     finally { setBusy(false); }
   }
 
   const configured = integrationStatus === "CONFIGURED" || integrationStatus === "MOCK";
-  const output = current?.output ?? current?.outputJson;
-  return <section><div className="flex items-center justify-between gap-3"><div><h2 className="font-semibold">AI 创作辅助</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">每次先生成预览，再由你决定是否应用。</p></div><Badge>{integrationStatus === "MOCK" ? "MOCK MODE" : integrationStatus}</Badge></div>
+  const stale = Boolean(analysis && (analysis.isStale || inputChanged));
+  const output = object(analysis?.output);
+  const rewriteOutput = object(rewriteRun?.output ?? rewriteRun?.outputJson);
+  return <section data-testid="unified-creative-analysis"><div className="flex items-center justify-between gap-3"><div><h2 className="font-semibold">AI 创作分析</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">一次整理创作理解、可选角度、结构、素材依据与风险提醒。</p></div><Badge>{integrationStatus === "MOCK" ? "MOCK MODE" : integrationStatus}</Badge></div>
     {!configured ? <div className="mt-4 rounded-xl border border-dashed p-4 text-sm"><p>{integrationStatus === "DISABLED" ? "AI 模型已禁用" : "尚未配置 AI 模型"}</p><Link href="/settings/integrations" className="mt-2 inline-block font-medium text-[var(--accent)]">前往设置</Link></div> : null}
-    {configured && !hasCreatorProfile ? <p className="mt-3 rounded-lg bg-[var(--surface-elevated)] p-3 text-xs text-[var(--text-secondary)]">尚未建立个人创作画像，AI 将只使用项目上下文。 <Link href="/settings/creator-profile" className="text-[var(--accent)]">去建立</Link></p> : null}
-    {configured && editable ? <div className="mt-4 grid grid-cols-2 gap-2">{actions.map((action) => <Button key={action} variant="secondary" disabled={busy} onClick={() => execute(action)} className={action === "GENERATE_MOTHER_CONTENT" ? "col-span-2" : ""}>{labels[action]}</Button>)}</div> : null}
-    {busy ? <p role="status" className="mt-4 text-sm text-[var(--text-secondary)]">AI 正在生成…</p> : null}
-    {error ? <p role="alert" className="mt-4 text-sm text-[var(--danger)]">{error}</p> : null}
+    {configured && !hasCreatorProfile ? <p className="mt-3 rounded-lg bg-[var(--surface-elevated)] p-3 text-xs text-[var(--text-secondary)]">尚未建立个人创作画像，分析将只使用项目上下文。 <Link href="/settings/creator-profile" className="text-[var(--accent)]">去建立</Link></p> : null}
+    {stale ? <p className="mt-3 rounded-lg bg-[var(--surface-elevated)] p-3 text-xs text-[var(--warning)]">创作信息已更新，可更新 AI 分析。旧分析不会覆盖当前创作简报。</p> : null}
+    {configured && editable && (!analysis || stale) ? <Button className="mt-4 w-full" disabled={busy} onClick={executeUnified}>{analysis ? "更新 AI 分析" : "AI 深度分析"}</Button> : null}
+    {analysis && !stale ? <p className="mt-3 text-xs text-[var(--success)]">AI 分析已是最新 · v{analysis.version}</p> : null}
+    {busy ? <p role="status" className="mt-4 text-sm text-[var(--text-secondary)]">AI 分析生成中…</p> : null}
+    {error ? <p role="alert" className="mt-4 text-sm text-[var(--danger)]">AI 分析暂时失败：{error}</p> : null}
     {message ? <p role="status" className="mt-4 text-sm text-[var(--success)]">{message}</p> : null}
-    {current && output ? <div className="mt-5 border-t pt-5"><div className="flex items-center justify-between gap-2"><h3 className="text-sm font-semibold">{labels[current.action]}预览</h3>{current.contextTruncated ? <Badge className="text-[var(--warning)]">上下文已截断</Badge> : null}</div><Preview action={current.action} output={output} selectedEvidence={selectedEvidence} setSelectedEvidence={setSelectedEvidence} />
-      <div className="mt-4 grid gap-2">
-        {current.action === "EXTRACT_EVIDENCE" ? <Button disabled={busy || !selectedEvidence.length} onClick={() => apply({ selectedIndexes: selectedEvidence })}>添加选中的观点 / 证据</Button> : null}
-        {current.action === "GENERATE_BRIEF" ? <Button disabled={busy} onClick={() => apply({ expectedVersion: briefVersion })}>应用到创作简报</Button> : null}
-        {current.action === "GENERATE_MOTHER_CONTENT" ? <Button disabled={busy} onClick={() => { const confirmed = !motherHasContent || window.confirm("当前母稿已有内容，确定用 AI Draft 替换吗？"); if (confirmed) void apply({ expectedVersion: motherVersion, confirmReplace: motherHasContent }); }}>应用为母稿</Button> : null}
-        {current.action === "GENERATE_ANGLES" ? array(object(output).angles).map((_, index) => <Button key={index} variant="secondary" disabled={busy} onClick={() => apply({ selectedIndex: index, expectedVersion: briefVersion })}>采用这个角度（{index + 1}）</Button>) : null}
-        {["REWRITE_SELECTION", "SHORTEN", "EXPAND", "ADD_PERSONAL_VIEW", "HUMANIZE"].includes(current.action) && currentRewrite.current ? <><Button disabled={busy} onClick={() => apply({ expectedVersion: motherVersion, selectionStart: currentRewrite.current!.selectionStart, selectionEnd: currentRewrite.current!.selectionEnd, mode: "REPLACE" })}>替换选中文字</Button><Button variant="secondary" disabled={busy} onClick={() => apply({ expectedVersion: motherVersion, selectionStart: currentRewrite.current!.selectionStart, selectionEnd: currentRewrite.current!.selectionEnd, mode: "INSERT_AFTER" })}>插入下方</Button></> : null}
-        <div className="flex gap-2"><Button variant="secondary" disabled={busy} onClick={() => execute(current.action, currentRewrite.current ?? undefined)}>重新生成</Button><Button variant="ghost" disabled={busy} onClick={discard}>放弃</Button></div>
-      </div>
-    </div> : null}
-    <div className="mt-6 border-t pt-4"><h3 className="text-xs font-semibold text-[var(--text-secondary)]">最近 AI 结果</h3><div className="mt-2 grid gap-2">{recentRuns.length ? recentRuns.map((run) => <div key={run.id} className="flex items-center justify-between rounded-lg bg-[var(--surface-elevated)] px-3 py-2 text-xs"><span>{labels[run.action]}</span><span>{run.appliedAt ? "已应用" : run.discardedAt ? "已放弃" : run.status}</span></div>) : <p className="text-xs text-[var(--text-secondary)]">暂无 AI 运行记录</p>}</div></div>
+    {analysis?.output ? <UnifiedAnalysisResult output={output} /> : null}
+    {rewriteRun ? <div className="mt-5 border-t pt-5"><h3 className="text-sm font-semibold">{rewriteLabels[rewriteRun.action] || "AI 编辑"}预览</h3><div className="mt-3 grid gap-3 text-xs"><div className="rounded-lg bg-[var(--surface-elevated)] p-3"><strong>原文</strong><p className="mt-2 whitespace-pre-wrap">{text(rewriteOutput.original)}</p></div><div className="rounded-lg border p-3"><strong>AI 建议版本</strong><p className="mt-2 whitespace-pre-wrap">{text(rewriteOutput.aiVersion)}</p></div></div><div className="mt-4 grid gap-2"><Button disabled={busy} onClick={() => applyRewrite("REPLACE")}>替换选中文字</Button><Button variant="secondary" disabled={busy} onClick={() => applyRewrite("INSERT_AFTER")}>插入下方</Button><Button variant="ghost" disabled={busy} onClick={discardRewrite}>放弃</Button></div></div> : null}
   </section>;
 }
 
-function Preview({ action, output, selectedEvidence, setSelectedEvidence }: { action: AIAction; output: unknown; selectedEvidence: number[]; setSelectedEvidence: (value: number[]) => void }) {
-  const data = object(output);
-  if (action === "EXTRACT_EVIDENCE") return <div className="mt-3 grid gap-2">{array(data.items).map((value, index) => { const item = object(value); return <label key={index} className="flex gap-2 rounded-lg border p-3 text-xs"><input type="checkbox" checked={selectedEvidence.includes(index)} onChange={(event) => setSelectedEvidence(event.target.checked ? [...selectedEvidence, index] : selectedEvidence.filter((itemIndex) => itemIndex !== index))} /><span><strong>{text(item.type)}</strong><br />{text(item.claim) || text(item.excerpt)}</span></label>; })}</div>;
-  if (action === "GENERATE_ANGLES") return <div className="mt-3 grid gap-2">{array(data.angles).map((value, index) => { const angle = object(value); return <article key={index} className="rounded-lg border p-3 text-xs"><p className="font-semibold">{index + 1}. {text(angle.title)}</p><p className="mt-2 leading-5">{text(angle.angle)}</p><p className="mt-2 text-[var(--text-secondary)]">{text(angle.whyItWorks)}</p></article>; })}</div>;
-  if (action === "GENERATE_BRIEF") return <div className="mt-3 rounded-lg border p-3 text-xs"><p className="font-semibold">{text(data.topic)}</p><p className="mt-2">{text(data.angle)}</p><p className="mt-2 text-[var(--text-secondary)]">{text(data.coreMessage)}</p></div>;
-  if (action === "GENERATE_MOTHER_CONTENT") return <div className="mt-3 max-h-80 overflow-auto rounded-lg border p-3 text-xs"><p className="font-semibold">{text(data.title)}</p><p className="mt-3 whitespace-pre-wrap leading-6">{text(data.body)}</p></div>;
-  if (["REWRITE_SELECTION", "SHORTEN", "EXPAND", "ADD_PERSONAL_VIEW", "HUMANIZE"].includes(action)) return <div className="mt-3 grid gap-3 text-xs"><div className="rounded-lg bg-[var(--surface-elevated)] p-3"><strong>原文</strong><p className="mt-2 whitespace-pre-wrap">{text(data.original)}</p></div><div className="rounded-lg border p-3"><strong>AI 建议版本</strong><p className="mt-2 whitespace-pre-wrap">{text(data.aiVersion)}</p></div></div>;
-  return <div className="mt-3 grid gap-3 text-xs">{["topics", "coreClaims", "facts", "cases", "questions", "hooks", "structures", "risks", "reusableInsights"].map((key) => <div key={key}><p className="font-semibold">{key}</p><ul className="mt-1 list-disc pl-4">{array(data[key]).map((value, index) => <li key={index}>{typeof value === "string" ? value : text(object(value).text)}</li>)}</ul></div>)}</div>;
+function UnifiedAnalysisResult({ output }: { output: Record<string, unknown> }) {
+  const interpretation = object(output.creativeInterpretation);
+  const structure = object(output.structure);
+  const expression = object(output.expressionDirection);
+  return <div className="mt-5 grid gap-4 border-t pt-5 text-xs">
+    <AnalysisSection title="创作理解" classification={text(interpretation.classification)}><p className="leading-5">{text(interpretation.text)}</p><SourceFacts output={output} /></AnalysisSection>
+    <AnalysisSection title="可选切入角度" classification="AI_SUGGESTION"><div className="grid gap-2">{array(output.angles).map((value, index) => { const item = object(value); return <article key={index} className="rounded-lg border p-3"><p className="font-semibold">{text(item.title)}</p><p className="mt-1 leading-5">{text(item.angle)}</p><p className="mt-1 text-[var(--text-secondary)]">{text(item.rationale)}</p></article>; })}</div></AnalysisSection>
+    <AnalysisSection title="结构建议" classification={text(structure.classification)}><p className="leading-5">{text(structure.overallApproach)}</p><ol className="mt-2 grid gap-2">{array(structure.sections).map((value, index) => { const item = object(value); return <li key={index} className="rounded-lg bg-[var(--surface-elevated)] p-3"><strong>{index + 1}. {text(item.title)}</strong><p className="mt-1">{text(item.purpose)}</p><p className="mt-1 text-[var(--text-secondary)]">{text(item.keyMessage)}</p></li>; })}</ol></AnalysisSection>
+    <AnalysisSection title="素材依据" classification="SOURCE_FACT"><div className="grid gap-2">{array(output.sourceReferences).map((value, index) => { const item = object(value); return <p key={index} className="rounded-lg bg-[var(--surface-elevated)] p-2">{text(item.title) || text(item.sourceItemId)} · {text(item.role)}</p>; })}{array(output.groundingGaps).length ? <p className="text-[var(--warning)]">SOURCE_REFERENCE_GAP：部分建议缺少足够的素材引用，请人工核对。</p> : null}</div></AnalysisSection>
+    <AnalysisSection title="表达方向" classification={text(expression.classification)}><p>{text(expression.description)}</p><p className="mt-1 text-[var(--text-secondary)]">{text(expression.rationale)}</p></AnalysisSection>
+    <AnalysisSection title="风险提醒" classification="AI_INTERPRETATION"><ul className="list-disc space-y-1 pl-4">{array(output.riskNotes).map((value, index) => <li key={index}>{text(object(value).text)}</li>)}</ul></AnalysisSection>
+    <AnalysisSection title="标题参考" classification="AI_SUGGESTION"><p className="mb-2 text-[var(--text-secondary)]">仅供参考，不是最终标题。</p><ul className="list-disc space-y-1 pl-4">{array(output.titleReferences).map((value, index) => <li key={index}>{text(object(value).title)}</li>)}</ul></AnalysisSection>
+  </div>;
 }
 
-export type { AIAction, RewriteRequest };
+function SourceFacts({ output }: { output: Record<string, unknown> }) {
+  const summary = object(output.summary); const question = object(output.coreQuestion); const viewpoint = object(output.coreViewpoint);
+  return <dl className="mt-3 grid gap-2 rounded-lg bg-[var(--surface-elevated)] p-3"><div><dt className="font-medium">素材背景</dt><dd className="mt-1">{text(summary.text) || "未提供"}</dd></div><div><dt className="font-medium">核心问题</dt><dd className="mt-1">{text(question.text) || "未提供"}</dd></div><div><dt className="font-medium">素材核心观点</dt><dd className="mt-1">{text(viewpoint.text) || "未提供"}</dd></div></dl>;
+}
+
+function AnalysisSection({ title, classification, children }: { title: string; classification: string; children: ReactNode }) {
+  const labels: Record<string, string> = { SOURCE_FACT: "素材事实", USER_INPUT: "用户输入", AI_INTERPRETATION: "AI 解读", AI_SUGGESTION: "AI 建议" };
+  return <section><div className="mb-2 flex items-center justify-between gap-2"><h3 className="text-sm font-semibold">{title}</h3>{classification ? <Badge>{labels[classification] || classification}</Badge> : null}</div>{children}</section>;
+}
+
+export type { AIAction, RewriteRequest, UnifiedAnalysisView };
