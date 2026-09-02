@@ -10,6 +10,7 @@ import { ProjectContextBuilder } from "../server/ai/project-context";
 import { selectPromptTemplate } from "../server/ai/prompt-service";
 import { getCreatorProfile, saveCreatorProfile } from "../server/creator-profile-service";
 import { createProject } from "../server/project-service";
+import { listMotherContentVersions, saveMotherContent } from "../server/mother-content-service";
 
 describe("AI creation engine", () => {
   const runId = randomUUID();
@@ -19,6 +20,7 @@ describe("AI creation engine", () => {
   let workspaceBId = "";
   let projectId = "";
   let projectBId = "";
+  let failureProjectId = "";
   let sourceId = "";
 
   beforeAll(async () => {
@@ -31,7 +33,10 @@ describe("AI creation engine", () => {
     await saveCreatorProfile({ workspaceId: workspaceAId, userId: userAId, data: { displayName: "Creator A", positioning: "Practical creator", targetAudience: "Teams", tone: "Direct", preferredStyle: "Concrete", forbiddenStyle: "Empty slogans", coreTopics: ["AI workflow"], personalViews: ["Evidence before opinion"], brandTerms: ["Content Center"], forbiddenTerms: ["guaranteed"], hookPreferences: ["Question"], structurePreferences: ["Problem-solution"], ctaPreferences: ["Ask for feedback"], examplePhrases: ["先看证据"], notes: "" } });
     await saveCreatorProfile({ workspaceId: workspaceBId, userId: userBId, data: { displayName: "Creator B", positioning: "Private", targetAudience: "Private", tone: "Private", preferredStyle: "", forbiddenStyle: "", coreTopics: [], personalViews: [], brandTerms: [], forbiddenTerms: [], hookPreferences: [], structurePreferences: [], ctaPreferences: [], examplePhrases: [], notes: "" } });
     sourceId = (await db.sourceItem.create({ data: { workspaceId: workspaceAId, createdById: userAId, sourceType: "TEXT", sourcePlatform: "GENERIC", status: "READY", title: "Long source", rawText: "A".repeat(200) } })).id;
+    await db.materialAnalysis.create({ data: { workspaceId: workspaceAId, sourceItemId: sourceId, version: 1, status: "COMPLETED", summary: "Material summary", topic: "Reliable creation", tags: [], keywords: [], keyPoints: ["Material key point"], origin: "AI", transcriptUpdatedAtAtAnalysis: new Date(), createdById: userAId } });
     projectId = (await createProject({ workspaceId: workspaceAId, userId: userAId, title: "AI Project", goal: "Create a grounded draft", sourceItemId: sourceId })).id;
+    failureProjectId = (await createProject({ workspaceId: workspaceAId, userId: userAId, title: "Failed mother project", sourceItemId: sourceId })).id;
+    await db.unifiedCreativeAnalysis.create({ data: { workspaceId: workspaceAId, projectId, createdById: userAId, version: 1, status: "COMPLETED", inputFingerprint: `fp-${runId}`, output: { creativeInterpretation: { text: "Unified interpretation", classification: "AI_INTERPRETATION", sourceItemIds: [sourceId] }, groundingGaps: ["Unverified number"] }, provenance: { sourceItemIds: [sourceId] } } });
     projectBId = (await createProject({ workspaceId: workspaceBId, userId: userBId, title: "Private AI Project" })).id;
   });
 
@@ -59,6 +64,10 @@ describe("AI creation engine", () => {
     const analyze = await builder.build({ workspaceId: workspaceAId, userId: userAId, projectId, action: "ANALYZE_SOURCES" });
     expect(analyze.context.sources[0]?.text).toHaveLength(20);
     expect(analyze.contextTruncated).toBe(true);
+    const mother = await builder.build({ workspaceId: workspaceAId, userId: userAId, projectId, action: "GENERATE_MOTHER_CONTENT" });
+    expect(mother.context.sources[0]?.materialAnalysis).toMatchObject({ summary: "Material summary", keyPoints: ["Material key point"] });
+    expect(mother.context.unifiedCreativeAnalysis).toMatchObject({ version: 1, output: expect.objectContaining({ creativeInterpretation: expect.any(Object) }) });
+    expect(mother.inputSummary).toMatchObject({ materialAnalysisCount: 1, hasUnifiedCreativeAnalysis: true, hasCreatorProfile: true });
     const rewrite = await builder.build({ workspaceId: workspaceAId, userId: userAId, projectId, action: "HUMANIZE" });
     expect(rewrite.context.sources).toEqual([]);
     expect(rewrite.context.evidence).toEqual([]);
@@ -66,11 +75,12 @@ describe("AI creation engine", () => {
   });
 
   it("keeps AI output in preview until explicit apply or discard", async () => {
+    let motherPrompt = "";
     const fixture = (input: { prompt: string }) => {
       if (input.prompt.includes("EXTRACT_EVIDENCE")) return { items: [{ type: "FACT", excerpt: "Supported excerpt", claim: "Supported claim", note: "", sourceItemId: sourceId }] };
       if (input.prompt.includes("GENERATE_ANGLES")) return { angles: [{ title: "Evidence-first angle", angle: "Start from a failed shortcut", coreMessage: "Evidence improves originality", whyItWorks: "Concrete", targetAudience: "Teams", recommendedStructure: ["Failure", "Evidence", "Method"], risk: "Avoid absolutes", evidenceIds: [], sourceItemIds: [sourceId] }] };
       if (input.prompt.includes("GENERATE_BRIEF")) return { topic: "AI content workflow", angle: "Evidence first", audience: "Teams", coreMessage: "Build from evidence", keyPoints: ["Collect", "Verify", "Write"], structure: ["Hook", "Method", "CTA"], tone: "Direct", risks: ["No invented facts"], evidenceIds: [], sourceItemIds: [sourceId] };
-      if (input.prompt.includes("GENERATE_MOTHER_CONTENT")) return { title: "Evidence before drafting", outline: ["Hook", "Method"], body: "Mother body", evidenceIds: [], sourceItemIds: [sourceId] };
+      if (input.prompt.includes("GENERATE_MOTHER_CONTENT")) { motherPrompt = input.prompt; return { title: "Evidence before drafting", outline: ["Hook", "Method"], body: "Mother body", evidenceIds: [], sourceItemIds: [sourceId] }; }
       if (input.prompt.includes("HUMANIZE")) return { original: "Mother body", aiVersion: "A more natural mother body" };
       return { topics: ["AI workflow"], coreClaims: [], facts: [], cases: [], questions: [], hooks: [], structures: [], risks: [], reusableInsights: [] };
     };
@@ -84,19 +94,36 @@ describe("AI creation engine", () => {
     const briefRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "GENERATE_BRIEF" }, { runtime });
     await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: briefRun.id, expectedVersion: 1 });
     const motherRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "GENERATE_MOTHER_CONTENT" }, { runtime });
+    expect(motherPrompt).toContain("Material summary");
+    expect(motherPrompt).toContain("Unified interpretation");
+    expect(motherPrompt).toContain("not source paraphrasing");
+    expect(motherPrompt).toContain("Never invent the creator's personal experience");
+    expect(motherPrompt).toContain("Do not reproduce source speech inside quotation marks");
+    expect(motherPrompt).toContain("do not repeat its exact number");
     await expect(db.motherContent.findUnique({ where: { projectId } })).resolves.toBeNull();
     await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: motherRun.id, expectedVersion: 0 });
+    await saveMotherContent({ workspaceId: workspaceAId, userId: userAId, projectId, data: { title: "Human edited V1", body: "Human work must survive", outline: ["Edited"], expectedVersion: 1 } });
     const replacementRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "GENERATE_MOTHER_CONTENT" }, { runtime });
-    await expect(applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: replacementRun.id, expectedVersion: 1 })).rejects.toMatchObject({ code: "AI_REPLACE_CONFIRMATION_REQUIRED" });
-    await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: replacementRun.id, expectedVersion: 1, confirmReplace: true });
+    await expect(applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: replacementRun.id, expectedVersion: 2 })).rejects.toMatchObject({ code: "AI_REPLACE_CONFIRMATION_REQUIRED" });
+    await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: replacementRun.id, expectedVersion: 2, confirmReplace: true });
+    const versions = await listMotherContentVersions({ workspaceId: workspaceAId, userId: userAId, projectId });
+    expect(versions).toMatchObject([{ version: 2, current: true, body: "Mother body" }, { version: 1, current: false, title: "Human edited V1", body: "Human work must survive" }]);
+    await expect(listMotherContentVersions({ workspaceId: workspaceAId, userId: userAId, projectId: projectBId })).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
     const rewriteRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "HUMANIZE", selectedText: "Mother body" }, { runtime });
-    await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: rewriteRun.id, expectedVersion: 2, selectionStart: 0, selectionEnd: 11, mode: "REPLACE" });
-    await expect(db.motherContent.findUniqueOrThrow({ where: { projectId } })).resolves.toMatchObject({ body: "A more natural mother body", version: 3 });
+    await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: rewriteRun.id, expectedVersion: 3, selectionStart: 0, selectionEnd: 11, mode: "REPLACE" });
+    await expect(db.motherContent.findUniqueOrThrow({ where: { projectId } })).resolves.toMatchObject({ body: "A more natural mother body", version: 4 });
     const analyzeRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "ANALYZE_SOURCES" }, { runtime });
     await discardAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: analyzeRun.id });
     await expect(db.aIRun.findUniqueOrThrow({ where: { id: analyzeRun.id } })).resolves.toMatchObject({ discardedAt: expect.any(Date) });
     const audit = await db.auditLog.findMany({ where: { workspaceId: workspaceAId, action: { startsWith: "ai." } }, select: { action: true, metadata: true } });
     expect(audit.map(({ action }) => action)).toEqual(expect.arrayContaining(["ai.run_started", "ai.run_succeeded", "ai.result_applied"]));
     expect(JSON.stringify(audit)).not.toContain("A more natural mother body");
+  });
+
+  it("records invalid AI output as failed and never creates fake mother content", async () => {
+    const runtime = { provider: new MockLLMProvider(() => ({ title: "Invalid", outline: [], body: "", evidenceIds: [], sourceItemIds: [] })), providerName: "MOCK", model: "mock-llm" };
+    await expect(runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId: failureProjectId, action: "GENERATE_MOTHER_CONTENT" }, { runtime })).rejects.toBeTruthy();
+    await expect(db.motherContent.findUnique({ where: { projectId: failureProjectId } })).resolves.toBeNull();
+    await expect(db.aIRun.findFirst({ where: { projectId: failureProjectId, action: "GENERATE_MOTHER_CONTENT" }, orderBy: { createdAt: "desc" } })).resolves.toMatchObject({ status: "FAILED" });
   });
 });

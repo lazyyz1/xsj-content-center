@@ -11,7 +11,7 @@ import { renderPrompt, selectPromptTemplate } from "./prompt-service";
 import { AI_ACTIONS, anglesSchema, briefPreviewSchema, evidencePreviewSchema, isRewriteAction, motherContentPreviewSchema, outputInstruction, rewritePreviewSchema, schemaForAction, type AIAction } from "./schemas";
 
 export class AIServiceError extends Error {
-  constructor(readonly code: "AI_RUN_NOT_FOUND" | "AI_RESULT_ALREADY_RESOLVED" | "AI_RESULT_NOT_APPLICABLE" | "AI_SELECTION_STALE" | "AI_REPLACE_CONFIRMATION_REQUIRED" | "AI_INVALID_INPUT", message: string) {
+  constructor(readonly code: "AI_RUN_NOT_FOUND" | "AI_RESULT_ALREADY_RESOLVED" | "AI_RESULT_NOT_APPLICABLE" | "AI_SELECTION_STALE" | "AI_REPLACE_CONFIRMATION_REQUIRED" | "AI_RUN_IN_PROGRESS" | "AI_INVALID_INPUT", message: string) {
     super(message); this.name = "AIServiceError";
   }
 }
@@ -95,13 +95,18 @@ export async function runAIAction(input: { workspaceId: string; userId: string; 
   const selectedText = input.selectedText?.trim();
   if (isRewriteAction(input.action) && !selectedText) throw new AIServiceError("AI_INVALID_INPUT", "请先选择需要处理的母稿文字。");
   if (selectedText && selectedText.length > 20_000) throw new AIServiceError("AI_INVALID_INPUT", "选择的文字过长。");
+  if (input.action === "GENERATE_MOTHER_CONTENT") {
+    const running = await db.aIRun.findFirst({ where: { workspaceId: input.workspaceId, projectId: input.projectId, action: "GENERATE_MOTHER_CONTENT", status: "RUNNING" }, select: { id: true } });
+    if (running) throw new AIServiceError("AI_RUN_IN_PROGRESS", "核心母稿正在生成，请勿重复提交。");
+  }
   const [built, template] = await Promise.all([
     (dependencies.contextBuilder ?? new ProjectContextBuilder()).build(input),
     selectPromptTemplate(input.workspaceId, input.action),
   ]);
   const inputSummary = { ...built.inputSummary, selectedTextLength: selectedText?.length ?? 0, hasInstruction: Boolean(input.instruction?.trim()) };
   const promptInput = isRewriteAction(input.action) ? { selectedText, instruction: input.instruction?.trim() || "" } : undefined;
-  const prompt = `${renderPrompt(template.template, built.context, promptInput)}${outputInstruction(input.action)}`;
+  const motherContentBoundary = input.action === "GENERATE_MOTHER_CONTENT" ? `\nOriginality and evidence boundary:\n- Write a new work led by the confirmed CreativeBrief and CreatorProfile; this is not source paraphrasing.\n- Do not replace source sentences with synonyms, reproduce distinctive expressions, copy personal experiences or quotes, or repeat unverified numbers as facts.\n- Do not reproduce source speech inside quotation marks. Summarize source claims at the concept level and remove distinctive phrasing.\n- If a source claim is not supported by formal evidence/creativeBasis, do not repeat its exact number, amount, percentage, date, personal case, or promise; weaken or omit it.\n- Treat evidence/creativeBasis as confirmed source support; treat unified analysis interpretations and suggestions as non-factual guidance.\n- Never invent evidence for a source reference gap. Weaken or omit unsupported claims.\n- Never invent the creator's personal experience.\n` : "";
+  const prompt = `${renderPrompt(template.template, built.context, promptInput)}${motherContentBoundary}${outputInstruction(input.action)}`;
   return executeStructuredAIRun({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, action: input.action, operation: input.action, promptTemplateId: template.id, promptVersion: template.version, inputSummary, contextTruncated: built.contextTruncated, generate: (provider) => provider.generateStructured({ systemPrompt: template.systemPrompt, prompt }, schemaForAction(input.action)) }, { runtime: dependencies.runtime });
 }
 
@@ -152,7 +157,7 @@ export async function applyAIResult(input: { workspaceId: string; userId: string
     const output = motherContentPreviewSchema.parse(run.outputJson);
     const existing = await db.motherContent.findFirst({ where: { workspaceId: input.workspaceId, projectId: input.projectId } });
     if (existing?.body.trim() && !input.confirmReplace) throw new AIServiceError("AI_REPLACE_CONFIRMATION_REQUIRED", "当前母稿已有内容，请确认替换。");
-    const content = await saveMotherContent({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, data: { title: output.title, outline: output.outline, body: output.body, expectedVersion: input.expectedVersion ?? 0, origin: "KIMI" } });
+    const content = await saveMotherContent({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, preservePreviousVersion: Boolean(existing), data: { title: output.title, outline: output.outline, body: output.body, expectedVersion: input.expectedVersion ?? 0, origin: "KIMI" } });
     await markApplied({ ...input, target: "mother_content", changedFields: ["title", "outline", "body"] });
     return { applied: true, target: "mother_content", motherContent: { title: content.title, body: content.body, outline: content.outline, version: content.version, origin: content.origin, originNote: content.originNote } };
   }

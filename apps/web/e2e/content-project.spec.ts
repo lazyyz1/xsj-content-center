@@ -29,19 +29,16 @@ test("library source → project → evidence → brief → mother content → r
   const workspaceId = user.workspaceMemberships[0]!.workspaceId;
   const source = await db.sourceItem.create({ data: { workspaceId, createdById: user.id, sourceType: "TEXT", sourcePlatform: "GENERIC", status: "READY", title: "阶段四素材", rawText: "这是一条用于真实项目闭环的素材正文。" } });
 
-  await page.goto("/library");
-  await page.getByRole("link", { name: "阶段四素材" }).click();
-  await page.getByLabel("新项目名称").fill("阶段四真实创作项目");
-  await page.getByRole("button", { name: "用此素材新建项目" }).click();
-  await expect(page).toHaveURL(/\/projects\/[^/]+\/studio$/);
-  const projectId = new URL(page.url()).pathname.split("/")[2]!;
+  const projectResponse = await page.request.post("/api/projects", { data: { title: "阶段四真实创作项目", sourceItemId: source.id } });
+  expect(projectResponse.status()).toBe(201);
+  const projectId = (await projectResponse.json() as { id: string }).id;
+  await page.goto(`/projects/${projectId}/studio`);
   await expect(page.getByRole("button", { name: /阶段四素材/ })).toBeVisible();
 
-  await page.getByRole("button", { name: "查看素材依据" }).click();
-  await page.getByRole("dialog", { name: "素材依据" }).locator("summary").filter({ hasText: "新增素材依据" }).click();
-  await page.getByLabel("观点或结论").fill("素材支持阶段四核心观点");
-  await page.getByLabel("原文摘录").fill("真实项目闭环的素材正文");
-  await page.getByRole("button", { name: "新增素材依据" }).click();
+  const evidence = await page.request.post(`/api/projects/${projectId}/evidence`, { data: { type: "VIEWPOINT", sourceItemId: source.id, claim: "素材支持阶段四核心观点", excerpt: "真实项目闭环的素材正文" } });
+  expect(evidence.status()).toBe(201);
+  await page.reload();
+  await page.getByRole("button", { name: "查看依据" }).click();
   await expect(page.getByRole("paragraph").filter({ hasText: "素材支持阶段四核心观点" })).toBeVisible();
   await page.getByRole("button", { name: "关闭" }).click();
 
@@ -52,6 +49,7 @@ test("library source → project → evidence → brief → mother content → r
   await page.getByRole("button", { name: "保存创作方案" }).click();
   await expect(page.getByRole("status")).toHaveText("创作方案已保存");
   await page.getByRole("button", { name: "确认并开始创作" }).click();
+  await page.getByRole("button", { name: "手动开始写" }).click();
   await expect(page.getByRole("button", { name: "提交人工审核" })).toBeVisible();
 
   await page.getByLabel("母稿标题").fill("阶段四母稿");
@@ -70,7 +68,7 @@ test("library source → project → evidence → brief → mother content → r
   await page.getByRole("button", { name: "查看创作方案" }).click();
   await expect(page.getByRole("dialog", { name: "创作方案" })).toContainText("阶段四创作工作台");
   await page.getByRole("button", { name: "关闭" }).click();
-  await page.getByRole("button", { name: "查看素材依据" }).click();
+  await page.getByRole("button", { name: "查看依据" }).click();
   await expect(page.getByRole("paragraph").filter({ hasText: "素材支持阶段四核心观点" })).toBeVisible();
 
   const otherUser = await db.user.create({ data: { name: "Other Project User", email: otherEmail } });

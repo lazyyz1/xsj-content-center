@@ -14,16 +14,21 @@ let fixtureOrigin = "";
 let fixtureSourceId = "";
 let calls = 0;
 
-function result() {
+function analysisResult() {
   calls += 1;
   return {
     creativeInterpretation: { text: "这条素材适合从证据缺失造成的返工切入。", classification: "AI_INTERPRETATION", sourceItemIds: [fixtureSourceId] },
     angles: [{ title: "从返工成本切入", angle: "先展示没有来源依据会如何拖慢创作。", rationale: "与素材核心问题直接相关", classification: "AI_SUGGESTION", sourceItemIds: [fixtureSourceId] }],
     structure: { overallApproach: "问题—依据—行动", classification: "AI_SUGGESTION", sourceItemIds: [fixtureSourceId], sections: [{ title: "返工问题", purpose: "建立冲突", keyMessage: "缺少来源会增加返工。", supportingPoints: ["来源不可追溯"], sourceItemIds: [fixtureSourceId] }, { title: "解决方法", purpose: "给出路径", keyMessage: "先分析，再创作。", supportingPoints: ["统一上下文"], sourceItemIds: [fixtureSourceId] }] },
     expressionDirection: { description: "直接、具体、避免口号。", rationale: "适合内容团队", classification: "AI_SUGGESTION", sourceItemIds: [fixtureSourceId] },
-    riskNotes: [{ text: "不要把来源观点写成已验证事实。", classification: "AI_INTERPRETATION", sourceItemIds: [fixtureSourceId] }],
+    riskNotes: [{ text: "不要把来源观点写成已验证事实。", classification: "AI_INTERPRETATION", sourceItemIds: [] }],
     titleReferences: [{ title: "为什么 AI 内容总在返工？", rationale: "突出实际成本", classification: "AI_SUGGESTION", sourceItemIds: [fixtureSourceId] }],
   };
+}
+
+function motherResult() {
+  calls += 1;
+  return { title: `AI 核心母稿 V${calls}`, outline: ["问题", "方法", "行动"], body: "这是一版由创作方案主导、需要人工继续修改的核心母稿。", evidenceIds: [], sourceItemIds: [fixtureSourceId] };
 }
 
 test.beforeAll(async () => {
@@ -33,9 +38,10 @@ test.beforeAll(async () => {
     request.on("end", () => {
       const parsed = JSON.parse(body) as { messages: Array<{ content: string }> };
       const prompt = parsed.messages.at(-1)?.content ?? "";
-      expect(prompt).toContain("Action: UNIFIED_CREATIVE_ANALYSIS");
+      const isMother = prompt.includes("Action: GENERATE_MOTHER_CONTENT");
+      expect(prompt).toContain(isMother ? "Action: GENERATE_MOTHER_CONTENT" : "Action: UNIFIED_CREATIVE_ANALYSIS");
       response.writeHead(request.headers.authorization === "Bearer unified-analysis-key" ? 200 : 401, { "content-type": "application/json", "x-request-id": `unified-${calls + 1}` });
-      response.end(JSON.stringify({ id: `unified-${calls + 1}`, model: "kimi-2.6-fixture", choices: [{ message: { content: JSON.stringify(result()) } }], usage: { prompt_tokens: 130, completion_tokens: 70 } }));
+      response.end(JSON.stringify({ id: `unified-${calls + 1}`, model: "kimi-2.6-fixture", choices: [{ message: { content: JSON.stringify(isMother ? motherResult() : analysisResult()) } }], usage: { prompt_tokens: 130, completion_tokens: 70 } }));
     });
   });
   await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
@@ -76,6 +82,7 @@ test("one unified AI action returns a grounded analysis, caches identical input,
   const created = await page.request.post("/api/projects", { data: { title: "统一创作分析项目", goal: "减少无依据创作", audience: "内容团队", sourceItemId: source.id } });
   expect(created.status()).toBe(201);
   const projectId = (await created.json() as { id: string }).id;
+  await db.evidenceItem.create({ data: { workspaceId: membership.workspaceId, projectId, sourceItemId: source.id, type: "VIEWPOINT", claim: "可靠创作需要来源约束。", createdById: user.id } });
   expect(calls).toBe(0);
 
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -138,10 +145,34 @@ test("one unified AI action returns a grounded analysis, caches identical input,
 
   await page.getByRole("button", { name: "确认并开始创作" }).click();
   await expect(page.getByRole("heading", { name: "核心母稿" })).toBeVisible();
+  await expect(page.getByLabel("母稿正文")).toHaveCount(0);
+  expect(calls).toBe(2);
+  await page.getByRole("button", { name: "AI 生成核心母稿" }).first().click();
+  await expect(page.getByLabel("母稿正文")).toHaveValue("这是一版由创作方案主导、需要人工继续修改的核心母稿。", { timeout: 20_000 });
+  expect(calls).toBe(3);
+  await page.getByLabel("母稿正文").fill("人工修改后的 V1，重新生成时不能丢失。");
+  await expect.poll(async () => (await db.motherContent.findUniqueOrThrow({ where: { projectId } })).body).toBe("人工修改后的 V1，重新生成时不能丢失。");
+  await page.getByRole("button", { name: "重新生成" }).click();
+  await expect(page.getByText("新版本母稿已生成")).toBeVisible();
+  expect(calls).toBe(4);
+  await page.getByRole("button", { name: "查看历史版本" }).click();
+  const historyDialog = page.getByRole("dialog", { name: "核心母稿历史版本" });
+  await expect(historyDialog).toContainText("V2");
+  await historyDialog.locator("summary").filter({ hasText: "V1" }).click();
+  await expect(historyDialog).toContainText("人工修改后的 V1，重新生成时不能丢失。");
+  await page.getByRole("button", { name: "关闭" }).click();
   await expect(page.getByRole("heading", { name: "创作方案" })).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("studio-writing.png"), fullPage: true });
   await page.getByRole("button", { name: "查看创作方案" }).click();
   await expect(page.getByRole("dialog", { name: "创作方案" })).toContainText("人工确认后的受众");
+  await page.getByRole("button", { name: "关闭" }).click();
+  await page.getByRole("button", { name: "查看依据" }).click();
+  const basisDialog = page.getByRole("dialog", { name: "创作依据" });
+  await expect(basisDialog).not.toContainText("SOURCE_REFERENCE_GAP");
+  await expect(basisDialog).toContainText("有部分建议缺少充分素材依据。");
+  await expect(basisDialog.getByText("已采用", { exact: true })).toBeVisible();
+  await expect(basisDialog.getByRole("button", { name: "不采用" }).first()).toBeVisible();
+  await expect(basisDialog.getByText("修改", { exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "关闭" }).click();
 
   await page.setViewportSize({ width: 375, height: 812 });
@@ -149,6 +180,9 @@ test("one unified AI action returns a grounded analysis, caches identical input,
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 
   await db.workspaceMember.update({ where: { id: membership.id }, data: { role: "VIEWER" } });
+  await page.reload();
+  await expect(page.getByLabel("母稿正文")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "重新生成" })).toHaveCount(0);
   const forbidden = await page.request.post(`/api/projects/${projectId}/ai/run`, { data: { action: "UNIFIED_CREATIVE_ANALYSIS" } });
   expect(forbidden.status()).toBe(403);
 });

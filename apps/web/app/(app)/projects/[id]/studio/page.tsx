@@ -12,6 +12,8 @@ import { deepContentPackageSchema } from "@/server/deep-content/schemas";
 import { projectStatusLabels } from "@/lib/content-labels";
 import { getUnifiedCreativeAnalysisState } from "@/server/unified-analysis/service";
 import { CreativeBriefPrefillService } from "@/server/studio/creative-brief-prefill";
+import { buildCreativeBasisSummary } from "@/server/studio/creative-basis";
+import { listMotherContentVersions } from "@/server/mother-content-service";
 
 function stringArray(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
 
@@ -21,16 +23,20 @@ export default async function ProjectStudioPage({ params }: { params: Promise<{ 
   const project = await getProjectForUser({ userId: session.user.id, workspaceId: workspace.id, projectId: id });
   if (!project) notFound();
   const sourceIds = project.sources.map(({ sourceItemId }) => sourceItemId);
-  const [availableSources, llm, ownProfile, unifiedAnalysis] = await Promise.all([
+  const [availableSources, llm, ownProfile, unifiedAnalysis, motherHistory, dismissedBasis] = await Promise.all([
     db.sourceItem.findMany({ where: { workspaceId: workspace.id, status: "READY", ...(sourceIds.length ? { id: { notIn: sourceIds } } : {}) }, select: { id: true, title: true, sourcePlatform: true, sourceType: true }, orderBy: { createdAt: "desc" }, take: 100 }),
     new IntegrationService().getIntegrationStatus(workspace.id, "LLM"),
     getCreatorProfile(workspace.id, session.user.id),
     getUnifiedCreativeAnalysisState({ workspaceId: workspace.id, userId: session.user.id, projectId: project.id }),
+    listMotherContentVersions({ workspaceId: workspace.id, userId: session.user.id, projectId: project.id }),
+    db.auditLog.findMany({ where: { workspaceId: workspace.id, resourceId: project.id, action: "creative_basis.dismissed" }, select: { metadata: true } }),
   ]);
   const brief = project.creativeBrief;
   const mother = project.motherContent;
   const storedBrief = brief ? { topic: brief.topic, angle: brief.angle, audience: brief.audience, coreMessage: brief.coreMessage, coreQuestion: brief.coreQuestion || "", background: brief.background || "", keyPoints: stringArray(brief.keyPoints), structure: stringArray(brief.structure), tone: brief.tone, risks: stringArray(brief.risks), version: brief.version, metadata: brief.metadata } : null;
   const creativePlan = CreativeBriefPrefillService.build({ project: { title: project.title, audience: project.audience, status: project.status }, sources: project.sources, existingBrief: storedBrief, unifiedAnalysisOutput: unifiedAnalysis.analysis?.output, hasMotherContent: Boolean(mother?.body.trim()) });
+  const dismissedIds = dismissedBasis.flatMap(({ metadata }) => metadata && typeof metadata === "object" && !Array.isArray(metadata) && typeof (metadata as Record<string, unknown>).basisId === "string" ? [(metadata as Record<string, unknown>).basisId as string] : []);
+  const creativeBasis = buildCreativeBasisSummary({ evidence: project.evidenceItems, unifiedAnalysisOutput: unifiedAnalysis.analysis?.output, dismissedIds });
   const deepRow = project.deepContentPackages[0];
   const deepPackage = deepRow ? { id: deepRow.id, version: deepRow.version, status: deepRow.status, creatorProfileId: deepRow.creatorProfileId, createdAt: deepRow.createdAt.toISOString(), updatedAt: deepRow.updatedAt.toISOString(), ...deepContentPackageSchema.parse({ topicPackage: deepRow.topicPackage, viewpointPackage: deepRow.viewpointPackage, evidencePackage: deepRow.evidencePackage, expressionPackage: deepRow.expressionPackage, structurePackage: deepRow.structurePackage, creatorContribution: deepRow.creatorContribution, recommendedDirection: deepRow.recommendedDirection, risks: deepRow.risks, needsConfirmation: deepRow.needsConfirmation }) } : null;
   const studioProject = {
@@ -39,9 +45,10 @@ export default async function ProjectStudioPage({ params }: { params: Promise<{ 
       const analysis = sourceItem.materialAnalyses[0];
       return { role: sourceRole, sourceItem: { id: sourceItem.id, title: sourceItem.title, sourcePlatform: sourceItem.sourcePlatform, sourceType: sourceItem.sourceType, rawText: sourceItem.rawText, transcript: sourceItem.transcript ? { fullText: sourceItem.transcript.fullText } : null, materialAnalysis: analysis ? { version: analysis.version, suggestedTitle: analysis.suggestedTitle, summary: analysis.summary, topic: analysis.topic, targetAudience: analysis.targetAudience, coreViewpoint: analysis.coreViewpoint, keyPoints: stringArray(analysis.keyPoints), coreQuestion: analysis.coreQuestion } : null } };
     }),
-    evidenceItems: project.evidenceItems.map((item) => ({ id: item.id, type: item.type, excerpt: item.excerpt, claim: item.claim, note: item.note, sourceItemId: item.sourceItemId, sourceItem: item.sourceItem })),
+    creativeBasis,
     creativePlan,
     motherContent: { title: mother?.title || "", body: mother?.body || "", outline: stringArray(mother?.outline), version: mother?.version || 0, origin: mother?.origin || "HUMAN" as const, originNote: mother?.originNote || null },
+    motherHistory,
     deepContentPackage: deepPackage,
     platformVariants: project.platformVariants.map((variant) => ({ id: variant.id, platform: variant.platform, version: variant.version, title: variant.title, body: variant.body, hook: variant.hook, summary: variant.summary, hashtags: stringArray(variant.hashtags), mediaPlan: variant.mediaPlan, metadata: variant.metadata, status: variant.status, sourceMotherVersion: variant.sourceMotherVersion, isStale: variant.sourceMotherVersion < (mother?.version ?? 0) })),
   };
