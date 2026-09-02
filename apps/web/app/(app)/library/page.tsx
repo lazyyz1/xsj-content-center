@@ -81,7 +81,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
       {items.length === 0 ? (
         <Card className="grid min-h-64 place-items-center p-8 text-center"><div><h2 className="font-semibold">还没有可用素材</h2><p className="mt-2 text-sm text-[var(--text-secondary)]">使用右上角“收录内容”添加第一条素材，或调整当前筛选条件。</p></div></Card>
       ) : (
-        <section aria-label="素材列表" className={listView ? "grid gap-3" : "grid gap-4 md:grid-cols-2 xl:grid-cols-3"}>
+        <section aria-label="素材列表" className={listView ? "grid gap-3" : "grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"}>
           {items.map((item) => {
             const latestJob = item.ingestJobs[0];
             const isMock = item.transcript?.providerMode === "MOCK" || latestJob?.providerMode === "MOCK";

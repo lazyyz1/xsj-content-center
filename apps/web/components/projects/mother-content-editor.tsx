@@ -61,11 +61,11 @@ export function MotherContentEditor({ projectId, initial, editable, onSaved }: {
 
   const characters = body.replace(/\s/g, "").length;
   return (
-    <section className="flex min-h-[70vh] flex-col">
+    <section className="flex min-h-[40rem] flex-col">
       <div className="flex items-center justify-between gap-3 border-b pb-3"><div><h3 className="font-semibold">口播稿</h3><p className="mt-1 text-xs text-[var(--text-secondary)]">可以直接修改，所有平台内容都以这份稿子为准。</p></div><div className="text-right text-xs"><p className={saveState === "FAILED" ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}>{labels[saveState]}</p><p className="mt-1 text-[var(--text-secondary)]">{characters} 字</p></div></div>
       <input aria-label="口播稿标题" value={title} disabled={!editable} onChange={(event) => setTitle(event.target.value)} className="mt-4 h-12 border-0 bg-transparent text-xl font-semibold outline-none" placeholder="口播稿标题" />
       <textarea aria-label="口播稿提纲" value={outlineText} disabled={!editable} onChange={(event) => setOutlineText(event.target.value)} rows={4} className="mt-3 rounded-xl border bg-[var(--surface-elevated)] p-3 text-sm leading-6 outline-none" placeholder="提纲，每行一点" />
-      <textarea aria-label="口播稿正文" value={body} disabled={!editable} onChange={(event) => setBody(event.target.value)} className="mt-3 min-h-[30rem] flex-1 resize-y rounded-xl border bg-[var(--surface)] p-4 text-sm leading-7 outline-none focus:border-[var(--accent)]" placeholder="从这里开始写口播稿。停止输入 800ms 后自动保存。" />
+      <textarea aria-label="口播稿正文" value={body} disabled={!editable} onChange={(event) => setBody(event.target.value)} className="mt-3 min-h-[32.5rem] flex-1 resize-y rounded-xl border bg-[var(--surface)] p-4 text-sm leading-7 outline-none focus:border-[var(--accent)]" placeholder="从这里开始写口播稿。停止输入 800ms 后自动保存。" />
       {error ? <p role="alert" className="mt-2 text-xs text-[var(--danger)]">{error}</p> : null}
     </section>
   );

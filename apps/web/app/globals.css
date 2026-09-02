@@ -14,6 +14,9 @@
   --success: #087443;
   --radius: 10px;
   --shadow: 0 1px 2px rgb(16 24 40 / 0.05), 0 8px 24px rgb(16 24 40 / 0.04);
+  --app-sidebar-width: 14rem;
+  --app-content-max-width: 110rem;
+  --app-desktop-padding: 1.75rem;
 }
 
 * {
@@ -30,6 +33,38 @@ body {
   color: var(--text-primary);
   font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+.app-main {
+  min-width: 0;
+  width: 100%;
+  padding: 1.25rem;
+}
+
+@media (min-width: 1024px) {
+  .app-main {
+    width: calc(100% - var(--app-sidebar-width));
+    max-width: var(--app-content-max-width);
+    margin-left: var(--app-sidebar-width);
+    margin-right: auto;
+    padding: var(--app-desktop-padding);
+  }
+}
+
+@media (min-width: 1280px) {
+  :root {
+    --app-desktop-padding: 2rem;
+  }
+}
+
+@media (min-width: 1536px) {
+  :root {
+    --app-desktop-padding: 2.5rem;
+  }
+
+  .desktop-discovery .xl\:grid-cols-3 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 a {

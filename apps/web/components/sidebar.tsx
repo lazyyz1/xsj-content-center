@@ -23,7 +23,7 @@ const links: NavItem[] = [
 
 export function Sidebar({ workspaceName, userName }: { workspaceName: string; userName: string }) {
   return (
-    <aside className="border-b border-[var(--border)] bg-[var(--surface)] lg:fixed lg:inset-y-0 lg:left-0 lg:w-64 lg:border-b-0 lg:border-r">
+    <aside className="border-b border-[var(--border)] bg-[var(--surface)] lg:fixed lg:inset-y-0 lg:left-0 lg:w-[var(--app-sidebar-width)] lg:border-b-0 lg:border-r">
       <div className="flex h-full flex-col p-4">
         <div className="mb-5 px-2">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--accent)]">AI 内容生产中心</p>

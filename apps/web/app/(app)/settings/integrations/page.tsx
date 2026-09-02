@@ -56,7 +56,7 @@ export default async function IntegrationsPage() {
       ) : null}
       <section aria-labelledby="external-services-title">
         <h2 id="external-services-title" className="mb-4 text-sm font-medium text-[var(--text-secondary)]">外部服务</h2>
-        <div className="grid gap-5 xl:grid-cols-3">
+        <div className="grid gap-5 lg:grid-cols-2 2xl:grid-cols-3">
         {primaryIntegrations.map((integration) => (
           <IntegrationCard
             key={`${integration.provider}-${integration.updatedAt ?? "new"}`}

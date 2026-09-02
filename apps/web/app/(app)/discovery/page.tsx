@@ -16,7 +16,7 @@ export default async function DiscoveryPage() {
     listTrendOpportunities({ workspaceId: workspace.id, window: "TODAY", platform: "ALL", type: "HOT", take: 6 }),
     getCurrentRecommendationBatch({ workspaceId: workspace.id, userId: session.user.id }),
   ]);
-  return <DiscoveryWorkspace
+  return <div className="desktop-discovery"><DiscoveryWorkspace
     configured={integration?.status === "CONFIGURED"}
     canWrite={role !== "VIEWER"}
     canManageBenchmarks={role === "OWNER" || role === "ADMIN"}
@@ -25,5 +25,5 @@ export default async function DiscoveryPage() {
     recentSources={recentSources.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() }))}
     initialTrends={trends.map(publicTrendOpportunity)}
     initialRecommendationBatch={recommendationBatch ? publicRecommendationBatch(recommendationBatch) : null}
-  />;
+  /></div>;
 }
