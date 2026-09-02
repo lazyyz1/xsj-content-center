@@ -242,6 +242,31 @@ export async function getBenchmarkWorks(input: { workspaceId: string; userId: st
   });
   if (!page.cached) await db.benchmarkAccount.update({ where: { id: benchmark.id }, data: { lastSyncedAt: new Date() } });
   const items = page.items.map(publicContent);
+  await db.$transaction(items.slice(0, 30).map((item) => db.benchmarkContentSnapshot.upsert({
+    where: { workspaceId_platform_externalId: { workspaceId: input.workspaceId, platform: item.platform, externalId: item.externalId } },
+    create: {
+      workspaceId: input.workspaceId,
+      benchmarkAccountId: benchmark.id,
+      platform: item.platform,
+      externalId: item.externalId,
+      title: item.title || item.description || "未命名对标内容",
+      url: item.originalUrl,
+      authorName: item.authorName,
+      coverUrl: item.coverUrl,
+      metadata: inputJson({ contentType: item.contentType, description: item.description?.slice(0, 500) ?? null, metrics: item.metrics }),
+      publishedAt: item.publishedAt ? new Date(item.publishedAt) : null,
+    },
+    update: {
+      benchmarkAccountId: benchmark.id,
+      title: item.title || item.description || "未命名对标内容",
+      url: item.originalUrl,
+      authorName: item.authorName,
+      coverUrl: item.coverUrl,
+      metadata: inputJson({ contentType: item.contentType, description: item.description?.slice(0, 500) ?? null, metrics: item.metrics }),
+      publishedAt: item.publishedAt ? new Date(item.publishedAt) : null,
+      observedAt: new Date(),
+    },
+  })));
   const [sources, ideaReferences] = await Promise.all([
     items.length ? db.sourceItem.findMany({ where: { workspaceId: input.workspaceId, OR: items.map((item) => ({ sourcePlatform: item.platform, externalId: item.externalId })) }, select: { id: true, sourcePlatform: true, externalId: true } }) : [],
     items.length ? db.contentIdeaReference.findMany({ where: { idea: { workspaceId: input.workspaceId }, OR: items.map((item) => ({ platform: item.platform, externalId: item.externalId })) }, select: { platform: true, externalId: true } }) : [],

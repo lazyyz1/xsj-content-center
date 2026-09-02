@@ -111,6 +111,21 @@ RedFoxTrendProvider
 - VIEWER 可读取已有快照，但不能刷新、查询相关外部内容、调用 AI 或保存选题；EDITOR、ADMIN、OWNER 可执行这些显式动作。
 - Kimi 未配置时，趋势读取、相关内容和人工加入选题仍然可用，UI 明确提示未配置。
 
-## D4 边界
+## D4 Today Recommendation
 
-D3 不包含 D4 Today Recommendation、CreatorMemory、个性化每日任务、自动趋势监控、Cron、自动对标同步、通知、爆款预测、自动评分、自动创建选题或自动创建项目。D4 必须作为独立阶段验证。
+D4 在内容发现首页加入“今天值得做”决策层。它聚合数据库中已经存在的趋势快照、用户显式加载过的对标作品安全快照、近期 Ideas、近期 Projects、已收录素材和当前用户 CreatorProfile。首页渲染只读取当天有效的 `RecommendationBatch`，不会生成新批次，也不会调用 RedFox 或 LLM；只有 EDITOR 及以上成员点击“生成今日线索 / 更新一批”才运行一次。
+
+推荐上下文最多包含 15 个候选和有限的近期标题，不包含完整素材正文、Transcript、项目正文或 RedFox raw response。`RecommendationCandidate` 是即时的内部候选，不入库；确定性 Ranker 只用于稳定排序，不向用户展示分数、置信度或爆款概率。READY / IN_PROGRESS 选题的规范化精确同名候选会被排除，近期项目的轻量相似只提示、不阻断。
+
+### 批次与依据
+
+- `RecommendationBatch`：当天缓存，记录 `DETERMINISTIC / AI_ASSISTED`、CreatorProfile、可选 AIRun、生成与失效时间、创建人。
+- `RecommendationItem`：保存 3 条为默认、最多 5 条方向及 `NEW / SAVED / STARTED / DISMISSED` 状态。
+- `RecommendationEvidence`：保存真实引用 ID 与生成时快照；来源限于趋势、对标内容、选题、素材、项目和创作者档案。
+- `BenchmarkContentSnapshot`：只在用户显式加载对标作品时保存公开、安全字段，供后续推荐离线读取；不保存 Provider raw metadata。
+
+AI 模式复用 Workspace LLM、PromptTemplate、AIRun 与 ApiUsage，一个 batch 最多一次结构化调用。服务器验证模型返回的 candidateId，并把 evidenceRefs 与该候选的允许集合求交；伪造或跨候选依据不会入库。页面把“真实依据”和“AI 判断”分开展示。LLM 未配置、被禁用或处于 MOCK MODE 时使用确定性线索，不创建 AIRun，也不出现“AI 推荐”或个性化断言。
+
+“加入选题”和“开始研究”会显式创建 ContentIdea 并保留推荐 provenance。“开始创作”先创建 / 复用 Idea，再调用既有项目流程；如包含未收录的外部对标引用，必须由用户确认后才能收录。推荐生成本身的 RedFox 调用数始终为 0。
+
+D4 仍不包含 CreatorMemory、长期偏好学习、点击训练、自动每日生成、Cron、后台刷新、通知、爆款预测、AI 评分、向量推荐、GPT API 或自动发布。

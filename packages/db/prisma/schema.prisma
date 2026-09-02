@@ -155,6 +155,28 @@ enum PromptType {
   GENERATE_DEEP_CONTENT_PACKAGE
   REVIEW_PLATFORM_CONTENT
   GENERATE_TOPIC_CANDIDATES
+  GENERATE_TODAY_RECOMMENDATIONS
+}
+
+enum RecommendationMode {
+  DETERMINISTIC
+  AI_ASSISTED
+}
+
+enum RecommendationItemStatus {
+  NEW
+  SAVED
+  STARTED
+  DISMISSED
+}
+
+enum RecommendationEvidenceType {
+  TREND
+  BENCHMARK_CONTENT
+  CONTENT_IDEA
+  SOURCE_ITEM
+  PROJECT
+  CREATOR_PROFILE
 }
 
 enum ReviewResult {
@@ -240,6 +262,7 @@ model User {
   publishedTasks          PublishTask[]         @relation("PublishTaskPublisher")
   createdBenchmarkAccounts BenchmarkAccount[]   @relation("BenchmarkAccountCreatedBy")
   createdContentIdeas     ContentIdea[]          @relation("ContentIdeaCreatedBy")
+  createdRecommendationBatches RecommendationBatch[] @relation("RecommendationBatchCreatedBy")
 }
 
 model Session {
@@ -319,6 +342,10 @@ model Workspace {
   benchmarkAccounts   BenchmarkAccount[]
   contentIdeas        ContentIdea[]
   trendSnapshots      TrendSnapshot[]
+  benchmarkContentSnapshots BenchmarkContentSnapshot[]
+  recommendationBatches RecommendationBatch[]
+  recommendationItems RecommendationItem[]
+  recommendationEvidence RecommendationEvidence[]
 }
 
 model WorkspaceMember {
@@ -575,6 +602,7 @@ model ContentProject {
   reviewRecords       ReviewRecord[]
   publishTasks        PublishTask[]
   contentIdea         ContentIdea?
+  recommendationItems RecommendationItem[]
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
@@ -600,10 +628,32 @@ model BenchmarkAccount {
   workspace         Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   creatorProfile    CreatorProfile? @relation(fields: [creatorProfileId], references: [id], onDelete: SetNull)
   createdBy         User           @relation("BenchmarkAccountCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  contentSnapshots  BenchmarkContentSnapshot[]
 
   @@unique([workspaceId, platform, externalAccountId])
   @@index([workspaceId, enabled, updatedAt])
   @@index([creatorProfileId])
+}
+
+model BenchmarkContentSnapshot {
+  id                 String           @id @default(cuid())
+  workspaceId        String
+  benchmarkAccountId String
+  platform           SourcePlatform
+  externalId         String
+  title              String
+  url                String
+  authorName         String?
+  coverUrl           String?
+  metadata           Json
+  publishedAt        DateTime?
+  observedAt         DateTime         @default(now())
+  workspace          Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  benchmarkAccount   BenchmarkAccount @relation(fields: [benchmarkAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, platform, externalId])
+  @@index([workspaceId, observedAt])
+  @@index([benchmarkAccountId, observedAt])
 }
 
 model ContentIdea {
@@ -623,6 +673,7 @@ model ContentIdea {
   project          ContentProject?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdBy        User              @relation("ContentIdeaCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   references       ContentIdeaReference[]
+  recommendationItems RecommendationItem[]
 
   @@index([workspaceId, status, updatedAt])
   @@index([creatorProfileId])
@@ -672,6 +723,72 @@ model TrendSnapshot {
   @@index([workspaceId, platform, trendType, observedAt])
   @@index([workspaceId, externalKey, observedAt])
   @@index([workspaceId, windowStart, windowEnd])
+}
+
+model RecommendationBatch {
+  id               String             @id @default(cuid())
+  workspaceId      String
+  creatorProfileId String?
+  mode             RecommendationMode
+  generatedAt      DateTime           @default(now())
+  expiresAt        DateTime
+  aiRunId          String?            @unique
+  createdById      String
+  workspace        Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creatorProfile   CreatorProfile?    @relation(fields: [creatorProfileId], references: [id], onDelete: SetNull)
+  aiRun             AIRun?            @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
+  createdBy         User              @relation("RecommendationBatchCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  items             RecommendationItem[]
+
+  @@index([workspaceId, createdById, generatedAt])
+  @@index([creatorProfileId])
+}
+
+model RecommendationItem {
+  id                          String                   @id @default(cuid())
+  workspaceId                 String
+  batchId                     String
+  position                    Int
+  title                       String
+  coreQuestion                String
+  angle                       String
+  whyRecommended              String
+  whyNow                      String
+  creatorFit                  String
+  differenceFromRecentContent String
+  suggestedNextStep           String
+  riskNotes                   Json
+  recommendedFormat           String?
+  status                      RecommendationItemStatus @default(NEW)
+  contentIdeaId               String?
+  projectId                   String?
+  createdAt                   DateTime                 @default(now())
+  updatedAt                   DateTime                 @updatedAt
+  workspace                   Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  batch                       RecommendationBatch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  contentIdea                 ContentIdea?             @relation(fields: [contentIdeaId], references: [id], onDelete: SetNull)
+  project                     ContentProject?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  evidence                    RecommendationEvidence[]
+
+  @@unique([batchId, position])
+  @@index([workspaceId, status, createdAt])
+  @@index([contentIdeaId])
+  @@index([projectId])
+}
+
+model RecommendationEvidence {
+  id                   String                     @id @default(cuid())
+  workspaceId          String
+  recommendationItemId String
+  type                 RecommendationEvidenceType
+  referenceId          String
+  snapshot             Json
+  createdAt            DateTime                   @default(now())
+  workspace            Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  recommendationItem   RecommendationItem         @relation(fields: [recommendationItemId], references: [id], onDelete: Cascade)
+
+  @@unique([recommendationItemId, type, referenceId])
+  @@index([workspaceId, type, referenceId])
 }
 
 model ProjectSource {
@@ -786,6 +903,7 @@ model CreatorProfile {
   benchmarkAccounts    BenchmarkAccount[]
   contentIdeas         ContentIdea[]
   deepContentPackages  DeepContentPackage[]
+  recommendationBatches RecommendationBatch[]
 
   @@unique([workspaceId, userId])
   @@index([userId])
@@ -980,6 +1098,7 @@ model AIRun {
   promptTemplate     PromptTemplate?   @relation(fields: [promptTemplateId], references: [id], onDelete: Restrict)
   platformTemplate   PlatformTemplate? @relation(fields: [platformTemplateId], references: [id], onDelete: Restrict)
   reviewRecords      ReviewRecord[]
+  recommendationBatch RecommendationBatch?
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, projectId, createdAt])
