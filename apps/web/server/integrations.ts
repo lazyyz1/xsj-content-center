@@ -31,8 +31,8 @@ const service = new IntegrationService();
 const providerDetails: Record<ConfigurableIntegrationProvider, { name: string; description: string; usage: readonly string[]; defaults: Record<string, string> }> = {
   REDFOX: {
     name: "RedFox",
-    description: "解析抖音等平台素材，获取视频和内容信息。",
-    usage: ["抖音素材收录"],
+    description: "为内容发现与素材收录提供抖音、小红书内容数据。",
+    usage: ["内容发现", "抖音 / 小红书素材收录"],
     defaults: { baseUrl: REDFOX_DEFAULT_BASE_URL },
   },
   DOUBAO_ASR: {

@@ -47,12 +47,13 @@ export function detectSourcePlatform(input: string): SourcePlatform {
   if (input.startsWith("mock://")) return "OTHER";
   try {
     const hostname = new URL(input).hostname.toLowerCase();
-    if (hostname === "youtu.be" || hostname.endsWith("youtube.com")) return "YOUTUBE";
-    if (hostname.endsWith("douyin.com")) return "DOUYIN";
-    if (hostname.endsWith("xiaohongshu.com") || hostname === "xhslink.com") return "XIAOHONGSHU";
-    if (hostname.endsWith("weixin.qq.com") || hostname.endsWith("qq.com")) return "WECHAT";
-    if (hostname.endsWith("bilibili.com") || hostname === "b23.tv") return "BILIBILI";
-    if (hostname.endsWith("tiktok.com")) return "TIKTOK";
+    const belongsTo = (domain: string) => hostname === domain || hostname.endsWith(`.${domain}`);
+    if (hostname === "youtu.be" || belongsTo("youtube.com")) return "YOUTUBE";
+    if (belongsTo("douyin.com") || belongsTo("iesdouyin.com")) return "DOUYIN";
+    if (belongsTo("xiaohongshu.com") || hostname === "xhslink.com") return "XIAOHONGSHU";
+    if (belongsTo("weixin.qq.com") || belongsTo("qq.com")) return "WECHAT";
+    if (belongsTo("bilibili.com") || hostname === "b23.tv") return "BILIBILI";
+    if (belongsTo("tiktok.com")) return "TIKTOK";
     return "GENERIC";
   } catch {
     return "OTHER";

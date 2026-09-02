@@ -49,7 +49,7 @@ export async function processContentIngestJob(job: Job<ContentIngestPayload>) {
     throw new UnrecoverableError("Ingest job is no longer runnable");
   }
 
-  if (record.sourceItem.sourcePlatform === "DOUYIN" && record.provider === "REDFOX") {
+  if (["DOUYIN", "XIAOHONGSHU"].includes(record.sourceItem.sourcePlatform) && record.provider === "REDFOX") {
     return processRedFoxIngestJob(record, job, startedAt);
   }
 

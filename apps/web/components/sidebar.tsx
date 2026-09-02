@@ -1,5 +1,6 @@
 import {
   CalendarDays,
+  Compass,
   FolderKanban,
   LayoutDashboard,
   Library,
@@ -13,6 +14,7 @@ type NavItem = { label: string; icon: LucideIcon; href: string };
 
 const links: NavItem[] = [
   { label: "工作台", href: "/dashboard", icon: LayoutDashboard },
+  { label: "内容发现", href: "/discovery", icon: Compass },
   { label: "素材库", href: "/library", icon: Library },
   { label: "内容项目", href: "/projects", icon: FolderKanban },
   { label: "发布中心", href: "/calendar", icon: CalendarDays },

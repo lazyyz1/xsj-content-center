@@ -51,6 +51,14 @@ enum SourcePlatform {
   OTHER
 }
 
+enum ContentIdeaStatus {
+  INBOX
+  READY
+  IN_PROGRESS
+  DONE
+  ARCHIVED
+}
+
 enum SourceItemStatus {
   PENDING
   PROCESSING
@@ -217,6 +225,8 @@ model User {
   reviewRecords           ReviewRecord[]       @relation("ReviewRecordReviewer")
   createdPublishTasks     PublishTask[]         @relation("PublishTaskCreatedBy")
   publishedTasks          PublishTask[]         @relation("PublishTaskPublisher")
+  createdBenchmarkAccounts BenchmarkAccount[]   @relation("BenchmarkAccountCreatedBy")
+  createdContentIdeas     ContentIdea[]          @relation("ContentIdeaCreatedBy")
 }
 
 model Session {
@@ -293,6 +303,8 @@ model Workspace {
   aiRuns              AIRun[]
   reviewRecords       ReviewRecord[]
   publishTasks        PublishTask[]
+  benchmarkAccounts   BenchmarkAccount[]
+  contentIdeas        ContentIdea[]
 }
 
 model WorkspaceMember {
@@ -350,6 +362,8 @@ model SourceItem {
   sourcePlatform SourcePlatform   @default(GENERIC)
   sourceUrl      String?
   canonicalUrl   String?
+  externalId     String?
+  sourceProvider String?
   title          String?
   author         String?
   description    String?
@@ -368,8 +382,10 @@ model SourceItem {
   assets         SourceAsset[]
   projects       ProjectSource[]
   evidenceItems  EvidenceItem[]
+  ideaReferences ContentIdeaReference[]
 
   @@unique([workspaceId, canonicalUrl])
+  @@unique([workspaceId, sourcePlatform, externalId])
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
   @@index([workspaceId, sourcePlatform])
@@ -544,11 +560,77 @@ model ContentProject {
   aiRuns              AIRun[]
   reviewRecords       ReviewRecord[]
   publishTasks        PublishTask[]
+  contentIdea         ContentIdea?
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
   @@index([createdById])
   @@index([creatorProfileId])
+}
+
+model BenchmarkAccount {
+  id                String         @id @default(cuid())
+  workspaceId       String
+  creatorProfileId  String?
+  platform          SourcePlatform
+  externalAccountId String
+  name              String
+  avatarUrl         String?
+  bio               String?
+  originalUrl       String?
+  enabled           Boolean        @default(true)
+  lastSyncedAt      DateTime?
+  createdById       String
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  workspace         Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creatorProfile    CreatorProfile? @relation(fields: [creatorProfileId], references: [id], onDelete: SetNull)
+  createdBy         User           @relation("BenchmarkAccountCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, platform, externalAccountId])
+  @@index([workspaceId, enabled, updatedAt])
+  @@index([creatorProfileId])
+}
+
+model ContentIdea {
+  id               String            @id @default(cuid())
+  workspaceId      String
+  creatorProfileId String?
+  projectId        String?            @unique
+  title            String
+  description      String?
+  status           ContentIdeaStatus @default(INBOX)
+  createdById      String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creatorProfile   CreatorProfile?   @relation(fields: [creatorProfileId], references: [id], onDelete: SetNull)
+  project          ContentProject?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdBy        User              @relation("ContentIdeaCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  references       ContentIdeaReference[]
+
+  @@index([workspaceId, status, updatedAt])
+  @@index([creatorProfileId])
+  @@index([createdById])
+}
+
+model ContentIdeaReference {
+  id               String         @id @default(cuid())
+  ideaId           String
+  platform         SourcePlatform
+  externalId       String
+  title            String
+  url              String
+  authorName       String?
+  coverUrl         String?
+  metadataSnapshot Json?
+  sourceItemId     String?
+  createdAt        DateTime       @default(now())
+  idea             ContentIdea    @relation(fields: [ideaId], references: [id], onDelete: Cascade)
+  sourceItem       SourceItem?     @relation(fields: [sourceItemId], references: [id], onDelete: SetNull)
+
+  @@unique([ideaId, platform, externalId])
+  @@index([sourceItemId])
 }
 
 model ProjectSource {
@@ -660,6 +742,8 @@ model CreatorProfile {
   workspace            Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user                 User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   projects             ContentProject[]
+  benchmarkAccounts    BenchmarkAccount[]
+  contentIdeas         ContentIdea[]
   deepContentPackages  DeepContentPackage[]
 
   @@unique([workspaceId, userId])

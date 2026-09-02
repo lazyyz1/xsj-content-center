@@ -28,7 +28,7 @@ function publicFailure(error: unknown) {
   if (error instanceof RedFoxError) {
     return { code: error.code, message: error.message, retryable: error.retryable, httpStatus: error.httpStatus };
   }
-  return { code: "INTERNAL_ERROR", message: "抖音素材采集失败。", retryable: false, httpStatus: undefined };
+  return { code: "INTERNAL_ERROR", message: "内容素材采集失败。", retryable: false, httpStatus: undefined };
 }
 
 async function recordParseUsage(input: {
@@ -123,7 +123,7 @@ export async function processRedFoxIngestJob(
   let parseCalled = false;
   try {
     const sourceUrl = record.sourceItem.sourceUrl;
-    if (!sourceUrl) throw new RedFoxError("INVALID_DOUYIN_URL", "抖音素材链接不存在。", false);
+    if (!sourceUrl) throw new RedFoxError("INVALID_REDFOX_URL", "素材链接不存在。", false);
     const config = await loadRedFoxConfig(record.workspaceId);
     const provider = new RedFoxSourceProvider(new RedFoxClient(config));
     await progress(record.id, 15, "FETCHING_METADATA");
@@ -285,6 +285,8 @@ export async function processRedFoxIngestJob(
           sourceType: resolved.sourceType,
           sourcePlatform: resolved.sourcePlatform,
           canonicalUrl: resolved.resolvedUrl ?? resolved.originalUrl,
+          externalId: resolved.providerMetadata.externalId ?? record.sourceItem.externalId,
+          sourceProvider: "REDFOX",
           title: resolved.title,
           author: resolved.author,
           description: resolved.description,

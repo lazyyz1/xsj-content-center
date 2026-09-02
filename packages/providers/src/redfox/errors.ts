@@ -16,7 +16,9 @@ export type RedFoxErrorCode =
   | "REDFOX_MEDIA_DOWNLOAD_FAILED"
   | "REDFOX_API_ERROR"
   | "AMBIGUOUS_DOUYIN_URL"
-  | "INVALID_DOUYIN_URL";
+  | "INVALID_DOUYIN_URL"
+  | "AMBIGUOUS_REDFOX_URL"
+  | "INVALID_REDFOX_URL";
 
 export class RedFoxError extends IngestProviderError {
   constructor(

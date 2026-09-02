@@ -1,13 +1,13 @@
 import type { SourceMediaReference } from "../types";
 import { RedFoxError } from "./errors";
-import { mapRedFoxPlatform } from "./platform";
+import { extractRedFoxContentUrl, mapRedFoxPlatform } from "./platform";
 import type { RedFoxParseData } from "./schemas";
 
 export type ResolvedSource = {
   provider: "REDFOX";
   providerMode: "REAL";
   sourceType: "VIDEO" | "IMAGE";
-  sourcePlatform: "DOUYIN";
+  sourcePlatform: "DOUYIN" | "XIAOHONGSHU";
   originalUrl: string;
   resolvedUrl?: string;
   title?: string;
@@ -24,7 +24,9 @@ function text(value: string | null | undefined): string | undefined {
 }
 
 export function normalizeRedFoxSource(data: RedFoxParseData, originalUrl: string): ResolvedSource {
-  const sourcePlatform = mapRedFoxPlatform(data.platform);
+  const sourcePlatform = data.platform
+    ? mapRedFoxPlatform(data.platform)
+    : extractRedFoxContentUrl(originalUrl).platform;
   const awemeType = data.awemeType.trim().toLowerCase();
   let sourceType: "VIDEO" | "IMAGE";
   let media: SourceMediaReference[];
@@ -62,6 +64,6 @@ export function normalizeRedFoxSource(data: RedFoxParseData, originalUrl: string
       externalId: data.awemeId === null || data.awemeId === undefined ? undefined : String(data.awemeId),
       awemeType: data.awemeType,
     },
-    providerRaw: { platform: data.platform, awemeType: data.awemeType },
+    providerRaw: { platform: data.platform ?? sourcePlatform, awemeType: data.awemeType },
   };
 }

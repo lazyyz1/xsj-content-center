@@ -2,7 +2,7 @@ import type { SourceProvider } from "../contracts";
 import type { ProviderResult, SourceMetadata } from "../types";
 import { RedFoxClient } from "./client";
 import { normalizeRedFoxSource, type ResolvedSource } from "./normalize";
-import { extractDouyinShareUrl, isSupportedDouyinUrl } from "./platform";
+import { extractRedFoxContentUrl, isSupportedDouyinUrl, isSupportedXiaohongshuUrl } from "./platform";
 
 export class RedFoxSourceProvider implements SourceProvider {
   readonly providerName = "REDFOX";
@@ -12,14 +12,15 @@ export class RedFoxSourceProvider implements SourceProvider {
 
   supports(input: string): boolean {
     try {
-      return isSupportedDouyinUrl(extractDouyinShareUrl(input));
+      const url = extractRedFoxContentUrl(input).url;
+      return isSupportedDouyinUrl(url) || isSupportedXiaohongshuUrl(url);
     } catch {
       return false;
     }
   }
 
   async resolve(input: string): Promise<ProviderResult<ResolvedSource>> {
-    const originalUrl = extractDouyinShareUrl(input);
+    const originalUrl = extractRedFoxContentUrl(input).url;
     const parsed = await this.client.parseWork(originalUrl);
     const result = normalizeRedFoxSource(parsed.data, originalUrl);
     this.lastResult = { input: originalUrl, result, providerRequestId: parsed.providerRequestId, providerCode: parsed.providerCode };
@@ -44,7 +45,7 @@ export class RedFoxSourceProvider implements SourceProvider {
   }
 
   async fetchMedia(input: string) {
-    const originalUrl = extractDouyinShareUrl(input);
+    const originalUrl = extractRedFoxContentUrl(input).url;
     const result = this.lastResult?.input === originalUrl ? this.lastResult.result : (await this.resolve(originalUrl)).data;
     return { providerMode: "REAL" as const, data: { media: result.media } };
   }

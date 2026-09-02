@@ -1,5 +1,5 @@
 import { RedFoxError } from "./errors";
-import { RedFoxParseResponseSchema, type RedFoxParseData } from "./schemas";
+import { RedFoxApiResponseSchema, RedFoxParseDataSchema, type RedFoxParseData } from "./schemas";
 
 export const REDFOX_PARSE_PATH = "/story/api/parseWork/parse";
 export const REDFOX_DEFAULT_BASE_URL = "https://redfox.hk";
@@ -7,6 +7,12 @@ export const REDFOX_DEFAULT_TIMEOUT_MS = 30_000;
 
 export type RedFoxParseResult = {
   data: RedFoxParseData;
+  providerRequestId?: string;
+  providerCode: string;
+};
+
+export type RedFoxApiResult = {
+  data: unknown;
   providerRequestId?: string;
   providerCode: string;
 };
@@ -52,17 +58,17 @@ export class RedFoxClient {
     if (!config.apiKey.trim()) throw new RedFoxError("REDFOX_NOT_CONFIGURED", "RedFox 尚未配置。", false);
   }
 
-  async parseWork(url: string): Promise<RedFoxParseResult> {
+  private async post(path: string, body: Record<string, unknown>, authHeader: "x-api-key" | "REDFOX_API_KEY"): Promise<RedFoxApiResult> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? REDFOX_DEFAULT_TIMEOUT_MS);
     let response: Response;
     try {
       response = await (this.config.fetch ?? fetch)(
-        new URL(REDFOX_PARSE_PATH, this.config.baseUrl ?? REDFOX_DEFAULT_BASE_URL),
+        new URL(path, this.config.baseUrl ?? REDFOX_DEFAULT_BASE_URL),
         {
           method: "POST",
-          headers: { "content-type": "application/json", "x-api-key": this.config.apiKey },
-          body: JSON.stringify({ url, source: this.config.source ?? "AI内容生产中心" }),
+          headers: { "content-type": "application/json", [authHeader]: this.config.apiKey },
+          body: JSON.stringify(body),
           signal: controller.signal,
         },
       );
@@ -86,12 +92,12 @@ export class RedFoxClient {
     } catch {
       throw new RedFoxError("REDFOX_INVALID_RESPONSE", "RedFox 返回了无效 JSON。", false, response.status, undefined, headerRequestId);
     }
-    const parsed = RedFoxParseResponseSchema.safeParse(raw);
+    const parsed = RedFoxApiResponseSchema.safeParse(raw);
     if (!parsed.success) {
       throw new RedFoxError("REDFOX_INVALID_RESPONSE", "RedFox 响应结构无效。", false, response.status, undefined, headerRequestId);
     }
     const providerCode = String(parsed.data.code);
-    const providerRequestId = cleanRequestId(parsed.data.requestId ?? parsed.data.data?.requestId) ?? headerRequestId;
+    const providerRequestId = cleanRequestId(parsed.data.requestId) ?? headerRequestId;
     if (!providerCode.startsWith("2") || !response.ok) {
       throw apiError(providerCode, parsed.data.msg ?? parsed.data.message ?? "RedFox API 返回错误。", response.status, providerRequestId);
     }
@@ -99,5 +105,60 @@ export class RedFoxClient {
       throw new RedFoxError("REDFOX_EMPTY_DATA", "RedFox 未返回作品数据。", false, response.status, providerCode, providerRequestId);
     }
     return { data: parsed.data.data, providerRequestId, providerCode };
+  }
+
+  async parseWork(url: string): Promise<RedFoxParseResult> {
+    const result = await this.post(
+      REDFOX_PARSE_PATH,
+      { url, source: this.config.source ?? "AI内容生产中心" },
+      "x-api-key",
+    );
+    const parsed = RedFoxParseDataSchema.safeParse(result.data);
+    if (!parsed.success) {
+      throw new RedFoxError("REDFOX_INVALID_RESPONSE", "RedFox 作品响应结构无效。", false, 200, result.providerCode, result.providerRequestId);
+    }
+    return { ...result, data: parsed.data };
+  }
+
+  searchContent(input: { platform: "DOUYIN" | "XIAOHONGSHU"; keyword: string; offset?: number; sortType?: string }) {
+    const path = input.platform === "DOUYIN"
+      ? "/story/api/dyData/searchArticle"
+      : "/story/api/xhsUser/searchArticle";
+    return this.post(path, { keyword: input.keyword, offset: input.offset ?? 0, sortType: input.sortType }, "REDFOX_API_KEY");
+  }
+
+  searchAccounts(input: { platform: "DOUYIN" | "XIAOHONGSHU"; keyword: string; offset?: number; sortType?: string }) {
+    const path = input.platform === "DOUYIN"
+      ? "/story/api/dyData/searchUser"
+      : "/story/api/xhsUser/searchUser";
+    return this.post(path, { keyword: input.keyword, offset: input.offset ?? 0, sortType: input.sortType }, "REDFOX_API_KEY");
+  }
+
+  getAccountDetail(input: { platform: "DOUYIN" | "XIAOHONGSHU"; accountId: string; userId?: string }) {
+    const path = input.platform === "DOUYIN"
+      ? "/story/api/dyData/queryUser"
+      : "/story/api/xhsUser/queryAccountDetail";
+    return this.post(path, {
+      accountId: input.accountId,
+      ...(input.platform === "XIAOHONGSHU" && input.userId ? { userId: input.userId } : {}),
+    }, "REDFOX_API_KEY");
+  }
+
+  getAccountWorks(input: { platform: "DOUYIN" | "XIAOHONGSHU"; accountId: string; offset?: number; sortType?: string }) {
+    const path = input.platform === "DOUYIN"
+      ? "/story/api/dyData/queryWorkList"
+      : "/story/api/xhsUser/queryWorkList";
+    const identity = input.platform === "DOUYIN" ? { accountId: input.accountId } : { redId: input.accountId };
+    return this.post(path, { ...identity, offset: input.offset ?? 0, sortType: input.sortType }, "REDFOX_API_KEY");
+  }
+
+  getWorkDetail(input: { platform: "DOUYIN" | "XIAOHONGSHU"; externalId?: string; url?: string }) {
+    const path = input.platform === "DOUYIN"
+      ? "/story/api/dyData/queryWork"
+      : "/story/api/xhsUser/queryWorkDetail";
+    const data = input.platform === "DOUYIN"
+      ? { workId: input.externalId, workUrl: input.url }
+      : { workId: input.externalId, workLink: input.url };
+    return this.post(path, data, "REDFOX_API_KEY");
   }
 }

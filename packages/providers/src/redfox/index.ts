@@ -1,4 +1,7 @@
 export * from "./client";
+export * from "./discovery";
+export * from "./discovery-adapters";
+export * from "./discovery-normalize";
 export * from "./errors";
 export * from "./normalize";
 export * from "./platform";

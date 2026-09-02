@@ -13,7 +13,8 @@ function payloadFor(url: string) {
   if (url.includes("missing-video")) return { code: 200, data: { awemeType: "video", platform: "dy" } };
   if (url.includes("empty-images")) return { code: 200, data: { awemeType: "photo", platform: "dy", imageUrls: [] } };
   if (url.includes("unknown-type")) return { code: 200, data: { awemeType: "live", platform: "dy" } };
-  if (url.includes("other-platform")) return { code: 200, data: { awemeType: "video", platform: "xhs", videoUrl: `${mediaBase}/clip.mp4` } };
+  if (url.includes("xiaohongshu")) return { code: 200, data: { awemeType: "video", platform: "xhs", title: "小红书视频", videoUrl: `${mediaBase}/clip.mp4`, awemeId: "xhs-1" } };
+  if (url.includes("other-platform")) return { code: 200, data: { awemeType: "video", platform: "youtube", videoUrl: `${mediaBase}/clip.mp4` } };
   return { code: 200, data: { awemeType: "video", platform: "dy", title: "真实视频", videoUrl: `${mediaBase}/clip.mp4`, awemeId: "123" } };
 }
 
@@ -82,6 +83,21 @@ describe("RedFoxClient and RedFoxSourceProvider", () => {
     const result = await provider().resolve("https://www.douyin.com/note/photo");
     expect(result.data.media).toHaveLength(2);
     expect(result.data.sourceType).toBe("IMAGE");
+  });
+
+  it("normalizes a Xiaohongshu video response", async () => {
+    const result = await provider().resolve("https://www.xiaohongshu.com/explore/xiaohongshu");
+    expect(result.data).toMatchObject({ sourceType: "VIDEO", sourcePlatform: "XIAOHONGSHU", title: "小红书视频" });
+  });
+
+  it("infers Douyin from a validated official share URL when parseWork omits platform", async () => {
+    const client = new RedFoxClient({
+      apiKey: "ak_test",
+      baseUrl,
+      fetch: async () => new Response(JSON.stringify({ code: 2000, data: { awemeType: "video", title: "真实响应", videoUrl: "https://media.example.com/clip.mp4", imageUrls: [] } }), { status: 200, headers: { "content-type": "application/json" } }),
+    });
+    const result = await new RedFoxSourceProvider(client).resolve("https://www.iesdouyin.com/share/video/7661555559430581370");
+    expect(result.data).toMatchObject({ sourceType: "VIDEO", sourcePlatform: "DOUYIN", title: "真实响应" });
   });
 
   it.each([

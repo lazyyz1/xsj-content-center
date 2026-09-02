@@ -5,12 +5,22 @@ import { z } from "zod";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
 import { listLibrarySources } from "@/server/library";
 import { createSourceAndJob, SourceServiceError } from "@/server/source-service";
-import { extractDouyinShareUrl, RedFoxError } from "@content-center/providers";
+import { extractDouyinShareUrl, extractRedFoxContentUrl, RedFoxError } from "@content-center/providers";
 
 const createSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("TEXT"), title: z.string().trim().max(200).optional(), text: z.string().trim().min(1).max(500_000), notes: z.string().trim().max(2_000).optional() }),
   z.object({ kind: z.literal("URL"), url: z.string().trim().url().max(2_000) }),
   z.object({ kind: z.literal("DOUYIN"), shareText: z.string().trim().min(1).max(10_000) }),
+  z.object({
+    kind: z.literal("REDFOX"),
+    url: z.string().trim().url().max(2_000),
+    externalId: z.string().trim().max(300).optional(),
+    title: z.string().trim().max(500).optional(),
+    author: z.string().trim().max(300).optional(),
+    description: z.string().trim().max(5_000).optional(),
+    thumbnailUrl: z.string().trim().url().max(2_000).optional(),
+    contentType: z.enum(["VIDEO", "IMAGE", "ARTICLE", "UNKNOWN"]).optional(),
+  }),
 ]);
 
 export async function GET(request: Request) {
@@ -36,16 +46,29 @@ export async function POST(request: Request) {
     const duplicate = await db.sourceItem.findFirst({ where: { workspaceId: context.workspace.id, canonicalUrl }, select: { id: true } });
     if (duplicate) return NextResponse.json({ error: "DUPLICATE_URL", sourceItemId: duplicate.id }, { status: 409 });
   }
-  if (parsed.data.kind === "DOUYIN") {
+  if (parsed.data.kind === "DOUYIN" || parsed.data.kind === "REDFOX") {
     let canonicalUrl: string;
+    let platform: "DOUYIN" | "XIAOHONGSHU";
     try {
-      canonicalUrl = normalizeSourceUrl(extractDouyinShareUrl(parsed.data.shareText));
+      const resolved = parsed.data.kind === "DOUYIN"
+        ? { url: extractDouyinShareUrl(parsed.data.shareText), platform: "DOUYIN" as const }
+        : extractRedFoxContentUrl(parsed.data.url);
+      canonicalUrl = normalizeSourceUrl(resolved.url);
+      platform = resolved.platform;
     } catch (error) {
       if (error instanceof RedFoxError) return apiError(error.code, 400, error.message);
-      return apiError("INVALID_DOUYIN_URL", 400, "请输入有效的抖音作品分享链接。");
+      return apiError("INVALID_REDFOX_URL", 400, "请输入有效的抖音或小红书作品链接。");
     }
     const duplicate = await db.sourceItem.findFirst({
-      where: { workspaceId: context.workspace.id, canonicalUrl },
+      where: {
+        workspaceId: context.workspace.id,
+        OR: [
+          { canonicalUrl },
+          ...(parsed.data.kind === "REDFOX" && parsed.data.externalId
+            ? [{ sourcePlatform: platform, externalId: parsed.data.externalId }]
+            : []),
+        ],
+      },
       select: { id: true, status: true },
     });
     if (duplicate) {

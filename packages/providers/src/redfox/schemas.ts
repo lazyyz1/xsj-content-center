@@ -5,7 +5,7 @@ const codeSchema = z.union([z.string(), z.number()]);
 export const RedFoxParseDataSchema = z
   .object({
     awemeType: z.string(),
-    platform: z.string(),
+    platform: z.string().optional().nullable(),
     title: z.string().optional().nullable(),
     author: z.string().optional().nullable(),
     authorName: z.string().optional().nullable(),
@@ -26,6 +26,16 @@ export const RedFoxParseResponseSchema = z
     msg: z.string().optional().nullable(),
     message: z.string().optional().nullable(),
     data: RedFoxParseDataSchema.optional().nullable(),
+    requestId: z.string().optional().nullable(),
+  })
+  .passthrough();
+
+export const RedFoxApiResponseSchema = z
+  .object({
+    code: codeSchema,
+    msg: z.string().optional().nullable(),
+    message: z.string().optional().nullable(),
+    data: z.unknown().optional().nullable(),
     requestId: z.string().optional().nullable(),
   })
   .passthrough();

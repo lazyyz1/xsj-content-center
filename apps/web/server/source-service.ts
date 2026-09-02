@@ -4,12 +4,22 @@ import { detectSourcePlatform, normalizeSourceUrl } from "@content-center/core";
 import { db } from "@content-center/db";
 import { enqueueContentIngest } from "@content-center/worker/queue";
 import { IntegrationService } from "@content-center/integrations";
-import { extractDouyinShareUrl } from "@content-center/providers";
+import { extractDouyinShareUrl, extractRedFoxContentUrl } from "@content-center/providers";
 
 export type CreateSourceInput =
   | { kind: "TEXT"; title?: string; text: string; notes?: string }
   | { kind: "URL"; url: string }
-  | { kind: "DOUYIN"; shareText: string };
+  | { kind: "DOUYIN"; shareText: string }
+  | {
+      kind: "REDFOX";
+      url: string;
+      externalId?: string;
+      title?: string;
+      author?: string;
+      description?: string;
+      thumbnailUrl?: string;
+      contentType?: "VIDEO" | "IMAGE" | "ARTICLE" | "UNKNOWN";
+    };
 
 export class SourceServiceError extends Error {
   constructor(readonly code: "REDFOX_NOT_CONFIGURED" | "REDFOX_DISABLED") {
@@ -25,7 +35,8 @@ export async function createSourceAndJob(input: {
   userId: string;
   source: CreateSourceInput;
 }) {
-  if (input.source.kind === "DOUYIN") {
+  const redFoxSource = input.source.kind === "DOUYIN" || input.source.kind === "REDFOX";
+  if (redFoxSource) {
     const integration = await integrationService.getIntegrationStatus(input.workspaceId, "REDFOX");
     if (integration.status === "DISABLED") throw new SourceServiceError("REDFOX_DISABLED");
     if (integration.status !== "CONFIGURED") throw new SourceServiceError("REDFOX_NOT_CONFIGURED");
@@ -35,15 +46,31 @@ export async function createSourceAndJob(input: {
     ? null
     : input.source.kind === "URL"
       ? input.source.url.trim()
-      : extractDouyinShareUrl(input.source.shareText);
+      : input.source.kind === "DOUYIN"
+        ? extractDouyinShareUrl(input.source.shareText)
+        : extractRedFoxContentUrl(input.source.url).url;
   const canonicalUrl = sourceUrl ? normalizeSourceUrl(sourceUrl) : null;
-  const sourceType = input.source.kind === "TEXT" ? "TEXT" : input.source.kind === "URL" ? "URL" : "VIDEO";
-  const sourcePlatform = input.source.kind === "DOUYIN" ? "DOUYIN" : input.source.kind === "TEXT" ? "GENERIC" : detectSourcePlatform(sourceUrl ?? "");
+  const sourceType = input.source.kind === "TEXT"
+    ? "TEXT"
+    : input.source.kind === "URL"
+      ? "URL"
+      : input.source.kind === "REDFOX" && input.source.contentType === "IMAGE"
+        ? "IMAGE"
+        : "VIDEO";
+  const sourcePlatform = input.source.kind === "TEXT" ? "GENERIC" : detectSourcePlatform(sourceUrl ?? "");
   const provider = input.source.kind === "TEXT" ? "MANUAL" : input.source.kind === "URL" ? "GENERIC_URL" : "REDFOX";
   const providerMode = "REAL";
   const jobType = input.source.kind === "TEXT" ? "EXTRACT_TEXT" : input.source.kind === "URL" ? "FETCH_URL" : "PROCESS_MEDIA";
-  const title = input.source.kind === "TEXT" ? input.source.title?.trim() || null : null;
-  const description = input.source.kind === "TEXT" ? input.source.notes?.trim() || null : null;
+  const title = input.source.kind === "TEXT"
+    ? input.source.title?.trim() || null
+    : input.source.kind === "REDFOX"
+      ? input.source.title?.trim() || null
+      : null;
+  const description = input.source.kind === "TEXT"
+    ? input.source.notes?.trim() || null
+    : input.source.kind === "REDFOX"
+      ? input.source.description?.trim() || null
+      : null;
 
   const created = await db.$transaction(async (tx) => {
     const sourceItem = await tx.sourceItem.create({
@@ -54,8 +81,12 @@ export async function createSourceAndJob(input: {
         sourcePlatform,
         sourceUrl,
         canonicalUrl,
+        externalId: input.source.kind === "REDFOX" ? input.source.externalId?.trim() || null : null,
+        sourceProvider: redFoxSource ? "REDFOX" : provider,
         title,
+        author: input.source.kind === "REDFOX" ? input.source.author?.trim() || null : null,
         description,
+        thumbnailUrl: input.source.kind === "REDFOX" ? input.source.thumbnailUrl?.trim() || null : null,
         rawText,
         status: "PENDING",
       },
