@@ -7,7 +7,7 @@ import { db } from "@content-center/db";
 import { saveBrief, VersionConflictError } from "../server/brief-service";
 import { createEvidence } from "../server/evidence-service";
 import { saveMotherContent } from "../server/mother-content-service";
-import { createProject, transitionProjectStatus } from "../server/project-service";
+import { createProject, listProjects, transitionProjectStatus } from "../server/project-service";
 
 describe("content project service flow", () => {
   const runId = randomUUID();
@@ -48,6 +48,9 @@ describe("content project service flow", () => {
     expect(stored.evidenceItems).toHaveLength(1);
     expect(stored.creativeBrief?.topic).toBe("A validated topic");
     expect(stored.motherContent?.body).toBe("A real persisted mother content body.");
+    await db.platformVariant.create({ data: { workspaceId, projectId: project.id, motherContentId: stored.motherContent!.id, platform: "DOUYIN", title: "待审核版本", body: "待审核正文", hashtags: [], mediaPlan: {}, metadata: {}, status: "IN_REVIEW", sourceMotherVersion: stored.motherContent!.version, createdById: userId } });
+    const pendingReview = await listProjects(workspaceId, { review: "pending" });
+    expect(pendingReview.items.map((item) => item.id)).toContain(project.id);
     const actions = await db.auditLog.findMany({ where: { workspaceId, metadata: { path: ["projectId"], equals: project.id } }, select: { action: true, metadata: true } });
     expect(actions.map(({ action }) => action)).toEqual(expect.arrayContaining(["project.created", "project.source_added", "evidence.created", "brief.updated", "mother_content.updated", "project.status_changed"]));
     expect(JSON.stringify(actions)).not.toContain("A real persisted mother content body.");

@@ -6,6 +6,7 @@ vi.mock("@content-center/worker/queue", () => ({ enqueueContentIngest: vi.fn().m
 
 import { db } from "@content-center/db";
 import { enqueueContentIngest } from "@content-center/worker/queue";
+import { readSourceMetadataEnvelope } from "@content-center/providers";
 import {
   addBenchmark,
   addIdeaReference,
@@ -119,6 +120,13 @@ describe("Content Discovery service", () => {
     await expect(db.sourceItem.count({ where: { workspaceId, sourcePlatform: "DOUYIN", externalId: "collect-once" } })).resolves.toBe(1);
     await expect(db.ingestJob.count({ where: { workspaceId, sourceItemId: first.sourceItem.id } })).resolves.toBe(1);
     await expect(db.contentIdeaReference.findFirstOrThrow({ where: { ideaId: idea.id, externalId: "collect-once" } })).resolves.toMatchObject({ sourceItemId: first.sourceItem.id });
+    const stored = await db.sourceItem.findUniqueOrThrow({ where: { id: first.sourceItem.id } });
+    expect(readSourceMetadataEnvelope(stored.metadata)?.external).toMatchObject({
+      externalId: "collect-once",
+      publishedAt: "2026-09-01T00:00:00.000Z",
+      durationMs: 30_000,
+      metrics: { likes: 88, views: null, comments: null, shares: null, favorites: null },
+    });
   });
 
   it("creates a project with a REFERENCE source from an external result", async () => {

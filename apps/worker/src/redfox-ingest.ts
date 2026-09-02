@@ -5,7 +5,12 @@ import {
   RedFoxClient,
   RedFoxError,
   RedFoxSourceProvider,
+  createSourceExternalMetadata,
+  createSourceMetadataEnvelope,
+  emptySourceExternalMetrics,
+  mergeSourceExternalMetadata,
   minioStorageFromEnv,
+  readSourceMetadataEnvelope,
   redFoxErrorMetadata,
 } from "@content-center/providers";
 import { UnrecoverableError, type Job } from "bullmq";
@@ -186,6 +191,42 @@ export async function processRedFoxIngestJob(
       throw error;
     }
 
+    const previousEnvelope = readSourceMetadataEnvelope(record.sourceItem.metadata);
+    const parsedExternalMetadata = createSourceExternalMetadata({
+      platform: resolved.sourcePlatform,
+      externalId: resolved.providerMetadata.externalId ?? record.sourceItem.externalId,
+      originalTitle: resolved.title ?? null,
+      description: resolved.description ?? null,
+      authorId: null,
+      authorName: resolved.author ?? null,
+      authorAvatarUrl: null,
+      publishedAt: null,
+      originalUrl: resolved.resolvedUrl ?? resolved.originalUrl,
+      coverUrl: resolved.thumbnailUrl ?? null,
+      durationMs: null,
+      topics: [],
+      metrics: emptySourceExternalMetrics(),
+      providerCrawlTime: null,
+    });
+    const externalMetadata = mergeSourceExternalMetadata(previousEnvelope?.external ?? null, parsedExternalMetadata);
+    await db.sourceItem.update({
+      where: { id: record.sourceItemId },
+      data: {
+        sourceType: resolved.sourceType,
+        sourcePlatform: resolved.sourcePlatform,
+        canonicalUrl: resolved.resolvedUrl ?? resolved.originalUrl,
+        externalId: externalMetadata.externalId,
+        sourceProvider: "REDFOX",
+        title: resolved.title ?? record.sourceItem.title,
+        author: resolved.author ?? record.sourceItem.author,
+        description: resolved.description ?? record.sourceItem.description,
+        thumbnailUrl: resolved.thumbnailUrl ?? record.sourceItem.thumbnailUrl,
+        metadata: json(createSourceMetadataEnvelope(externalMetadata, {
+          awemeType: resolved.providerMetadata.awemeType,
+        })),
+      },
+    });
+
     const storage = minioStorageFromEnv();
     const mediaFetcher = new MediaFetcher(storage, { allowedTestOrigin: process.env.INGEST_TEST_FIXTURE_ORIGIN });
     let storedCount = 0;
@@ -285,21 +326,17 @@ export async function processRedFoxIngestJob(
           sourceType: resolved.sourceType,
           sourcePlatform: resolved.sourcePlatform,
           canonicalUrl: resolved.resolvedUrl ?? resolved.originalUrl,
-          externalId: resolved.providerMetadata.externalId ?? record.sourceItem.externalId,
+          externalId: externalMetadata.externalId,
           sourceProvider: "REDFOX",
-          title: resolved.title,
-          author: resolved.author,
-          description: resolved.description,
-          thumbnailUrl: resolved.thumbnailUrl,
+          title: resolved.title ?? record.sourceItem.title,
+          author: resolved.author ?? record.sourceItem.author,
+          description: resolved.description ?? record.sourceItem.description,
+          thumbnailUrl: resolved.thumbnailUrl ?? record.sourceItem.thumbnailUrl,
           rawText: null,
-          metadata: json({
-            provider: resolved.provider,
-            providerMode: resolved.providerMode,
-            externalId: resolved.providerMetadata.externalId,
+          metadata: json(createSourceMetadataEnvelope(externalMetadata, {
             awemeType: resolved.providerMetadata.awemeType,
-            providerRaw: resolved.providerRaw,
             assetCount: storedCount,
-          }),
+          })),
           status: "READY",
         },
       }),

@@ -42,7 +42,8 @@ export function getSourceProcessingState(input: SourceProcessingInput) {
   const redfoxJob = input.jobs.find((job) => job.provider === "REDFOX" && job.jobType === "PROCESS_MEDIA");
   const transcriptionJob = input.jobs.find((job) => job.jobType === "TRANSCRIBE");
   const storedVideo = input.assets.some((asset) => asset.assetType === "VIDEO" && asset.status === "STORED");
-  const failedVideo = input.assets.some((asset) => asset.assetType === "VIDEO" && asset.status === "FAILED");
+  const storedPrimaryMedia = input.assets.some((asset) => (asset.assetType === "VIDEO" || asset.assetType === "IMAGE") && asset.status === "STORED");
+  const failedPrimaryMedia = input.assets.some((asset) => (asset.assetType === "VIDEO" || asset.assetType === "IMAGE") && asset.status === "FAILED");
   const storedAudio = input.assets.some((asset) => asset.assetType === "AUDIO" && asset.status === "STORED");
   const failedAudio = input.assets.some((asset) => asset.assetType === "AUDIO" && asset.status === "FAILED");
   const transcriptionConfigured = input.transcriptionStatus === "CONFIGURED";
@@ -61,15 +62,15 @@ export function getSourceProcessingState(input: SourceProcessingInput) {
     ? "FAILED"
     : redfoxJob?.status === "RUNNING"
       ? "PROCESSING"
-      : redfoxJob?.status === "SUCCEEDED" || storedVideo
+      : redfoxJob?.status === "SUCCEEDED" || storedPrimaryMedia
         ? "SUCCEEDED"
         : redfoxJob?.status === "CANCELLED"
           ? "SKIPPED"
           : "WAITING";
 
-  const videoSave: ProcessingStepState = storedVideo
+  const videoSave: ProcessingStepState = storedPrimaryMedia
     ? "SUCCEEDED"
-    : failedVideo
+    : failedPrimaryMedia
       ? "FAILED"
       : redfoxParse === "FAILED" || redfoxParse === "SKIPPED"
         ? "SKIPPED"

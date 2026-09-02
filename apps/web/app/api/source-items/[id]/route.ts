@@ -1,7 +1,7 @@
 import { db, findSourceForUser } from "@content-center/db";
 import { NextResponse } from "next/server";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
-import { minioStorageFromEnv } from "@content-center/providers";
+import { minioStorageFromEnv, readSourceMetadataEnvelope } from "@content-center/providers";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -13,6 +13,7 @@ export async function GET(_request: Request, route: RouteContext) {
   if (!source) return apiError("NOT_FOUND", 404);
   return NextResponse.json({
     ...source,
+    metadata: readSourceMetadataEnvelope(source.metadata),
     assets: source.assets.map(({ remoteUrl: _remoteUrl, sizeBytes, ...asset }) => ({
       ...asset,
       sizeBytes: sizeBytes?.toString() ?? null,

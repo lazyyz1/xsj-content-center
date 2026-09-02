@@ -21,6 +21,7 @@ export type ProjectListQuery = {
   sort?: string;
   page?: string;
   pageSize?: string;
+  review?: string;
 };
 
 export async function listProjects(workspaceId: string, query: ProjectListQuery) {
@@ -33,6 +34,7 @@ export async function listProjects(workspaceId: string, query: ProjectListQuery)
   const where: Prisma.ContentProjectWhereInput = {
     workspaceId,
     status: status ?? { not: "ARCHIVED" },
+    ...(query.review === "pending" ? { platformVariants: { some: { status: "IN_REVIEW" } } } : {}),
     ...(search ? {
       OR: [
         { title: { contains: search, mode: "insensitive" } },

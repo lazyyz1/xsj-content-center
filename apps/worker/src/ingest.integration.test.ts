@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import { db } from "@content-center/db";
 import { IntegrationService } from "@content-center/integrations";
-import { minioStorageFromEnv } from "@content-center/providers";
+import { minioStorageFromEnv, readSourceMetadataEnvelope } from "@content-center/providers";
 import { QueueEvents } from "bullmq";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONTENT_INGEST, CONTENT_INGEST_QUEUE, createContentIngestQueue, createContentIngestWorker } from "./queue";
@@ -42,6 +42,12 @@ describe("CONTENT_INGEST integration", () => {
         return;
       }
       if (request.url === "/fixture.mp4") {
+        const sourceBeforeDownload = await db.sourceItem.findFirst({ where: { workspaceId, canonicalUrl: "https://www.douyin.com/video/worker-fixture" } });
+        expect(readSourceMetadataEnvelope(sourceBeforeDownload?.metadata)?.external).toMatchObject({
+          platform: "DOUYIN",
+          originalTitle: "RedFox Worker Fixture",
+          originalUrl: "https://www.douyin.com/video/worker-fixture",
+        });
         const body = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112, 109, 112, 52, 50]);
         response.writeHead(200, { "content-type": "video/mp4", "content-length": body.length });
         response.end(body);
@@ -161,7 +167,9 @@ describe("CONTENT_INGEST integration", () => {
     await queue.close();
 
     expect(redfoxRequests).toBe(1);
-    await expect(db.sourceItem.findUnique({ where: { id: source.id } })).resolves.toMatchObject({ status: "READY", sourceType: "VIDEO", sourcePlatform: "DOUYIN", title: "RedFox Worker Fixture" });
+    const storedSource = await db.sourceItem.findUniqueOrThrow({ where: { id: source.id } });
+    expect(storedSource).toMatchObject({ status: "READY", sourceType: "VIDEO", sourcePlatform: "DOUYIN", title: "RedFox Worker Fixture" });
+    expect(readSourceMetadataEnvelope(storedSource.metadata)?.ingest).toMatchObject({ awemeType: "video", assetCount: 1 });
     const asset = await db.sourceAsset.findFirstOrThrow({ where: { workspaceId, sourceItemId: source.id } });
     expect(asset).toMatchObject({ status: "STORED", assetType: "VIDEO", sourceProvider: "REDFOX", mimeType: "video/mp4" });
     expect(asset.storageKey).toMatch(new RegExp(`^workspaces/${workspaceId}/sources/${source.id}/assets/${asset.id}/original$`));

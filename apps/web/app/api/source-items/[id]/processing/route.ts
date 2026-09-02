@@ -1,0 +1,39 @@
+import { db } from "@content-center/db";
+import { NextResponse } from "next/server";
+import { apiError, getApiWorkspaceContext } from "@/server/api-access";
+
+export async function GET(_request: Request, route: { params: Promise<{ id: string }> }) {
+  const context = await getApiWorkspaceContext();
+  if (!context) return apiError("UNAUTHORIZED", 401);
+  const { id } = await route.params;
+  const source = await db.sourceItem.findFirst({
+    where: { id, workspaceId: context.workspace.id },
+    select: {
+      status: true,
+      updatedAt: true,
+      transcript: { select: { id: true, updatedAt: true } },
+      ingestJobs: {
+        where: { status: { in: ["QUEUED", "RUNNING", "FAILED", "SUCCEEDED"] } },
+        select: { id: true, jobType: true, status: true, updatedAt: true },
+        orderBy: { createdAt: "desc" },
+        take: 4,
+      },
+    },
+  });
+  if (!source) return apiError("NOT_FOUND", 404);
+  const busy = source.status === "PENDING"
+    || source.status === "PROCESSING"
+    || source.ingestJobs.some((job) => job.status === "QUEUED" || job.status === "RUNNING");
+  const latestTranscription = source.ingestJobs.find((job) => job.jobType === "TRANSCRIBE");
+  return NextResponse.json({
+    busy,
+    sourceStatus: source.status,
+    transcriptionStatus: latestTranscription?.status ?? null,
+    hasTranscript: Boolean(source.transcript),
+    fingerprint: [
+      source.updatedAt.toISOString(),
+      source.transcript?.updatedAt.toISOString() ?? "none",
+      ...source.ingestJobs.map((job) => `${job.id}:${job.status}:${job.updatedAt.toISOString()}`),
+    ].join("|"),
+  });
+}

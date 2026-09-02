@@ -17,4 +17,35 @@ describe("RedFox discovery normalization", () => {
     });
     expect(page.items[0]).toMatchObject({ externalId: "red-1", platform: "XIAOHONGSHU", name: "内容研究社", followers: 12000 });
   });
+
+  it("normalizes the complete supported work-detail field set", () => {
+    const page = normalizeContentPage("DOUYIN", {
+      list: [{
+        awemeId: "dy-complete",
+        awemeType: "video",
+        title: "完整作品标题",
+        desc: "完整作品说明",
+        author: { uid: "author-complete", nickname: "完整作者", avatarUrl: "https://example.test/avatar.jpg" },
+        statistics: { playCount: 98_000, diggCount: 8_800, collectCount: 660, commentCount: 55, shareCount: 44 },
+        shareUrl: "https://www.douyin.com/video/dy-complete",
+        coverUrl: "https://example.test/cover.jpg",
+        publishTime: 1_777_665_600,
+        duration: 21,
+      }],
+    });
+    expect(page.items[0]).toMatchObject({
+      externalId: "dy-complete",
+      contentType: "VIDEO",
+      title: "完整作品标题",
+      description: "完整作品说明",
+      authorId: "author-complete",
+      authorName: "完整作者",
+      authorAvatarUrl: "https://example.test/avatar.jpg",
+      coverUrl: "https://example.test/cover.jpg",
+      originalUrl: "https://www.douyin.com/video/dy-complete",
+      durationMs: 21_000,
+      metrics: { views: 98_000, likes: 8_800, favorites: 660, comments: 55, shares: 44 },
+    });
+    expect(page.items[0]?.publishedAt).not.toBeNull();
+  });
 });

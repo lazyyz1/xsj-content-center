@@ -4,7 +4,12 @@ import { detectSourcePlatform, normalizeSourceUrl } from "@content-center/core";
 import { db } from "@content-center/db";
 import { enqueueContentIngest } from "@content-center/worker/queue";
 import { IntegrationService } from "@content-center/integrations";
-import { extractDouyinShareUrl, extractRedFoxContentUrl } from "@content-center/providers";
+import {
+  createSourceMetadataEnvelope,
+  extractDouyinShareUrl,
+  extractRedFoxContentUrl,
+  type SourceExternalMetadata,
+} from "@content-center/providers";
 
 export type CreateSourceInput =
   | { kind: "TEXT"; title?: string; text: string; notes?: string }
@@ -19,6 +24,7 @@ export type CreateSourceInput =
       description?: string;
       thumbnailUrl?: string;
       contentType?: "VIDEO" | "IMAGE" | "ARTICLE" | "UNKNOWN";
+      externalMetadata?: SourceExternalMetadata;
     };
 
 export class SourceServiceError extends Error {
@@ -88,6 +94,9 @@ export async function createSourceAndJob(input: {
         description,
         thumbnailUrl: input.source.kind === "REDFOX" ? input.source.thumbnailUrl?.trim() || null : null,
         rawText,
+        metadata: input.source.kind === "REDFOX" && input.source.externalMetadata
+          ? createSourceMetadataEnvelope(input.source.externalMetadata)
+          : undefined,
         status: "PENDING",
       },
     });

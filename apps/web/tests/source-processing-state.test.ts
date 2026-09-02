@@ -51,4 +51,14 @@ describe("getSourceProcessingState", () => {
       steps: { videoSave: "SUCCEEDED", audioExtraction: "SUCCEEDED", aiTranscription: "FAILED" },
     });
   });
+
+  it("marks a stored RedFox image as saved without inventing a video step", () => {
+    expect(getSourceProcessingState({
+      sourceStatus: "READY",
+      transcriptionStatus: "UNCONFIGURED",
+      hasTranscript: false,
+      assets: [{ assetType: "IMAGE", status: "STORED" }],
+      jobs: [redfoxSucceeded],
+    }).steps).toMatchObject({ redfoxParse: "SUCCEEDED", videoSave: "SUCCEEDED", audioExtraction: "SKIPPED", aiTranscription: "SKIPPED" });
+  });
 });

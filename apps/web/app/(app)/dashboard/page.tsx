@@ -1,5 +1,5 @@
 import { Button, Card } from "@content-center/ui";
-import { ArrowRight, CheckCircle2, FolderPlus, LibraryBig, Send, Settings2 } from "lucide-react";
+import { ArrowRight, FolderPlus, LibraryBig, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { PageHeader } from "@/components/page";
 import { requireWorkspace } from "@/server/access";
@@ -13,16 +13,10 @@ export default async function DashboardPage() {
     .filter((integration) => integration.provider !== "STORAGE" && integration.status !== "CONFIGURED" && integration.status !== "MOCK")
     .map((integration) => integration.name);
   const metrics = [
-    ["素材", counts.materials],
-    ["内容项目", counts.projects],
-    ["待审核", counts.pendingReview],
-    ["待发布", counts.pendingPublish],
-  ] as const;
-  const quickActions = [
-    ["收录素材", "添加文本、网页或抖音作品", "/library", LibraryBig],
-    ["新建项目", "把素材组织成创作任务", "/projects/new", FolderPlus],
-    ["处理待审核", `${counts.pendingReview} 条内容等待人工结论`, "/projects", CheckCircle2],
-    ["准备发布", `${counts.pendingPublish} 个发布任务待处理`, "/calendar?view=pending", Send],
+    ["素材", counts.materials, "/library"],
+    ["内容项目", counts.projects, "/projects"],
+    ["待审核", counts.pendingReview, "/projects?review=pending"],
+    ["待发布", counts.pendingPublish, "/calendar?view=pending"],
   ] as const;
 
   return (
@@ -35,18 +29,17 @@ export default async function DashboardPage() {
         </Link>
       ) : null}
       <section aria-label="内容概览" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {metrics.map(([label, value]) => (
-          <Card key={label} className="p-5">
+        {metrics.map(([label, value, href]) => (
+          <Link key={label} href={href} aria-label={`${label} ${value}，查看详情`} className="group rounded-[calc(var(--radius)+4px)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
+            <Card className="h-full p-5 transition-[border-color,transform,background-color] group-hover:-translate-y-0.5 group-hover:border-[var(--accent)] group-hover:bg-[var(--surface-elevated)] group-active:translate-y-0">
             <p className="text-sm text-[var(--text-secondary)]">{label}</p>
-            <p className="mt-4 text-3xl font-semibold tabular-nums">{value}</p>
-          </Card>
+            <div className="mt-4 flex items-end justify-between gap-3"><p className="text-3xl font-semibold tabular-nums">{value}</p><ArrowRight size={17} className="mb-1 text-[var(--text-secondary)] transition-transform group-hover:translate-x-0.5" /></div>
+            </Card>
+          </Link>
         ))}
       </section>
       <Card className="mt-6 p-6">
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="font-semibold">开始一次内容创作</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">先收录素材，或从已有项目和待办继续。</p></div><Button asChild><Link href="/library">收录新素材 <ArrowRight size={16} /></Link></Button></div>
-        <div className="mt-5 grid gap-3 border-t pt-5 sm:grid-cols-2 xl:grid-cols-4">
-          {quickActions.map(([title, description, href, Icon]) => <Link key={title} href={href} className="rounded-xl border p-4 transition-colors hover:border-[var(--accent)] hover:bg-[var(--surface-elevated)]"><Icon size={18} className="text-[var(--accent)]" /><p className="mt-3 text-sm font-medium">{title}</p><p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">{description}</p></Link>)}
-        </div>
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="font-semibold">开始一次内容创作</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">收录新素材，或新建一个内容项目。</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" asChild><Link href="/library"><LibraryBig size={16} />收录素材</Link></Button><Button asChild><Link href="/projects/new"><FolderPlus size={16} />新建项目</Link></Button></div></div>
       </Card>
     </>
   );
