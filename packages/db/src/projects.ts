@@ -15,7 +15,7 @@ export function findProjectForUser(
       creatorProfile: true,
       sources: {
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-        include: { sourceItem: { include: { transcript: true } } },
+        include: { sourceItem: { include: { transcript: true, materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1 } } } },
       },
       evidenceItems: {
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],

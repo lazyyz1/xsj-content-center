@@ -66,20 +66,23 @@ export async function executeStructuredAIRun<T>(input: {
     await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_started", resourceType: "ai_run", resourceId: created.id, metadata: json({ ...(input.projectId ? { projectId: input.projectId } : {}), ...safeAuditMetadata }) } });
     return created;
   });
+  const requestStartedAt = Date.now();
   try {
     const result = await input.generate(runtime.provider);
     const usage = result.data.usage;
+    const latencyMs = Date.now() - requestStartedAt;
     await db.$transaction([
       db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(result.data.value), providerRequestId: result.data.providerRequestId, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, finishedAt: new Date() } }),
-      db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: "LLM", operation: input.operation, requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, metadata: json({ airRunId: run.id, promptVersion: input.promptVersion, contextTruncated: input.contextTruncated, ...auditModel, ...input.auditMetadata }) } }),
+      db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: "LLM", operation: input.operation, requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, metadata: json({ airRunId: run.id, promptVersion: input.promptVersion, contextTruncated: input.contextTruncated, latencyMs, ...auditModel, ...input.auditMetadata }) } }),
       db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_succeeded", resourceType: "ai_run", resourceId: run.id, metadata: json({ ...(input.projectId ? { projectId: input.projectId } : {}), ...safeAuditMetadata }) } }),
     ]);
     return { id: run.id, action: input.action, status: "SUCCEEDED" as const, output: result.data.value, contextTruncated: input.contextTruncated, provider: runtime.providerName, model: result.data.model, usage };
   } catch (error) {
     const failure = publicError(error, runtime);
+    const latencyMs = Date.now() - requestStartedAt;
     await db.$transaction([
       db.aIRun.update({ where: { id: run.id }, data: { status: "FAILED", errorCode: failure.code, errorMessage: failure.message, finishedAt: new Date() } }),
-      db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: "LLM", operation: input.operation, requestId: run.id, success: false, units: 1, cost: null, metadata: json({ airRunId: run.id, errorCode: failure.code, promptVersion: input.promptVersion, ...auditModel, ...input.auditMetadata }) } }),
+      db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: "LLM", operation: input.operation, requestId: run.id, success: false, units: 1, cost: null, metadata: json({ airRunId: run.id, errorCode: failure.code, promptVersion: input.promptVersion, latencyMs, ...auditModel, ...input.auditMetadata }) } }),
       db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_failed", resourceType: "ai_run", resourceId: run.id, metadata: json({ ...(input.projectId ? { projectId: input.projectId } : {}), errorCode: failure.code, ...safeAuditMetadata }) } }),
     ]);
     throw failure;

@@ -141,6 +141,7 @@ enum EvidenceType {
 }
 
 enum PromptType {
+  ANALYZE_MATERIAL
   ANALYZE_SOURCES
   EXTRACT_EVIDENCE
   GENERATE_ANGLES
@@ -156,6 +157,17 @@ enum PromptType {
   REVIEW_PLATFORM_CONTENT
   GENERATE_TOPIC_CANDIDATES
   GENERATE_TODAY_RECOMMENDATIONS
+}
+
+enum MaterialAnalysisStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum MaterialAnalysisOrigin {
+  AI
+  HUMAN
 }
 
 enum RecommendationMode {
@@ -263,6 +275,7 @@ model User {
   createdBenchmarkAccounts BenchmarkAccount[]   @relation("BenchmarkAccountCreatedBy")
   createdContentIdeas     ContentIdea[]          @relation("ContentIdeaCreatedBy")
   createdRecommendationBatches RecommendationBatch[] @relation("RecommendationBatchCreatedBy")
+  createdMaterialAnalyses MaterialAnalysis[]           @relation("MaterialAnalysisCreatedBy")
 }
 
 model Session {
@@ -346,6 +359,7 @@ model Workspace {
   recommendationBatches RecommendationBatch[]
   recommendationItems RecommendationItem[]
   recommendationEvidence RecommendationEvidence[]
+  materialAnalyses       MaterialAnalysis[]
 }
 
 model WorkspaceMember {
@@ -424,6 +438,7 @@ model SourceItem {
   projects       ProjectSource[]
   evidenceItems  EvidenceItem[]
   ideaReferences ContentIdeaReference[]
+  materialAnalyses MaterialAnalysis[]
 
   @@unique([workspaceId, canonicalUrl])
   @@unique([workspaceId, sourcePlatform, externalId])
@@ -806,6 +821,41 @@ model ProjectSource {
   @@index([projectId, sortOrder])
 }
 
+model MaterialAnalysis {
+  id                            String                 @id @default(cuid())
+  workspaceId                   String
+  sourceItemId                  String
+  version                       Int
+  status                        MaterialAnalysisStatus @default(PROCESSING)
+  suggestedTitle                String?
+  summary                       String?
+  topic                         String?
+  tags                          Json
+  keywords                      Json
+  contentType                   String?
+  targetAudience                String?
+  coreViewpoint                 String?
+  keyPoints                     Json
+  coreQuestion                  String?
+  origin                        MaterialAnalysisOrigin @default(AI)
+  aiRunId                       String?                @unique
+  transcriptUpdatedAtAtAnalysis DateTime
+  errorCode                     String?
+  errorMessage                  String?
+  createdById                   String
+  createdAt                     DateTime               @default(now())
+  updatedAt                     DateTime               @updatedAt
+  workspace                     Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceItem                    SourceItem             @relation(fields: [sourceItemId], references: [id], onDelete: Cascade)
+  aiRun                         AIRun?                  @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
+  createdBy                     User                   @relation("MaterialAnalysisCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([sourceItemId, version])
+  @@index([workspaceId, sourceItemId, createdAt])
+  @@index([workspaceId, status])
+  @@index([createdById])
+}
+
 model EvidenceItem {
   id           String         @id @default(cuid())
   workspaceId  String
@@ -1099,6 +1149,7 @@ model AIRun {
   platformTemplate   PlatformTemplate? @relation(fields: [platformTemplateId], references: [id], onDelete: Restrict)
   reviewRecords      ReviewRecord[]
   recommendationBatch RecommendationBatch?
+  materialAnalysis    MaterialAnalysis?
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, projectId, createdAt])

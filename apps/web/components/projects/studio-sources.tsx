@@ -14,6 +14,7 @@ type ProjectSource = {
     sourceType: string;
     rawText: string | null;
     transcript: { fullText: string } | null;
+    materialAnalysis: { topic: string | null; coreViewpoint: string | null } | null;
   };
 };
 
@@ -47,8 +48,9 @@ export function StudioSources({ projectId, sources, availableSources, editable }
           <details key={sourceItem.id} className="rounded-xl border bg-[var(--surface)] p-3">
             <summary className="cursor-pointer list-none">
               <p className="line-clamp-2 text-sm font-medium">{sourceItem.title || "未命名素材"}</p>
-              <div className="mt-2 flex flex-wrap gap-1"><Badge>{sourcePlatformLabels[sourceItem.sourcePlatform] || sourceItem.sourcePlatform}</Badge><Badge>{sourceTypeLabels[sourceItem.sourceType] || sourceItem.sourceType}</Badge><Badge>{sourceItem.transcript ? "已转写" : "原始正文"}</Badge></div>
+              <div className="mt-2 flex flex-wrap gap-1"><Badge>{sourcePlatformLabels[sourceItem.sourcePlatform] || sourceItem.sourcePlatform}</Badge><Badge>{sourceTypeLabels[sourceItem.sourceType] || sourceItem.sourceType}</Badge><Badge>{sourceItem.transcript ? "已转写" : "原始正文"}</Badge>{sourceItem.materialAnalysis ? <Badge>已智能整理</Badge> : null}</div>
             </summary>
+            {sourceItem.materialAnalysis ? <div className="mt-3 rounded-lg bg-[var(--surface-elevated)] p-3 text-xs leading-5"><p><span className="text-[var(--text-secondary)]">主题：</span>{sourceItem.materialAnalysis.topic}</p><p className="mt-1"><span className="text-[var(--text-secondary)]">核心观点：</span>{sourceItem.materialAnalysis.coreViewpoint}</p></div> : null}
             <p className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap border-t pt-3 text-xs leading-6 text-[var(--text-secondary)]">{sourceItem.transcript?.fullText || sourceItem.rawText || "暂无可用正文"}</p>
             <div className="mt-3 flex items-center justify-between text-xs text-[var(--text-secondary)]"><span>{role}</span>{editable ? <button disabled={busy} className="text-[var(--danger)]" onClick={() => action(() => request(`/api/projects/${projectId}/sources/${sourceItem.id}`, "DELETE"))}>移出项目</button> : null}</div>
           </details>

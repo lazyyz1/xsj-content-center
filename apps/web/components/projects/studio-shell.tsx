@@ -14,7 +14,7 @@ import { DeepContentWorkspace, type MotherSnapshot, type PackageView } from "./d
 
 type Source = {
   role: string;
-  sourceItem: { id: string; title: string | null; sourcePlatform: string; sourceType: string; rawText: string | null; transcript: { fullText: string } | null };
+  sourceItem: { id: string; title: string | null; sourcePlatform: string; sourceType: string; rawText: string | null; transcript: { fullText: string } | null; materialAnalysis: { topic: string | null; coreViewpoint: string | null } | null };
 };
 type Evidence = { id: string; type: string; excerpt: string | null; claim: string | null; note: string | null; sourceItemId: string | null; sourceItem: { title: string | null } | null };
 type AvailableSource = { id: string; title: string | null; sourcePlatform: string; sourceType: string };
