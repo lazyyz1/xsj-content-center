@@ -43,6 +43,7 @@ async function recordParseUsage(input: {
   providerRequestId?: string;
   providerCode?: string;
   errorCode?: string;
+  latencyMs?: number;
 }) {
   await db.apiUsage.create({
     data: {
@@ -55,7 +56,7 @@ async function recordParseUsage(input: {
       success: input.success,
       units: 1,
       cost: null,
-      metadata: json({ providerCode: input.providerCode, errorCode: input.errorCode, attempt: input.attempt }),
+      metadata: json({ providerCode: input.providerCode, errorCode: input.errorCode, attempt: input.attempt, latencyMs: input.latencyMs, platform: input.record.sourceItem.sourcePlatform }),
     },
   });
 }
@@ -143,12 +144,13 @@ export async function processRedFoxIngestJob(
       },
     });
     parseCalled = true;
+    const providerStartedAt = Date.now();
     let resolved;
     try {
       resolved = (await provider.resolve(sourceUrl)).data;
       const requestMetadata = provider.getLastRequestMetadata();
       await Promise.all([
-        recordParseUsage({ record, attempt, success: true, ...requestMetadata }),
+        recordParseUsage({ record, attempt, success: true, latencyMs: Date.now() - providerStartedAt, ...requestMetadata }),
         db.auditLog.create({
           data: {
             workspaceId: record.workspaceId,
@@ -170,6 +172,7 @@ export async function processRedFoxIngestJob(
           providerRequestId: metadata.providerRequestId,
           providerCode: metadata.providerCode,
           errorCode: error instanceof RedFoxError ? error.code : "REDFOX_API_ERROR",
+          latencyMs: Date.now() - providerStartedAt,
         }),
         db.auditLog.create({
           data: {

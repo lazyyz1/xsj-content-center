@@ -44,6 +44,7 @@ export async function processContentIngestJob(job: Job<ContentIngestPayload>) {
     include: { sourceItem: true },
   });
   if (!record) throw new UnrecoverableError("Ingest job scope mismatch");
+  if (record.sourceItem.workspaceId !== record.workspaceId) throw new UnrecoverableError("Ingest parent workspace mismatch");
   if (record.status === "SUCCEEDED") return { status: "already-succeeded" as const };
   if (record.status === "CANCELLED" || record.sourceItem.status === "ARCHIVED") {
     throw new UnrecoverableError("Ingest job is no longer runnable");

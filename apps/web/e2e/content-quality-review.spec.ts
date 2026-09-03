@@ -58,7 +58,7 @@ test("rule gate → Workspace LLM advice → human approval → edit reset → E
   await db.platformVariant.create({ data: { workspaceId: membership.workspaceId, projectId: project.id, motherContentId: mother.id, platform: "DOUYIN", title: "可靠内容怎么做", hook: "先别急着写", body: "可靠内容先核对事实，再组织表达。", hashtags: ["内容方法"], mediaPlan: {}, metadata: {}, status: "READY", sourceMotherVersion: 1, createdById: user.id } });
 
   await page.goto(`/projects/${project.id}/studio`);
-  await page.getByRole("button", { name: /3 · 平台内容与审核/ }).click();
+  await page.getByRole("button", { name: "平台内容与审核", exact: true }).click();
   await page.getByRole("button", { name: /^抖音/ }).click();
   await page.getByRole("button", { name: "提交审核" }).click();
   await expect(page.getByText("抖音已提交人工审核，不会自动运行 AI 检查。", { exact: true })).toBeVisible();
@@ -75,7 +75,7 @@ test("rule gate → Workspace LLM advice → human approval → edit reset → E
   expect(usage).toMatchObject({ provider: "LLM", inputTokens: 149, outputTokens: 47 });
 
   await page.getByRole("link", { name: "返回创作工作台" }).click();
-  await page.getByRole("button", { name: /3 · 平台内容与审核/ }).click();
+  await page.getByRole("button", { name: "平台内容与审核", exact: true }).click();
   await page.getByRole("button", { name: /^抖音/ }).click();
   await page.getByLabel("抖音正文").fill("人工修改后的平台正文。");
   await expect.poll(async () => (await db.platformVariant.findUnique({ where: { projectId_platform: { projectId: project.id, platform: "DOUYIN" } } }))?.status, { timeout: 10_000 }).toBe("DRAFT");
@@ -94,7 +94,7 @@ test("rule gate → Workspace LLM advice → human approval → edit reset → E
   const imported = await page.request.post(`/api/projects/${project.id}/import-gpt-draft`, { data: { title: "新版 GPT Web 母稿", body: "这是人工从 ChatGPT 网页版复制回来的新版成稿。", note: "人工确认", confirmReplace: true } });
   expect(imported.status()).toBe(201);
   await page.reload();
-  await expect(page.getByText("此前已批准，但母稿已经更新", { exact: true })).toBeVisible();
+  await expect(page.getByText("此前已批准，但口播稿已经更新", { exact: true })).toBeVisible();
   const reviews = await page.request.get(`/api/projects/${project.id}/platform-variants/DOUYIN/reviews`);
   expect(reviews.status()).toBe(200);
   expect((await reviews.json()).readyToPublish).toBe(false);

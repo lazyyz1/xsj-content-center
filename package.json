@@ -22,6 +22,7 @@
     "db:generate": "pnpm --filter @content-center/db db:generate",
     "db:migrate": "dotenv -e .env -- pnpm --filter @content-center/db db:migrate",
     "db:studio": "dotenv -e .env -- pnpm --filter @content-center/db db:studio",
+    "admin:bootstrap": "dotenv -e .env -- pnpm --filter @content-center/web admin:bootstrap",
     "infra:up": "docker compose -f docker-compose.dev.yml up -d",
     "infra:down": "docker compose -f docker-compose.dev.yml down"
   },

@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   Library,
   Settings,
+  ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -21,7 +22,7 @@ const links: NavItem[] = [
   { label: "设置", href: "/settings", icon: Settings },
 ];
 
-export function Sidebar({ workspaceName, userName }: { workspaceName: string; userName: string }) {
+export function Sidebar({ workspaceName, userName, isSystemAdmin = false }: { workspaceName: string; userName: string; isSystemAdmin?: boolean }) {
   return (
     <aside className="border-b border-[var(--border)] bg-[var(--surface)] lg:fixed lg:inset-y-0 lg:left-0 lg:w-[var(--app-sidebar-width)] lg:border-b-0 lg:border-r">
       <div className="flex h-full flex-col p-4">
@@ -36,6 +37,7 @@ export function Sidebar({ workspaceName, userName }: { workspaceName: string; us
               {label}
             </Link>
           ))}
+          {isSystemAdmin ? <Link href="/admin/users" className="flex shrink-0 items-center gap-2 rounded-[var(--radius)] px-3 py-2.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)] hover:text-[var(--text-primary)]"><ShieldCheck size={17} />系统管理</Link> : null}
         </nav>
         <div className="mt-4 hidden border-t border-[var(--border)] pt-4 lg:block">
           <p className="mb-2 truncate px-3 text-xs text-[var(--text-secondary)]">{userName}</p>

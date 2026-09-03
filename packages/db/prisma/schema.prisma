@@ -14,6 +14,11 @@ enum WorkspaceRole {
   VIEWER
 }
 
+enum SystemRole {
+  SYSTEM_ADMIN
+  USER
+}
+
 enum IntegrationProvider {
   REDFOX
   DOUBAO_ASR
@@ -260,6 +265,7 @@ model User {
   image                   String?
   createdAt               DateTime             @default(now())
   updatedAt               DateTime             @updatedAt
+  systemRole              SystemRole           @default(USER)
   sessions                Session[]
   accounts                Account[]
   workspaceMemberships    WorkspaceMember[]
@@ -284,6 +290,8 @@ model User {
   createdRecommendationBatches RecommendationBatch[] @relation("RecommendationBatchCreatedBy")
   createdMaterialAnalyses MaterialAnalysis[]           @relation("MaterialAnalysisCreatedBy")
   createdUnifiedCreativeAnalyses UnifiedCreativeAnalysis[] @relation("UnifiedCreativeAnalysisCreatedBy")
+
+  @@index([systemRole])
 }
 
 model Session {

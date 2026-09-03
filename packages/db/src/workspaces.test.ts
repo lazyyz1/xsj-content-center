@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
-import { createOwnedWorkspace, db, findWorkspaceForUser } from "./index";
+import { createOwnedWorkspace, db, ensurePersonalWorkspaceForUser, findWorkspaceForUser } from "./index";
 
 describe("workspace isolation", () => {
   const runId = randomUUID();
@@ -47,5 +47,16 @@ describe("workspace isolation", () => {
     await expect(db.auditLog.findFirst({
       where: { workspaceId: workspace.id, action: "workspace.created" },
     })).resolves.not.toBeNull();
+  });
+
+  it("provisions one personal workspace idempotently", async () => {
+    const id = `personal-${runId}`;
+    await db.user.create({ data: { id, name: "Personal User", email: `${id}@example.test` } });
+    const first = await ensurePersonalWorkspaceForUser(db, { userId: id });
+    const second = await ensurePersonalWorkspaceForUser(db, { userId: id });
+    expect(second.id).toBe(first.id);
+    await expect(db.workspaceMember.count({ where: { userId: id, role: "OWNER" } })).resolves.toBe(1);
+    await db.workspace.deleteMany({ where: { members: { some: { userId: id } } } });
+    await db.user.delete({ where: { id } });
   });
 });

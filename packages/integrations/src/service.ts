@@ -10,6 +10,7 @@ import {
   primarySecretField,
   splitProviderConfig,
 } from "./schemas";
+import { getSystemProviderConfig, getSystemProviderPublicConfig, systemManagedProvidersEnabled } from "./system-provider-policy";
 
 export const INTEGRATION_AUDIT_ACTIONS = [
   "integration.created",
@@ -72,6 +73,17 @@ export class IntegrationService {
   }
 
   async getIntegrationStatus(workspaceId: string, provider: ConfigurableIntegrationProvider): Promise<PublicIntegrationConfig> {
+    if (systemManagedProvidersEnabled()) {
+      const publicConfig = getSystemProviderPublicConfig(provider);
+      return {
+        provider,
+        status: publicConfig ? "CONFIGURED" : "UNCONFIGURED",
+        configured: Boolean(publicConfig),
+        publicConfig: publicConfig ?? {},
+        lastFour: null,
+        updatedAt: null,
+      };
+    }
     const row = await this.prisma.integrationConfig.findUnique({
       where: { workspaceId_provider: { workspaceId, provider } },
     });
@@ -95,6 +107,7 @@ export class IntegrationService {
   }
 
   async getDecryptedIntegrationConfig(workspaceId: string, provider: ConfigurableIntegrationProvider): Promise<Record<string, unknown> | null> {
+    if (systemManagedProvidersEnabled()) return getSystemProviderConfig(provider);
     const row = await this.prisma.integrationConfig.findUnique({
       where: { workspaceId_provider: { workspaceId, provider } },
     });

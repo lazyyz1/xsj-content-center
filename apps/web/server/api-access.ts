@@ -15,6 +15,19 @@ export async function getApiWorkspaceContext() {
   return { session, workspace: membership.workspace, role: membership.role };
 }
 
+export async function getSystemAdminApiContext() {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) return { response: apiError("UNAUTHORIZED", 401) } as const;
+  const user = await db.user.findUnique({
+    where: { id: session.user.id },
+    select: { id: true, systemRole: true },
+  });
+  if (!user || user.systemRole !== "SYSTEM_ADMIN") {
+    return { response: apiError("FORBIDDEN", 403) } as const;
+  }
+  return { session, user } as const;
+}
+
 export function apiError(error: string, status: number, message?: string) {
   return NextResponse.json({ error, message }, { status });
 }

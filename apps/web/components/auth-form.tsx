@@ -53,12 +53,12 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
       <Button className="w-full" disabled={pending}>
         {pending ? "处理中…" : isRegister ? "创建账号" : "登录"}
       </Button>
-      <p className="text-center text-sm text-[var(--text-secondary)]">
+      {isRegister || process.env.NEXT_PUBLIC_ALLOW_PUBLIC_SIGNUP === "true" ? <p className="text-center text-sm text-[var(--text-secondary)]">
         {isRegister ? "已有账号？" : "还没有账号？"}{" "}
         <Link className="font-medium text-[var(--accent)]" href={isRegister ? "/login" : "/register"}>
           {isRegister ? "去登录" : "注册"}
         </Link>
-      </p>
+      </p> : null}
     </form>
   );
 }

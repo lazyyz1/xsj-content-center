@@ -13,6 +13,8 @@ import {
   assertFlashAudioLimits,
   DoubaoClient,
   DoubaoError,
+  DoubaoRecordingFileClient,
+  DoubaoRecordingFileTranscriptionProvider,
   DoubaoTranscriptionProvider,
   doubaoErrorMetadata,
   doubaoRuntimeConfigSchema,
@@ -52,6 +54,7 @@ type TranscriptionPlan = {
   device?: LocalAsrDevice;
   fallbackToDoubao: boolean;
   fallbackUsed?: boolean;
+  protocol?: "FLASH" | "RECORDING_FILE_2_0";
 };
 
 const integrationService = new IntegrationService();
@@ -108,7 +111,7 @@ async function loadDoubaoConfig(workspaceId: string) {
     resourceId: decrypted.resourceId ?? DOUBAO_DEFAULT_RESOURCE_ID,
   });
   if (!parsed.success) throw new DoubaoError("DOUBAO_NOT_CONFIGURED", "豆包 ASR Integration 配置无效。", false);
-  return parsed.data;
+  return { ...parsed.data, protocol: decrypted.protocol === "RECORDING_FILE_2_0" ? "RECORDING_FILE_2_0" as const : "FLASH" as const };
 }
 
 async function loadWorkspaceTranscriptionConfig(workspaceId: string): Promise<WorkspaceTranscriptionConfig> {
@@ -172,8 +175,8 @@ async function resolveLocalPlan(config: WorkspaceTranscriptionConfig): Promise<T
 export async function resolveWorkspaceTranscriptionPlan(workspaceId: string): Promise<TranscriptionPlan> {
   const config = await loadWorkspaceTranscriptionConfig(workspaceId);
   if (config.source === "DOUBAO") {
-    await loadDoubaoConfig(workspaceId);
-    return { provider: "DOUBAO_ASR", qualityMode: config.qualityMode, fallbackToDoubao: false };
+    const doubao = await loadDoubaoConfig(workspaceId);
+    return { provider: "DOUBAO_ASR", qualityMode: config.qualityMode, fallbackToDoubao: false, protocol: doubao.protocol };
   }
   try {
     return await resolveLocalPlan(config);
@@ -276,13 +279,22 @@ async function recordUsage(input: {
       workspaceId: input.record.workspaceId,
       userId: input.record.requestedById,
       provider: input.provider,
-      operation: input.provider === "LOCAL_FUNASR" ? "TRANSCRIBE_LOCAL" : "TRANSCRIBE_FLASH",
+      operation: input.provider === "LOCAL_FUNASR" ? "TRANSCRIBE_LOCAL" : input.metadata?.protocol === "RECORDING_FILE_2_0" ? "TRANSCRIBE_RECORDING_FILE_2_0" : "TRANSCRIBE_FLASH",
       requestId: `${input.record.id}:${input.attempt}:${input.provider}`,
       providerRequestId: input.providerRequestId,
       success: input.success,
       units: 1,
       cost: input.provider === "LOCAL_FUNASR" ? 0 : null,
-      metadata: json({ durationMs: input.durationMs, processingMs: input.processingMs, errorCode: input.errorCode, attempt: input.attempt, ...input.metadata }),
+      metadata: json({
+        sourceItemId: input.record.sourceItemId,
+        durationMs: input.durationMs,
+        audioDurationSeconds: Math.round(input.durationMs / 100) / 10,
+        processingMs: input.processingMs,
+        providerMode: "REAL",
+        errorCode: input.errorCode,
+        attempt: input.attempt,
+        ...input.metadata,
+      }),
     },
   });
 }
@@ -372,7 +384,10 @@ async function transcribeWithProvider(input: {
   }
 
   const config = await loadDoubaoConfig(input.record.workspaceId);
-  const provider = new DoubaoTranscriptionProvider(new DoubaoClient(config));
+  const recordingFile = input.plan.protocol === "RECORDING_FILE_2_0" || config.protocol === "RECORDING_FILE_2_0";
+  const provider = recordingFile
+    ? new DoubaoRecordingFileTranscriptionProvider(new DoubaoRecordingFileClient(config))
+    : new DoubaoTranscriptionProvider(new DoubaoClient(config));
   const started = Date.now();
   try {
     const transcript = (await provider.transcribe(input.providerInput)).data;
@@ -385,7 +400,7 @@ async function transcribeWithProvider(input: {
       processingMs: Date.now() - started,
       success: true,
       providerRequestId: metadata.providerRequestId,
-      metadata,
+      metadata: { ...metadata, protocol: recordingFile ? "RECORDING_FILE_2_0" : "FLASH" },
     });
     return { transcript, provider: "DOUBAO_ASR", metadata };
   } catch (error) {
@@ -419,6 +434,7 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
     include: { sourceItem: { include: { assets: true } } },
   });
   if (!record) throw new UnrecoverableError("Transcription job scope mismatch");
+  if (record.sourceItem.workspaceId !== record.workspaceId) throw new UnrecoverableError("Transcription parent workspace mismatch");
   if (record.status === "SUCCEEDED") return { status: "already-succeeded" as const };
   if (record.status === "CANCELLED" || record.sourceItem.status === "ARCHIVED") {
     throw new UnrecoverableError("Transcription job is no longer runnable");
@@ -495,7 +511,7 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
       });
       try {
         const videoUrl = (await storage.getSignedUrl(video.storageKey, 15 * 60)).data.url;
-        const extracted = await processor.extractAudio(videoUrl, { limits: plan.provider === "DOUBAO_ASR" ? "DOUBAO_FLASH" : "NONE" });
+        const extracted = await processor.extractAudio(videoUrl, { limits: plan.provider === "DOUBAO_ASR" && plan.protocol !== "RECORDING_FILE_2_0" ? "DOUBAO_FLASH" : "NONE" });
         cleanup = extracted.cleanup;
         extractedPath = extracted.path;
         durationMs = extracted.durationMs;
@@ -538,7 +554,7 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
       throw new MediaProcessorError("ASR_AUDIO_EXTRACTION_FAILED", "已保存音频缺少必要元数据。");
     }
     const sizeBytes = Number(audio.sizeBytes);
-    if (plan.provider === "DOUBAO_ASR") assertFlashAudioLimits({ sizeBytes, durationMs });
+    if (plan.provider === "DOUBAO_ASR" && plan.protocol !== "RECORDING_FILE_2_0") assertFlashAudioLimits({ sizeBytes, durationMs });
     const signedUrl = (await storage.getSignedUrl(audio.storageKey, ASR_AUDIO_SIGNED_URL_TTL_SECONDS)).data.url;
     const providerInput = plan.provider === "LOCAL_FUNASR"
       ? await localAudioInput({ signedUrl, extractedPath })

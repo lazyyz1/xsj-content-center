@@ -44,7 +44,7 @@ test("approved → schedule → calendar → package copy → manual publish →
   const scheduledLocal = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}T10:00`;
 
   await page.goto(`/projects/${project.id}/studio`);
-  await page.getByRole("button", { name: /3 · 平台内容与审核/ }).click();
+  await page.getByRole("button", { name: "平台内容与审核", exact: true }).click();
   await page.getByRole("button", { name: /^抖音/ }).click();
   await page.getByRole("button", { name: "加入发布中心" }).click();
   await page.getByLabel("计划发布时间").fill(scheduledLocal);
@@ -76,7 +76,7 @@ test("Mother update makes an approved variant stale and blocks task creation", a
   const user = await register(page, 2);
   const { project } = await approvedProject(user, "阶段八过期门禁项目", true);
   await page.goto(`/projects/${project.id}/studio`);
-  await page.getByRole("button", { name: /3 · 平台内容与审核/ }).click();
+  await page.getByRole("button", { name: "平台内容与审核", exact: true }).click();
   await page.getByRole("button", { name: /^抖音/ }).click();
   await expect(page.getByRole("button", { name: "加入发布中心" })).toBeDisabled();
   await expect(page.getByText("母稿已更新，必须重新生成并审核。", { exact: true })).toBeVisible();

@@ -1,5 +1,6 @@
 import { canManageWorkspace } from "@content-center/core";
 import { parseProviderConfig } from "@content-center/integrations";
+import { systemManagedProvidersEnabled } from "@content-center/integrations";
 import { Card } from "@content-center/ui";
 import { PageHeader } from "@/components/page";
 import { IntegrationCard, SystemServiceCard } from "@/components/integrations/integration-card";
@@ -9,6 +10,10 @@ import { getIntegrationStatuses, integrationVisibleToRole } from "@/server/integ
 import { getLocalAsrDisplay } from "@/server/local-asr";
 
 export default async function IntegrationsPage() {
+  if (systemManagedProvidersEnabled()) {
+    const { redirect } = await import("next/navigation");
+    redirect("/settings");
+  }
   const { workspace, role } = await requireWorkspace();
   const canManage = canManageWorkspace(role);
   const [integrationStatuses, localAsr] = await Promise.all([getIntegrationStatuses(workspace.id), getLocalAsrDisplay(workspace.id)]);

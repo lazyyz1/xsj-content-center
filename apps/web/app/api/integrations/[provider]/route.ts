@@ -1,4 +1,5 @@
 import { canManageWorkspace } from "@content-center/core";
+import { systemManagedProvidersEnabled } from "@content-center/integrations";
 import { NextResponse } from "next/server";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
 import { configurableProviderOrResponse, integrationApiError, noContent } from "@/server/integration-api";
@@ -7,6 +8,7 @@ import { getIntegrationDisplay, integrationService, integrationVisibleToRole } f
 type RouteContext = { params: Promise<{ provider: string }> };
 
 export async function GET(_request: Request, route: RouteContext) {
+  if (systemManagedProvidersEnabled()) return apiError("SYSTEM_MANAGED_PROVIDERS", 403);
   const context = await getApiWorkspaceContext();
   if (!context) return apiError("UNAUTHORIZED", 401);
   const { provider } = await route.params;
@@ -17,6 +19,7 @@ export async function GET(_request: Request, route: RouteContext) {
 }
 
 export async function PUT(request: Request, route: RouteContext) {
+  if (systemManagedProvidersEnabled()) return apiError("SYSTEM_MANAGED_PROVIDERS", 403);
   const context = await getApiWorkspaceContext();
   if (!context) return apiError("UNAUTHORIZED", 401);
   if (!canManageWorkspace(context.role)) return apiError("FORBIDDEN", 403);
@@ -39,6 +42,7 @@ export async function PUT(request: Request, route: RouteContext) {
 }
 
 export async function DELETE(_request: Request, route: RouteContext) {
+  if (systemManagedProvidersEnabled()) return apiError("SYSTEM_MANAGED_PROVIDERS", 403);
   const context = await getApiWorkspaceContext();
   if (!context) return apiError("UNAUTHORIZED", 401);
   if (!canManageWorkspace(context.role)) return apiError("FORBIDDEN", 403);
