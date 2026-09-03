@@ -11,11 +11,13 @@ services:
     # Free staging only builds the Web app; Turbo's full monorepo build is unnecessarily memory-heavy here.
     buildCommand: pnpm install --frozen-lockfile && pnpm --filter @content-center/web exec next build --webpack
     # Free services do not support preDeployCommand; migrate deploy is idempotent and runs before start.
-    startCommand: pnpm db:migrate && pnpm --filter @content-center/web start
+    startCommand: pnpm db:migrate && pnpm admin:bootstrap && pnpm --filter @content-center/web start
     healthCheckPath: /login
     envVars:
       - key: NODE_ENV
         value: production
+      - key: APP_ENV
+        value: staging
       - key: STORAGE_DRIVER
         value: RENDER_MEDIA_RELAY
       - key: MEDIA_STORAGE_ROOT
@@ -52,6 +54,9 @@ services:
       - key: ALLOW_PUBLIC_SIGNUP
         value: "false"
       - key: NEXT_PUBLIC_ALLOW_PUBLIC_SIGNUP
+        value: "false"
+      # One-time staging admin bootstrap bridge. Keep disabled after the first successful run.
+      - key: STAGING_ADMIN_BOOTSTRAP_ENABLED
         value: "false"
 
   - type: keyvalue
