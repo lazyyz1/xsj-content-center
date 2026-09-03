@@ -86,7 +86,7 @@ describe("AI creation engine", () => {
       if (input.prompt.includes("EXTRACT_EVIDENCE")) return { items: [{ type: "FACT", excerpt: "Supported excerpt", claim: "Supported claim", note: "", sourceItemId: sourceId }] };
       if (input.prompt.includes("GENERATE_ANGLES")) return { angles: [{ title: "Evidence-first angle", angle: "Start from a failed shortcut", coreMessage: "Evidence improves originality", whyItWorks: "Concrete", targetAudience: "Teams", recommendedStructure: ["Failure", "Evidence", "Method"], risk: "Avoid absolutes", evidenceIds: [], sourceItemIds: [sourceId] }] };
       if (input.prompt.includes("GENERATE_BRIEF")) return { topic: "AI content workflow", angle: "Evidence first", audience: "Teams", coreMessage: "Build from evidence", keyPoints: ["Collect", "Verify", "Write"], structure: ["Hook", "Method", "CTA"], tone: "Direct", risks: ["No invented facts"], evidenceIds: [], sourceItemIds: [sourceId] };
-      if (input.prompt.includes("GENERATE_MOTHER_CONTENT")) { motherCalls += 1; motherPrompt = input.prompt; motherSystemPrompt = input.systemPrompt || ""; return { title: "Evidence before drafting", outline: ["Hook", "Method"], body: "Mother body", evidenceIds: [], sourceItemIds: [sourceId] }; }
+      if (input.prompt.includes("GENERATE_MOTHER_CONTENT")) { motherCalls += 1; motherPrompt = input.prompt; motherSystemPrompt = input.systemPrompt || ""; return { recommendedAngle: "Evidence before drafting", alternativeAngles: ["Why unsupported drafts fail", "Make evidence useful"], recommendedTitle: "Evidence before drafting", alternativeTitles: ["Why does drafting start with evidence?", "A grounded draft starts here"], openingHook: "Mother body", outline: ["Hook", "Method"], body: "Mother body", evidenceIds: [], sourceItemIds: [sourceId] }; }
       if (input.prompt.includes("HUMANIZE")) return { original: "Mother body", aiVersion: "A more natural mother body" };
       return { topics: ["AI workflow"], coreClaims: [], facts: [], cases: [], questions: [], hooks: [], structures: [], risks: [], reusableInsights: [] };
     };
@@ -101,6 +101,7 @@ describe("AI creation engine", () => {
     await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: briefRun.id, expectedVersion: 1 });
     const motherRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "GENERATE_MOTHER_CONTENT" }, { runtime });
     expect(motherCalls).toBe(1);
+    expect(motherRun.output).toMatchObject({ recommendedAngle: "Evidence before drafting", alternativeAngles: expect.any(Array), alternativeTitles: expect.any(Array), openingHook: "Mother body", estimatedCharacterCount: 10, estimatedDurationSeconds: 2 });
     expect(motherPrompt).not.toContain("Material summary");
     expect(motherPrompt).toContain("prohibitedReferenceClaims");
     expect(motherPrompt).not.toContain("Unified interpretation");
@@ -137,7 +138,7 @@ describe("AI creation engine", () => {
   });
 
   it("records invalid AI output as failed and never creates fake mother content", async () => {
-    const runtime = { provider: new MockLLMProvider(() => ({ title: "Invalid", outline: [], body: "", evidenceIds: [], sourceItemIds: [] })), providerName: "MOCK", model: "mock-llm" };
+    const runtime = { provider: new MockLLMProvider(() => ({ recommendedAngle: "Invalid", alternativeAngles: [], recommendedTitle: "Invalid", alternativeTitles: ["A", "B"], openingHook: "Invalid", outline: [], body: "", evidenceIds: [], sourceItemIds: [] })), providerName: "MOCK", model: "mock-llm" };
     await expect(runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId: failureProjectId, action: "GENERATE_MOTHER_CONTENT" }, { runtime })).rejects.toBeTruthy();
     await expect(db.motherContent.findUnique({ where: { projectId: failureProjectId } })).resolves.toBeNull();
     await expect(db.aIRun.findFirst({ where: { projectId: failureProjectId, action: "GENERATE_MOTHER_CONTENT" }, orderBy: { createdAt: "desc" } })).resolves.toMatchObject({ status: "FAILED" });

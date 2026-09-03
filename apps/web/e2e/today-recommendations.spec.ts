@@ -22,8 +22,12 @@ test("today recommendation → evidence → idea/project, deterministic copy and
   await db.benchmarkContentSnapshot.create({ data: { workspaceId, benchmarkAccountId: benchmark.id, platform: "DOUYIN", externalId: `benchmark-work-${runId}`, title: "团队内容复盘的三个断点", url: "https://www.douyin.com/video/fixture", metadata: { contentType: "VIDEO" }, observedAt: now } });
   await db.sourceItem.createMany({ data: [{ workspaceId, createdById: user.id, sourceType: "TEXT", title: "内容证据库搭建方法", status: "READY" }, { workspaceId, createdById: user.id, sourceType: "TEXT", title: "选题会如何减少重复劳动", status: "READY" }] });
 
-  await page.goto("/discovery"); await expect(page.getByRole("heading", { name: "今日内容线索", exact: true })).toBeVisible(); await expect(page.getByText("AI 推荐", { exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "生成今日线索" }).click(); await expect(page.getByRole("heading", { name: "AI 内容团队正在重做工作流" })).toBeVisible();
+  await page.goto("/discovery"); await expect(page.getByRole("heading", { name: "今天值得看", exact: true })).toBeVisible(); await expect(page.getByText("AI 推荐", { exact: true })).toHaveCount(0);
+  const generatedResponsePromise = page.waitForResponse((response) => response.url().endsWith("/api/discovery/recommendations") && response.request().method() === "POST");
+  await page.getByRole("button", { name: "生成今日线索" }).click();
+  const generatedResponse = await generatedResponsePromise;
+  expect(generatedResponse.status(), await generatedResponse.text()).toBe(200);
+  await expect(page.getByRole("heading", { name: "AI 内容团队正在重做工作流" })).toBeVisible();
   expect(await db.apiUsage.count({ where: { workspaceId, provider: "REDFOX" } })).toBe(0); expect(await db.aIRun.count({ where: { workspaceId, action: "GENERATE_TODAY_RECOMMENDATIONS" } })).toBe(0);
   await page.getByRole("link", { name: /查看依据/ }).first().click(); await expect(page.getByRole("heading", { name: "真实依据" })).toBeVisible();
   expect(await db.apiUsage.count({ where: { workspaceId, provider: "REDFOX" } })).toBe(0); expect(await db.aIRun.count({ where: { workspaceId, action: "GENERATE_TODAY_RECOMMENDATIONS" } })).toBe(0);

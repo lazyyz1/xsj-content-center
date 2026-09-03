@@ -9,7 +9,22 @@ export const analyzeSourcesSchema = z.object({ topics: z.array(z.string()).max(1
 export const evidencePreviewSchema = z.object({ items: z.array(z.object({ type: z.enum(["FACT", "VIEWPOINT", "CASE", "DATA", "QUOTE", "EXPERIENCE", "QUESTION", "OTHER"]), excerpt: z.string().max(20_000).default(""), claim: z.string().max(5_000).default(""), note: z.string().max(5_000).default(""), sourceItemId: z.string().nullable().default(null) }).strict()).min(1).max(50) }).strict();
 export const anglesSchema = z.object({ angles: z.array(z.object({ title: z.string().min(1).max(2_000), angle: z.string().min(1).max(5_000), coreMessage: z.string().min(1).max(10_000), whyItWorks: z.string().max(5_000), targetAudience: z.string().max(2_000), recommendedStructure: z.array(z.string()).max(50), risk: z.string().max(5_000), evidenceIds: ids, sourceItemIds: ids }).strict()).min(1).max(10) }).strict();
 export const briefPreviewSchema = z.object({ topic: z.string().min(1).max(2_000), angle: z.string().max(5_000), audience: z.string().max(2_000), coreMessage: z.string().min(1).max(10_000), keyPoints: z.array(z.string()).max(100), structure: z.array(z.string()).max(100), tone: z.string().max(2_000), risks: z.array(z.string()).max(100), evidenceIds: ids, sourceItemIds: ids }).strict();
-export const motherContentPreviewSchema = z.object({ title: z.string().max(2_000), outline: z.array(z.string()).max(200), body: z.string().min(1).max(1_000_000), evidenceIds: ids, sourceItemIds: ids }).strict();
+export const motherContentProviderSchema = z.object({
+  recommendedAngle: z.string().min(1).max(5_000),
+  alternativeAngles: z.array(z.string().min(1).max(5_000)).max(2),
+  recommendedTitle: z.string().min(1).max(2_000),
+  alternativeTitles: z.array(z.string().min(1).max(2_000)).length(2),
+  openingHook: z.string().min(1).max(5_000),
+  outline: z.array(z.string()).max(200),
+  body: z.string().min(1).max(1_000_000),
+  evidenceIds: ids,
+  sourceItemIds: ids,
+}).strict();
+export const motherContentPreviewSchema = motherContentProviderSchema.extend({
+  estimatedDurationSeconds: z.number().int().positive(),
+  estimatedCharacterCount: z.number().int().nonnegative(),
+  ownContribution: z.enum(["STRONG", "MEDIUM", "WEAK"]),
+}).strict();
 export const rewritePreviewSchema = z.object({ original: z.string().min(1).max(20_000), aiVersion: z.string().min(1).max(50_000) }).strict();
 
 export function schemaForAction(action: AIAction): z.ZodTypeAny {
@@ -26,7 +41,7 @@ const outputShapes: Record<AIAction, string> = {
   EXTRACT_EVIDENCE: '{"items":[{"type":"FACT|VIEWPOINT|CASE|DATA|QUOTE|EXPERIENCE|QUESTION|OTHER","excerpt":string,"claim":string,"note":string,"sourceItemId":string|null}]}',
   GENERATE_ANGLES: '{"angles":[{"title":string,"angle":string,"coreMessage":string,"whyItWorks":string,"targetAudience":string,"recommendedStructure":string[],"risk":string,"evidenceIds":string[],"sourceItemIds":string[]}]}',
   GENERATE_BRIEF: '{"topic":string,"angle":string,"audience":string,"coreMessage":string,"keyPoints":string[],"structure":string[],"tone":string,"risks":string[],"evidenceIds":string[],"sourceItemIds":string[]}',
-  GENERATE_MOTHER_CONTENT: '{"title":string,"outline":string[],"body":string,"evidenceIds":string[],"sourceItemIds":string[]}',
+  GENERATE_MOTHER_CONTENT: '{"recommendedAngle":string,"alternativeAngles":string[0..2],"recommendedTitle":string,"alternativeTitles":[string,string],"openingHook":string,"outline":string[],"body":string,"evidenceIds":string[],"sourceItemIds":string[]}',
   REWRITE_SELECTION: '{"original":string,"aiVersion":string}', SHORTEN: '{"original":string,"aiVersion":string}', EXPAND: '{"original":string,"aiVersion":string}', ADD_PERSONAL_VIEW: '{"original":string,"aiVersion":string}', HUMANIZE: '{"original":string,"aiVersion":string}',
 };
 

@@ -28,7 +28,7 @@ function analysisResult() {
 
 function motherResult() {
   calls += 1;
-  return { title: `AI 核心母稿 V${calls}`, outline: ["问题", "方法", "行动"], body: "这是一版由创作方案主导、需要人工继续修改的核心母稿。", evidenceIds: [], sourceItemIds: [fixtureSourceId] };
+  return { recommendedAngle: "先解释返工为什么发生", alternativeAngles: ["从证据缺口切入", "从团队协作切入"], recommendedTitle: `AI 核心母稿 V${calls}`, alternativeTitles: ["为什么 AI 内容总在返工？", "少返工，从保存依据开始"], openingHook: "这是一版由创作方案主导的口播稿。", outline: ["问题", "方法", "行动"], body: "这是一版由创作方案主导的口播稿。需要人工继续修改。", evidenceIds: [], sourceItemIds: [fixtureSourceId] };
 }
 
 test.beforeAll(async () => {

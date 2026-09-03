@@ -9,6 +9,7 @@ import { sourcePlatformLabels, sourceStatusLabels, sourceTypeLabels } from "@/li
 import { requireWorkspace } from "@/server/access";
 import { listLibrarySources, type LibraryQuery } from "@/server/library";
 import { db } from "@content-center/db";
+import { sourceDisplayName } from "@/lib/content-production";
 
 function queryHref(query: LibraryQuery, updates: Record<string, string>) {
   const params = new URLSearchParams();
@@ -91,6 +92,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
               assets: item.assets,
               jobs: item.ingestJobs,
             });
+            const displayName = sourceDisplayName({ title: item.title, suggestedTitle: item.materialAnalyses[0]?.suggestedTitle, summary: item.materialAnalyses[0]?.summary, platformLabel: sourcePlatformLabels[item.sourcePlatform] || item.sourcePlatform, createdAt: item.createdAt });
             return (
               <Card key={item.id} className={listView ? "flex flex-col gap-4 p-4 sm:flex-row sm:items-center" : "overflow-hidden"}>
                 <div className={listView ? "h-16 w-24 shrink-0 rounded-lg bg-[var(--surface-elevated)]" : "h-32 bg-[var(--surface-elevated)]"}>
@@ -98,7 +100,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
                 </div>
                 <div className={listView ? "min-w-0 flex-1" : "p-4"}>
                   <div className="mb-2 flex flex-wrap gap-1.5"><Badge>{sourcePlatformLabels[item.sourcePlatform] || item.sourcePlatform}</Badge><Badge>{sourceTypeLabels[item.sourceType] || item.sourceType}</Badge><Badge>{item.sourceType === "VIDEO" ? processing.libraryLabel : sourceStatusLabels[item.status] || item.status}</Badge>{isMock ? <Badge className="border-[var(--warning)] text-[var(--warning)]">MOCK MODE</Badge> : null}</div>
-                  <Link href={`/library/${item.id}`} className="line-clamp-2 font-semibold hover:text-[var(--accent)]">{item.title || "未命名素材"}</Link>
+                  <Link href={`/library/${item.id}`} className="line-clamp-2 font-semibold hover:text-[var(--accent)]">{displayName}</Link>
                   <p className="mt-2 truncate text-xs text-[var(--text-secondary)]">{item.author || "未知作者"} · {item.createdAt.toLocaleString("zh-CN")}</p>
                   <div className="mt-3 flex flex-wrap gap-1">{item.tags.map(({ tag }) => <span key={tag.id} className="rounded-full bg-[var(--surface-elevated)] px-2 py-1 text-xs">#{tag.name}</span>)}</div>
                   {item.status === "FAILED" && latestJob ? <div className="mt-3 rounded-lg bg-red-50 p-3 text-xs text-[var(--danger)]"><p>{latestJob.errorMessage || "采集失败"}</p><RetryIngestButton jobId={latestJob.id} /></div> : null}

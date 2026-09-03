@@ -5,6 +5,7 @@ import { ProjectServiceError } from "../project-service";
 import type { AIAction } from "./schemas";
 import { materialAnalysisOutputSchema } from "../material-analysis/schemas";
 import type { MaterialAnalysisOutput } from "../material-analysis/schemas";
+import { resolveOwnContribution } from "../../lib/content-production";
 
 export type ContextBudgetLimits = { perSourceChars: number; totalSourceChars: number; totalEvidenceChars: number };
 const defaults: ContextBudgetLimits = { perSourceChars: 8_000, totalSourceChars: 24_000, totalEvidenceChars: 12_000 };
@@ -64,9 +65,11 @@ export class ProjectContextBuilder {
     });
     const profile = creatorProfile ? { displayName: creatorProfile.displayName, positioning: creatorProfile.positioning, targetAudience: creatorProfile.targetAudience, tone: creatorProfile.tone, preferredStyle: creatorProfile.preferredStyle, forbiddenStyle: creatorProfile.forbiddenStyle, coreTopics: strings(creatorProfile.coreTopics), personalViews: strings(creatorProfile.personalViews), brandTerms: strings(creatorProfile.brandTerms), forbiddenTerms: strings(creatorProfile.forbiddenTerms), hookPreferences: strings(creatorProfile.hookPreferences), structurePreferences: strings(creatorProfile.structurePreferences), ctaPreferences: strings(creatorProfile.ctaPreferences), examplePhrases: strings(creatorProfile.examplePhrases) } : null;
     const briefData = brief ? { topic: brief.topic, angle: brief.angle, audience: brief.audience, coreMessage: brief.coreMessage, coreQuestion: brief.coreQuestion, background: brief.background, keyPoints: strings(brief.keyPoints), structure: strings(brief.structure), tone: brief.tone, risks: strings(brief.risks), version: brief.version } : null;
+    const ownContribution = resolveOwnContribution({ coreMessage: briefData?.coreMessage, background: briefData?.background, audience: briefData?.audience });
+    const hasOwnBackground = Boolean(briefData?.background?.trim());
     const context = input.action === "GENERATE_MOTHER_CONTENT"
-      ? { project: { title: project.title }, mySupplement: briefData ? { myCoreViewpoint: briefData.coreMessage, audience: briefData.audience, ownBusinessExperienceOrCases: briefData.background, otherRequirements: briefData.angle } : null, creatorProfile: profile, materialUnderstanding: sources, confirmedFacts: evidence.map((item) => item.content) }
+      ? { project: { title: project.title }, mySupplement: briefData ? { myCoreViewpoint: briefData.coreMessage, audience: briefData.audience, ownBusinessExperienceOrCases: briefData.background, otherRequirements: briefData.angle } : null, ownContribution, creatorProfile: profile, materialUnderstanding: sources, confirmedFacts: evidence.map((item) => item.content) }
       : { project: { id: project.id, title: project.title, description: project.description, goal: project.goal, audience: project.audience }, creatorProfile: profile, sources, evidence, creativeBasis: evidence.map((item) => ({ ...item, status: "ADOPTED", verificationRequired: false })), creativeBrief: briefData };
-    return { context, contextTruncated, inputSummary: { action: input.action, sourceCount: sources.length, evidenceCount: evidence.length, materialAnalysisCount: sourceRows.filter(({ sourceItem }) => sourceItem.materialAnalyses.length > 0).length, hasUnifiedCreativeAnalysis: false, hasCreativeBrief: Boolean(brief), contextChars: JSON.stringify(context).length, hasCreatorProfile: Boolean(profile), contextTruncated } };
+    return { context, ownContribution, hasOwnBackground, contextTruncated, inputSummary: { action: input.action, sourceCount: sources.length, evidenceCount: evidence.length, materialAnalysisCount: sourceRows.filter(({ sourceItem }) => sourceItem.materialAnalyses.length > 0).length, hasUnifiedCreativeAnalysis: false, hasCreativeBrief: Boolean(brief), contextChars: JSON.stringify(context).length, hasCreatorProfile: Boolean(profile), ownContribution, hasOwnBackground, contextTruncated } };
   }
 }

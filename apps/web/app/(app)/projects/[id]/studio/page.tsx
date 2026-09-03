@@ -8,11 +8,13 @@ import { getProjectForUser } from "@/server/project-service";
 import { db } from "@content-center/db";
 import { IntegrationService } from "@content-center/integrations";
 import { getCreatorProfile } from "@/server/creator-profile-service";
-import { projectStatusLabels } from "@/lib/content-labels";
+import { projectStatusLabels, sourcePlatformLabels } from "@/lib/content-labels";
+import { sourceDisplayName } from "@/lib/content-production";
 import { CreativeBriefPrefillService } from "@/server/studio/creative-brief-prefill";
 import { listMotherContentVersions } from "@/server/mother-content-service";
 import { materialAnalysisOutputSchema } from "@/server/material-analysis/schemas";
 import { buildDraftWarnings } from "@/server/ai/draft-warnings";
+import { motherContentPreviewSchema } from "@/server/ai/schemas";
 
 function stringArray(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
 
@@ -22,11 +24,12 @@ export default async function ProjectStudioPage({ params }: { params: Promise<{ 
   const project = await getProjectForUser({ userId: session.user.id, workspaceId: workspace.id, projectId: id });
   if (!project) notFound();
   const sourceIds = project.sources.map(({ sourceItemId }) => sourceItemId);
-  const [availableSources, llm, ownProfile, motherHistory] = await Promise.all([
-    db.sourceItem.findMany({ where: { workspaceId: workspace.id, status: "READY", ...(sourceIds.length ? { id: { notIn: sourceIds } } : {}) }, select: { id: true, title: true, sourcePlatform: true, sourceType: true }, orderBy: { createdAt: "desc" }, take: 100 }),
+  const [availableSources, llm, ownProfile, motherHistory, latestAppliedMotherRun] = await Promise.all([
+    db.sourceItem.findMany({ where: { workspaceId: workspace.id, status: "READY", ...(sourceIds.length ? { id: { notIn: sourceIds } } : {}) }, select: { id: true, title: true, sourcePlatform: true, sourceType: true, createdAt: true, materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { summary: true } } }, orderBy: { createdAt: "desc" }, take: 100 }),
     new IntegrationService().getIntegrationStatus(workspace.id, "LLM"),
     getCreatorProfile(workspace.id, session.user.id),
     listMotherContentVersions({ workspaceId: workspace.id, userId: session.user.id, projectId: project.id }),
+    db.aIRun.findFirst({ where: { workspaceId: workspace.id, projectId: project.id, userId: session.user.id, action: "GENERATE_MOTHER_CONTENT", appliedAt: { not: null }, status: "SUCCEEDED" }, orderBy: { appliedAt: "desc" }, select: { outputJson: true } }),
   ]);
   const brief = project.creativeBrief;
   const mother = project.motherContent;
@@ -38,7 +41,7 @@ export default async function ProjectStudioPage({ params }: { params: Promise<{ 
     sources: project.sources.map(({ role: sourceRole, sourceItem }) => {
       const analysis = sourceItem.materialAnalyses[0];
       const parsed = materialAnalysisOutputSchema.safeParse(analysis?.understanding);
-      return { role: sourceRole, sourceItem: { id: sourceItem.id, title: sourceItem.title, sourcePlatform: sourceItem.sourcePlatform, sourceType: sourceItem.sourceType, rawText: sourceItem.rawText, transcript: sourceItem.transcript ? { fullText: sourceItem.transcript.fullText } : null, materialAnalysis: analysis ? { version: analysis.version, summary: analysis.summary, keyPoints: stringArray(analysis.keyPoints), understanding: parsed.success ? parsed.data : null, legacy: !parsed.success } : null } };
+      return { role: sourceRole, sourceItem: { id: sourceItem.id, title: sourceItem.title, displayName: sourceDisplayName({ title: sourceItem.title, summary: analysis?.summary, platformLabel: sourcePlatformLabels[sourceItem.sourcePlatform] || sourceItem.sourcePlatform, createdAt: sourceItem.createdAt }), sourcePlatform: sourceItem.sourcePlatform, sourceType: sourceItem.sourceType, rawText: sourceItem.rawText, transcript: sourceItem.transcript ? { fullText: sourceItem.transcript.fullText } : null, materialAnalysis: analysis ? { version: analysis.version, summary: analysis.summary, keyPoints: stringArray(analysis.keyPoints), understanding: parsed.success ? parsed.data : null, legacy: !parsed.success } : null } };
     }),
     creativePlan,
     motherContent: { title: mother?.title || "", body: mother?.body || "", outline: stringArray(mother?.outline), version: mother?.version || 0, origin: mother?.origin || "HUMAN" as const, originNote: mother?.originNote || null },
@@ -46,6 +49,8 @@ export default async function ProjectStudioPage({ params }: { params: Promise<{ 
     platformVariants: project.platformVariants.map((variant) => ({ id: variant.id, platform: variant.platform, version: variant.version, title: variant.title, body: variant.body, hook: variant.hook, summary: variant.summary, hashtags: stringArray(variant.hashtags), mediaPlan: variant.mediaPlan, metadata: variant.metadata, status: variant.status, sourceMotherVersion: variant.sourceMotherVersion, isStale: variant.sourceMotherVersion < (mother?.version ?? 0) })),
   };
   const profile = project.creatorProfile || ownProfile;
+  const parsedProductionPlan = motherContentPreviewSchema.safeParse(latestAppliedMotherRun?.outputJson);
   const ai = { integrationStatus: llm.status !== "CONFIGURED" && process.env.MOCK_MODE === "true" ? "MOCK" as const : llm.status, creatorProfile: profile ? { displayName: profile.displayName, positioning: profile.positioning } : null };
-  return <><header className="mb-5 flex flex-wrap items-start justify-between gap-4"><div><Link href="/projects" className="mb-3 inline-flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"><ArrowLeft size={16} />返回我的创作</Link><h1 className="text-2xl font-semibold tracking-tight">{project.title}</h1><p className="mt-1 text-sm text-[var(--text-secondary)]">参考素材 → 我的补充 → 我的口播稿</p></div><Badge>{projectStatusLabels[project.status] || project.status}</Badge></header><StudioShell project={studioProject} availableSources={availableSources} editable={role !== "VIEWER"} ai={ai} initialWarnings={initialWarnings} /></>;
+  const namedAvailableSources = availableSources.map((source) => ({ ...source, displayName: sourceDisplayName({ title: source.title, summary: source.materialAnalyses[0]?.summary, platformLabel: sourcePlatformLabels[source.sourcePlatform] || source.sourcePlatform, createdAt: source.createdAt }) }));
+  return <><header className="mb-5 flex flex-wrap items-start justify-between gap-4"><div><Link href="/projects" className="mb-3 inline-flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"><ArrowLeft size={16} />返回我的创作</Link><h1 className="text-2xl font-semibold tracking-tight">{project.title}</h1><p className="mt-1 text-sm text-[var(--text-secondary)]">参考素材 → 我的补充 → 我的口播稿</p></div><Badge>{projectStatusLabels[project.status] || project.status}</Badge></header><StudioShell project={{ ...studioProject, productionPlan: parsedProductionPlan.success ? parsedProductionPlan.data : null }} availableSources={namedAvailableSources} editable={role !== "VIEWER"} ai={ai} initialWarnings={initialWarnings} /></>;
 }

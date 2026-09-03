@@ -30,7 +30,7 @@ async function recommendationMode(workspaceId: string, runtime?: LLMRuntime): Pr
     const resolved = runtime ?? await loadLLMRuntime(workspaceId);
     return resolved.providerName === "MOCK" ? { mode: "DETERMINISTIC" } : { mode: "AI_ASSISTED", runtime: resolved };
   } catch (error) {
-    if (error instanceof LLMError && ["LLM_NOT_CONFIGURED", "LLM_DISABLED"].includes(error.code)) return { mode: "DETERMINISTIC" };
+    if (error instanceof LLMError && ["LLM_NOT_CONFIGURED", "LLM_DISABLED", "KIMI_NOT_CONFIGURED", "KIMI_MODEL_ID_MISSING"].includes(error.code)) return { mode: "DETERMINISTIC" };
     throw error;
   }
 }

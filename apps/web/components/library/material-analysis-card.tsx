@@ -57,13 +57,14 @@ export function MaterialAnalysisCard({ sourceId, current: initial, canEdit, llmS
 }
 
 function UnderstandingView({ value }: { value: MaterialAnalysisOutput }) {
-  return <div className="mt-5 grid gap-4">
-    <Block title="它讲了什么"><p className="text-sm leading-6">{value.whatItSays.summary}</p>{value.whatItSays.keyPoints.length ? <ul className="mt-3 list-disc space-y-1 pl-5 text-sm">{value.whatItSays.keyPoints.map((item) => <li key={item}>{item}</li>)}</ul> : null}</Block>
-    <Block title="值得借"><ItemList items={value.reusable.map((item) => ({ main: item.content, detail: item.whyUseful }))} /></Block>
-    <Block title="不要照搬"><ItemList items={value.doNotCopy.map((item) => ({ main: item.content, detail: item.reason }))} empty="没有明显需要避开的内容" /></Block>
-    <Block title="需要确认"><ItemList items={value.uncertain.map((item) => ({ main: item.content, detail: item.reason }))} empty="没有待确认信息" /></Block>
+  return <div className="mt-4 divide-y" data-testid="compact-material-analysis">
+    <Block title="它讲了什么"><CompactSummary value={value.whatItSays.summary} /></Block>
+    <Block title={`值得借 · ${value.reusable.length}`}><ItemList items={value.reusable.map((item) => ({ main: item.content, detail: item.whyUseful }))} /></Block>
+    <Block title={`不要照搬 · ${value.doNotCopy.length}`}><ItemList items={value.doNotCopy.map((item) => ({ main: item.content, detail: item.reason }))} empty="没有明显需要避开的内容" /></Block>
+    <Block title={`需要确认 · ${value.uncertain.length}`}><ItemList items={value.uncertain.map((item) => ({ main: item.content, detail: item.reason }))} empty="没有待确认信息" /></Block>
   </div>;
 }
 
-function Block({ title, children }: { title: string; children: ReactNode }) { return <section className="rounded-xl border p-4"><h3 className="font-medium">{title}</h3><div className="mt-3">{children}</div></section>; }
-function ItemList({ items, empty = "暂无" }: { items: Array<{ main: string; detail: string }>; empty?: string }) { return items.length ? <div className="grid gap-3">{items.map((item, index) => <article key={`${item.main}-${index}`}><p className="text-sm leading-6">{item.main}</p><p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">{item.detail}</p></article>)}</div> : <p className="text-sm text-[var(--text-secondary)]">{empty}</p>; }
+function Block({ title, children }: { title: string; children: ReactNode }) { return <section className="py-4 first:pt-0"><h3 className="text-sm font-medium">{title}</h3><div className="mt-2">{children}</div></section>; }
+function CompactSummary({ value }: { value: string }) { const [open, setOpen] = useState(false); const long = value.length > 72; return <><p className={`text-sm leading-6 ${!open && long ? "max-h-[4.5rem] overflow-hidden" : ""}`}>{value}</p>{long ? <button className="mt-1 text-xs font-medium text-[var(--accent)]" onClick={() => setOpen((current) => !current)}>{open ? "收起" : "展开"}</button> : null}</>; }
+function ItemList({ items, empty = "暂无" }: { items: Array<{ main: string; detail: string }>; empty?: string }) { const [open, setOpen] = useState(false); const visible = open ? items : items.slice(0, 4); return items.length ? <><div className="grid gap-2.5">{visible.map((item, index) => <article key={`${item.main}-${index}`}><p className="text-sm leading-5">{item.main}</p><p className="mt-0.5 line-clamp-1 text-xs leading-5 text-[var(--text-secondary)]">{item.detail}</p></article>)}</div>{items.length > 4 ? <button className="mt-2 text-xs font-medium text-[var(--accent)]" onClick={() => setOpen((current) => !current)}>{open ? "收起" : `查看全部 ${items.length} 条`}</button> : null}</> : <p className="text-sm text-[var(--text-secondary)]">{empty}</p>; }

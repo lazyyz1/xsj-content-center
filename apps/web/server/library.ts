@@ -62,6 +62,7 @@ export async function listLibrarySources(workspaceId: string, query: LibraryQuer
         },
         assets: { select: { assetType: true, status: true } },
         transcript: { select: { providerMode: true } },
+        materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { suggestedTitle: true, summary: true } },
       },
       orderBy,
       skip: (page - 1) * pageSize,
