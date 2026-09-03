@@ -3,6 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   serverExternalPackages: ["jsdom"],
   turbopack: {},
+  experimental: {
+    staticGenerationMaxConcurrency: 2,
+  },
   transpilePackages: [
     "@content-center/core",
     "@content-center/db",
