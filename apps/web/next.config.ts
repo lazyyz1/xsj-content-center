@@ -4,6 +4,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["jsdom"],
   turbopack: {},
   experimental: {
+    cpus: 2,
     staticGenerationMaxConcurrency: 2,
   },
   transpilePackages: [
