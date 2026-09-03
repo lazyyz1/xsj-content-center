@@ -1,7 +1,7 @@
 import "server-only";
 
 import { getSystemProviderConfig, resolveSystemProviderConfig, systemManagedProvidersEnabled } from "@content-center/integrations";
-import { storageHealthFromEnv } from "@content-center/providers";
+import { storageHealthFromEnv } from "@content-center/providers/storage";
 
 async function localFunAsrStatus() {
   const baseUrl = process.env.LOCAL_ASR_ENDPOINT?.trim() || "http://127.0.0.1:8765";
