@@ -9,7 +9,8 @@ import {
   createSourceMetadataEnvelope,
   emptySourceExternalMetrics,
   mergeSourceExternalMetadata,
-  minioStorageFromEnv,
+  buildSourceAssetObjectKey,
+  getStorageProvider,
   readSourceMetadataEnvelope,
   redFoxErrorMetadata,
 } from "@content-center/providers";
@@ -230,7 +231,7 @@ export async function processRedFoxIngestJob(
       },
     });
 
-    const storage = minioStorageFromEnv();
+    const storage = getStorageProvider();
     const mediaFetcher = new MediaFetcher(storage, { allowedTestOrigin: process.env.INGEST_TEST_FIXTURE_ORIGIN });
     let storedCount = 0;
     let storedVideoAssetId: string | undefined;
@@ -246,7 +247,6 @@ export async function processRedFoxIngestJob(
           metadata: media.index === undefined ? undefined : { index: media.index },
         },
       });
-      const storageKey = `workspaces/${record.workspaceId}/sources/${record.sourceItemId}/assets/${asset.id}/original`;
       await progress(record.id, 45, "DOWNLOADING_MEDIA");
       await db.$transaction([
         db.sourceAsset.update({ where: { id: asset.id }, data: { status: "DOWNLOADING" } }),
@@ -265,7 +265,13 @@ export async function processRedFoxIngestJob(
         const downloaded = await mediaFetcher.downloadToStorage({
           remoteUrl: media.url,
           kind: media.type,
-          storageKey,
+          storageKey: ({ mimeType }) => buildSourceAssetObjectKey({
+            workspaceId: record.workspaceId,
+            sourceItemId: record.sourceItemId,
+            assetId: asset.id,
+            assetType: media.type,
+            mimeType,
+          }),
           onBeforeStore: () => progress(record.id, 75, "STORING"),
         });
         const storedAt = new Date();

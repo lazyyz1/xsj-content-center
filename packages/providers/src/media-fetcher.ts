@@ -102,7 +102,7 @@ export class MediaFetcher {
   async downloadToStorage(input: {
     remoteUrl: string;
     kind: MediaKind;
-    storageKey: string;
+    storageKey: string | ((input: { mimeType: string }) => string);
     onBeforeStore?: () => void | Promise<void>;
   }) {
     const maxBytes = input.kind === "VIDEO"
@@ -151,13 +151,14 @@ export class MediaFetcher {
         await pipeline(opened.response, limiter, createWriteStream(tempFile));
         if (sizeBytes === 0) throw new IngestProviderError("EMPTY_MEDIA", "媒体文件为空。", false);
         await input.onBeforeStore?.();
+        const storageKey = typeof input.storageKey === "function" ? input.storageKey({ mimeType }) : input.storageKey;
         await this.storage.upload({
-          key: input.storageKey,
+          key: storageKey,
           body: createReadStream(tempFile),
           contentType: mimeType,
           contentLength: sizeBytes,
         });
-        return { storageKey: input.storageKey, mimeType, sizeBytes, finalUrl: url.toString() };
+        return { storageKey, mimeType, sizeBytes, finalUrl: url.toString() };
       }
       throw new IngestProviderError("TOO_MANY_REDIRECTS", "媒体重定向次数过多。", false);
     } catch (error) {

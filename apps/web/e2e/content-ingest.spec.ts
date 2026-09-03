@@ -60,9 +60,11 @@ test("manual and URL ingest → tags → collection → search with workspace is
   const manualSourceId = new URL(page.url()).pathname.split("/").pop();
   if (!manualSourceId) throw new Error("Missing manual source id");
 
+  await page.getByRole("tab", { name: "信息" }).click();
   await page.getByLabel("新标签").fill("阶段二");
   await page.getByRole("button", { name: "添加标签" }).click();
   await expect(page.getByText("#阶段二")).toBeVisible();
+  await page.getByText("素材集", { exact: true }).click();
   await page.getByLabel("新素材集").fill("重点素材");
   await page.getByRole("button", { name: "新建并加入" }).click();
   await expect(page.getByRole("button", { name: "移出素材集 重点素材" })).toBeVisible();
@@ -91,7 +93,6 @@ test("manual and URL ingest → tags → collection → search with workspace is
   await page.getByRole("button", { name: "提交收录" }).click();
   await expect(page.getByRole("dialog").getByText("处理中", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "查看素材" }).click();
-  await expect(page.getByText("已完成", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole("heading", { name: "E2E Fixture Article" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "E2E Fixture Article" })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/served by the local Playwright fixture/)).toBeVisible();
 });

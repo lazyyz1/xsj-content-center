@@ -55,5 +55,10 @@ export interface StorageProvider {
     contentLength?: number;
   }): Promise<ProviderResult<{ key: string }>>;
   delete(key: string): Promise<ProviderResult<{ key: string }>>;
-  getSignedUrl(key: string, expiresInSeconds?: number): Promise<ProviderResult<{ url: string }>>;
+  getSignedUrl(key: string, expiresInSeconds?: number, options?: StorageSignedUrlOptions): Promise<ProviderResult<{ url: string }>>;
 }
+
+export type StorageSignedUrlOptions = {
+  disposition?: "inline" | "attachment";
+  filename?: string;
+};

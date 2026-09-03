@@ -123,6 +123,7 @@ Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 
 - 显式 Mock Provider：返回 `providerMode: MOCK` 并记录 `MOCK_PROVIDER_USED`。
 - Web 创建 `SYSTEM_HEALTH_CHECK`，Redis/BullMQ Worker 消费并完成任务。
 - MinIO 上传、Signed URL 和删除。
+- Storage 统一使用 S3-compatible Provider：开发环境为 MinIO，生产环境可使用 Cloudflare R2；生产对象保持私有，仅通过 5 分钟短时 Signed URL 播放或下载。
 - Dashboard 的计数来自 Workspace 范围内的数据库查询；空库显示真实的 `0`。
 - 「AI 与外部服务」页面从 Workspace `IntegrationConfig` 读取 RedFox、豆包语音识别、Kimi AI 状态，支持 OWNER/ADMIN 保存、禁用、启用和删除；API 只返回公开配置与 `lastFour`。
 - Provider secret 通过 AES-256-GCM、随机 IV 和认证标签加密保存；Worker 使用同一 Workspace scoped IntegrationService 解密入口。

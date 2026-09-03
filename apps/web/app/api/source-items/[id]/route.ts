@@ -1,7 +1,7 @@
 import { db, findSourceForUser } from "@content-center/db";
 import { NextResponse } from "next/server";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
-import { minioStorageFromEnv, readSourceMetadataEnvelope } from "@content-center/providers";
+import { getStorageProvider, readSourceMetadataEnvelope } from "@content-center/providers";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -14,7 +14,7 @@ export async function GET(_request: Request, route: RouteContext) {
   return NextResponse.json({
     ...source,
     metadata: readSourceMetadataEnvelope(source.metadata),
-    assets: source.assets.map(({ remoteUrl: _remoteUrl, sizeBytes, ...asset }) => ({
+    assets: source.assets.map(({ remoteUrl: _remoteUrl, storageKey: _storageKey, sizeBytes, ...asset }) => ({
       ...asset,
       sizeBytes: sizeBytes?.toString() ?? null,
     })),
@@ -48,7 +48,7 @@ export async function DELETE(_request: Request, route: RouteContext) {
   const source = await findSourceForUser(db, { userId: context.session.user.id, workspaceId: context.workspace.id, sourceItemId: id });
   if (!source) return apiError("NOT_FOUND", 404);
   const storedAssets = source.assets.filter((asset) => asset.storageKey);
-  const storage = storedAssets.length > 0 ? minioStorageFromEnv() : null;
+  const storage = storedAssets.length > 0 ? getStorageProvider() : null;
   for (const asset of storedAssets) {
     if (!asset.storageKey) continue;
     try {

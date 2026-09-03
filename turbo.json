@@ -5,6 +5,7 @@
     "REDIS_URL",
     "AUTH_SECRET",
     "APP_URL",
+    "STORAGE_DRIVER",
     "S3_ENDPOINT",
     "S3_REGION",
     "S3_BUCKET",

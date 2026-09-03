@@ -78,6 +78,16 @@ describe("MediaFetcher", () => {
     expect(storage.uploads[0]).toMatchObject({ key: `asset/${path}`, contentType: mime, contentLength: fixtureBody.length, body: fixtureBody });
   });
 
+  it("allows the key to be built from the detected MIME type", async () => {
+    const { storage, fetcher } = fixture();
+    await fetcher.downloadToStorage({
+      remoteUrl: `${origin}/video`,
+      kind: "VIDEO",
+      storageKey: ({ mimeType }) => `workspaces/w/sources/s/assets/a/original.${mimeType.split("/")[1]}`,
+    });
+    expect(storage.uploads[0]?.key).toBe("workspaces/w/sources/s/assets/a/original.mp4");
+  });
+
   it("rejects a wrong MIME", async () => {
     await expect(fixture().fetcher.downloadToStorage({ remoteUrl: `${origin}/wrong`, kind: "VIDEO", storageKey: "asset/wrong" }))
       .rejects.toMatchObject({ code: "REDFOX_MEDIA_DOWNLOAD_FAILED", retryable: false, providerCode: "INVALID_MEDIA_MIME" });

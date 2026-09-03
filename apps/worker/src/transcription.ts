@@ -23,7 +23,8 @@ import {
   LocalAsrError,
   LocalFunASRTranscriptionProvider,
   MediaProcessorError,
-  minioStorageFromEnv,
+  buildSourceAssetObjectKey,
+  getStorageProvider,
   resolvePublicAddress,
   TranscriptionQualityResolver,
   type LocalAsrBenchmarkProfile,
@@ -486,7 +487,7 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
     );
     if (!video?.storageKey) throw new Error("ASR_VIDEO_NOT_AVAILABLE");
 
-    const storage = minioStorageFromEnv();
+    const storage = getStorageProvider();
     const processor = new FFmpegMediaProcessor();
     await processor.checkAvailability();
     let audio = record.sourceItem.assets
@@ -524,7 +525,13 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
         extractedPath = extracted.path;
         durationMs = extracted.durationMs;
         await updateProgress(record.id, 35, "UPLOADING_AUDIO", plan);
-        const storageKey = `workspaces/${record.workspaceId}/sources/${record.sourceItemId}/assets/${pendingAudio.id}/audio.mp3`;
+        const storageKey = buildSourceAssetObjectKey({
+          workspaceId: record.workspaceId,
+          sourceItemId: record.sourceItemId,
+          assetId: pendingAudio.id,
+          assetType: "AUDIO",
+          mimeType: "audio/mpeg",
+        });
         await storage.upload({
           key: storageKey,
           body: createReadStream(extracted.path),

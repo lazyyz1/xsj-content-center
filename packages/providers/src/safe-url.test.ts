@@ -35,6 +35,14 @@ describe("SSRF protection", () => {
     expect(transport).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts a public R2-style signed URL and still rejects private resolution", async () => {
+    const publicR2Resolver = async (hostname: string) => hostname.endsWith("r2.cloudflarestorage.com")
+      ? [{ address: "104.16.0.1", family: 4 as const }]
+      : [{ address: "10.0.0.2", family: 4 as const }];
+    await expect(resolvePublicAddress("https://account-id.r2.cloudflarestorage.com/private-bucket/object?X-Amz-Signature=test", publicR2Resolver)).resolves.toMatchObject({ url: expect.any(URL) });
+    await expect(resolvePublicAddress("https://internal.example/object", publicR2Resolver)).rejects.toMatchObject({ code: "SSRF_BLOCKED" });
+  });
+
   it("limits redirects", async () => {
     const transport = vi.fn().mockResolvedValue({
       status: 302,

@@ -7,7 +7,7 @@ import {
   IntegrationService,
   type ConfigurableIntegrationProvider,
 } from "@content-center/integrations";
-import { REDFOX_DEFAULT_BASE_URL } from "@content-center/providers";
+import { REDFOX_DEFAULT_BASE_URL, storageHealthFromEnv } from "@content-center/providers";
 
 export type IntegrationDisplayStatus = "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "ERROR" | "DISABLED" | "MOCK";
 
@@ -55,10 +55,6 @@ const providerDetails: Record<ConfigurableIntegrationProvider, { name: string; d
   },
 };
 
-function hasEvery(...keys: string[]): boolean {
-  return keys.every((key) => Boolean(process.env[key]?.trim()));
-}
-
 export async function getIntegrationStatuses(workspaceId: string): Promise<IntegrationDisplay[]> {
   const workspaceIntegrations = await Promise.all(
     CONFIGURABLE_INTEGRATION_PROVIDERS.map(async (provider) => {
@@ -74,13 +70,7 @@ export async function getIntegrationStatuses(workspaceId: string): Promise<Integ
       };
     }),
   );
-  const storageConfigured = hasEvery(
-    "S3_ENDPOINT",
-    "S3_REGION",
-    "S3_BUCKET",
-    "S3_ACCESS_KEY_ID",
-    "S3_SECRET_ACCESS_KEY",
-  );
+  const storageConfigured = storageHealthFromEnv() === "CONFIGURED";
   return [
     ...workspaceIntegrations,
     {

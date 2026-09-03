@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import { db } from "@content-center/db";
 import { IntegrationService } from "@content-center/integrations";
-import { minioStorageFromEnv, readSourceMetadataEnvelope } from "@content-center/providers";
+import { buildSourceAssetObjectKey, minioStorageFromEnv, readSourceMetadataEnvelope } from "@content-center/providers";
 import { QueueEvents } from "bullmq";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONTENT_INGEST, CONTENT_INGEST_QUEUE, createContentIngestQueue, createContentIngestWorker } from "./queue";
@@ -172,7 +172,7 @@ describe("CONTENT_INGEST integration", () => {
     expect(readSourceMetadataEnvelope(storedSource.metadata)?.ingest).toMatchObject({ awemeType: "video", assetCount: 1 });
     const asset = await db.sourceAsset.findFirstOrThrow({ where: { workspaceId, sourceItemId: source.id } });
     expect(asset).toMatchObject({ status: "STORED", assetType: "VIDEO", sourceProvider: "REDFOX", mimeType: "video/mp4" });
-    expect(asset.storageKey).toMatch(new RegExp(`^workspaces/${workspaceId}/sources/${source.id}/assets/${asset.id}/original$`));
+    expect(asset.storageKey).toBe(buildSourceAssetObjectKey({ workspaceId, sourceItemId: source.id, assetId: asset.id, assetType: "VIDEO", mimeType: "video/mp4" }));
     const signedUrl = await minioStorageFromEnv().getSignedUrl(asset.storageKey!);
     const stored = await fetch(signedUrl.data.url);
     expect(stored.status).toBe(200);
