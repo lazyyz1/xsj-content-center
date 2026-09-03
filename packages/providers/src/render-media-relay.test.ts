@@ -24,6 +24,17 @@ describe("RenderMediaRelayStorageProvider", () => {
     expect(() => readRenderMediaRelayConfig({ APP_URL: "https://content.example" })).toThrow("UNCONFIGURED");
   });
 
+  it("accepts Render private hostport references for the internal relay", () => {
+    const config = readRenderMediaRelayConfig({
+      APP_URL: "https://content.example",
+      MEDIA_STORAGE_ROOT: "/var/data/xsj-media",
+      MEDIA_RELAY_INTERNAL_BASE_URL: "xsj-content-web-staging:10000",
+      MEDIA_RELAY_INTERNAL_SECRET: "internal-secret",
+      MEDIA_RELAY_SIGNING_SECRET: "signing-secret",
+    });
+    expect(config.internalBaseUrl).toBe("http://xsj-content-web-staging:10000");
+  });
+
   it("streams upload with scope headers and never submits a raw object key", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       expect(init?.method).toBe("PUT");

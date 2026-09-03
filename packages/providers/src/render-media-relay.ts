@@ -42,6 +42,11 @@ function httpUrl(value: string, field: string) {
   return value.replace(/\/+$/, "");
 }
 
+function internalHttpUrl(value: string) {
+  const withScheme = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `http://${value}`;
+  return httpUrl(withScheme, "MEDIA_RELAY_INTERNAL_BASE_URL");
+}
+
 export function readRenderMediaRelayConfig(env: RenderStorageEnvironment = process.env): RenderMediaRelayStorageConfig {
   return readRenderMediaRelayConfigWithOptions(env);
 }
@@ -51,9 +56,8 @@ export function readRenderMediaRelayConfigWithOptions(
   options: { requireMediaStorageRoot?: boolean } = {},
 ): RenderMediaRelayStorageConfig {
   const publicBaseUrl = httpUrl(required(env, "APP_URL"), "APP_URL");
-  const internalBaseUrl = httpUrl(
+  const internalBaseUrl = internalHttpUrl(
     env.MEDIA_RELAY_INTERNAL_BASE_URL?.trim() || env.MEDIA_RELAY_BASE_URL?.trim() || publicBaseUrl,
-    "MEDIA_RELAY_INTERNAL_BASE_URL",
   );
   return {
     mediaStorageRoot: options.requireMediaStorageRoot === false ? env.MEDIA_STORAGE_ROOT?.trim() || "" : required(env, "MEDIA_STORAGE_ROOT"),
