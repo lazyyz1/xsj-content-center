@@ -8,7 +8,8 @@ services:
     region: singapore
     branch: feat/production-readiness-v1b
     autoDeployTrigger: commit
-    buildCommand: pnpm install --frozen-lockfile && pnpm exec turbo build
+    # Render Free build machines expose many CPUs; cap Next.js static workers to avoid Free-plan OOM.
+    buildCommand: CIRCLE_NODE_TOTAL=2 pnpm install --frozen-lockfile && CIRCLE_NODE_TOTAL=2 pnpm exec turbo build
     # Free services do not support preDeployCommand; migrate deploy is idempotent and runs before start.
     startCommand: pnpm db:migrate && pnpm --filter @content-center/web start
     healthCheckPath: /login
