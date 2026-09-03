@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { ASR_AUDIO_SIGNED_URL_TTL_SECONDS, MAX_ASR_BINARY_DATA_BYTES } from "@content-center/config";
+import { ASR_AUDIO_SIGNED_URL_TTL_SECONDS, MAX_ASR_BINARY_DATA_BYTES, readAsrAudioRetentionHours } from "@content-center/config";
 import { db, type Prisma } from "@content-center/db";
 import {
   DOUBAO_DEFAULT_BASE_URL,
@@ -306,6 +306,30 @@ export function transcriptionUsageOperation(provider: TranscriptionProviderName,
   return protocol === "RECORDING_FILE_2_0" ? "TRANSCRIBE_RECORDING_FILE_2_0" as const : "TRANSCRIBE_FLASH" as const;
 }
 
+export async function cleanupExpiredAsrAudio(now = Date.now()) {
+  const retentionHours = readAsrAudioRetentionHours();
+  const cutoff = new Date(now - retentionHours * 60 * 60 * 1_000);
+  const assets = await db.sourceAsset.findMany({
+    where: { assetType: "AUDIO", status: "STORED", storageKey: { not: null }, storedAt: { lt: cutoff } },
+    select: { id: true, workspaceId: true, sourceItemId: true, storageKey: true },
+    take: 100,
+  });
+  const storage = assets.length > 0 ? getStorageProvider() : null;
+  let cleaned = 0;
+  for (const asset of assets) {
+    if (!asset.storageKey || !storage) continue;
+    try {
+      await storage.delete(asset.storageKey, { workspaceId: asset.workspaceId, sourceItemId: asset.sourceItemId, assetId: asset.id });
+      await db.sourceAsset.update({ where: { id: asset.id }, data: { status: "FAILED", storageKey: null, sizeBytes: null, storedAt: null } });
+      cleaned += 1;
+    } catch {
+      // Keep STORED when physical deletion fails so the asset remains retryable and discoverable.
+      console.warn("ASR_AUDIO_CLEANUP_FAILED", { assetId: asset.id });
+    }
+  }
+  return { scanned: assets.length, cleaned };
+}
+
 async function localAudioInput(input: { signedUrl: string; extractedPath?: string }): Promise<TranscriptionInput> {
   if (input.extractedPath) return { audio: { mode: "BINARY_DATA", data: await readFile(input.extractedPath) }, contentType: "audio/mpeg" };
   const response = await fetch(input.signedUrl, { signal: AbortSignal.timeout(120_000) });
@@ -519,7 +543,9 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
         },
       });
       try {
-        const videoUrl = (await storage.getSignedUrl(video.storageKey, 15 * 60)).data.url;
+        const videoUrl = (await storage.getSignedUrl(video.storageKey, 15 * 60, {
+          assetScope: { workspaceId: record.workspaceId, sourceItemId: record.sourceItemId, assetId: video.id },
+        })).data.url;
         const extracted = await processor.extractAudio(videoUrl, { limits: plan.provider === "DOUBAO_ASR" && plan.protocol !== "RECORDING_FILE_2_0" ? "DOUBAO_FLASH" : "NONE" });
         cleanup = extracted.cleanup;
         extractedPath = extracted.path;
@@ -537,6 +563,7 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
           body: createReadStream(extracted.path),
           contentType: "audio/mpeg",
           contentLength: extracted.sizeBytes,
+          assetScope: { workspaceId: record.workspaceId, sourceItemId: record.sourceItemId, assetId: pendingAudio.id },
         });
         audio = await db.sourceAsset.update({
           where: { id: pendingAudio.id },
@@ -570,7 +597,10 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
     }
     const sizeBytes = Number(audio.sizeBytes);
     if (plan.provider === "DOUBAO_ASR" && plan.protocol !== "RECORDING_FILE_2_0") assertFlashAudioLimits({ sizeBytes, durationMs });
-    const signedUrl = (await storage.getSignedUrl(audio.storageKey, ASR_AUDIO_SIGNED_URL_TTL_SECONDS)).data.url;
+    const signedUrl = (await storage.getSignedUrl(audio.storageKey, ASR_AUDIO_SIGNED_URL_TTL_SECONDS, {
+      assetScope: { workspaceId: record.workspaceId, sourceItemId: record.sourceItemId, assetId: audio.id },
+      purpose: plan.provider === "DOUBAO_ASR" ? "doubao" : "browser",
+    })).data.url;
     const providerInput = plan.provider === "LOCAL_FUNASR"
       ? await localAudioInput({ signedUrl, extractedPath })
       : await doubaoAudioInput({ signedUrl, sizeBytes, extractedPath });
@@ -585,6 +615,7 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
       qualityMode: plan.qualityMode,
       processingMs: result.metadata.processingMs,
       fallbackUsed: Boolean(result.fallbackUsed || plan.fallbackUsed),
+      audioRetentionHours: readAsrAudioRetentionHours(),
       technical: result.metadata,
     };
     await db.$transaction(async (tx) => {

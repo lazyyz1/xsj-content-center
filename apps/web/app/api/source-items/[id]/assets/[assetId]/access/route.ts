@@ -26,6 +26,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const signed = await getStorageProvider().getSignedUrl(asset.storageKey, ACCESS_TTL_SECONDS, {
       disposition,
       filename: disposition === "attachment" ? "source-asset" : undefined,
+      assetScope: { workspaceId: context.workspace.id, sourceItemId: source.id, assetId: asset.id },
     });
     return NextResponse.json({ url: signed.data.url, expiresInSeconds: ACCESS_TTL_SECONDS, disposition });
   } catch (error) {

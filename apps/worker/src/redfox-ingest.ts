@@ -272,6 +272,11 @@ export async function processRedFoxIngestJob(
             assetType: media.type,
             mimeType,
           }),
+          assetScope: {
+            workspaceId: record.workspaceId,
+            sourceItemId: record.sourceItemId,
+            assetId: asset.id,
+          },
           onBeforeStore: () => progress(record.id, 75, "STORING"),
         });
         const storedAt = new Date();

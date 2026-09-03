@@ -81,7 +81,7 @@ export async function getIntegrationStatuses(workspaceId: string): Promise<Integ
       publicConfig: {},
       lastFour: null,
       updatedAt: null,
-      description: "S3-compatible 对象存储，由服务端环境变量管理。",
+      description: "Render Media Relay（生产）或 S3-compatible（开发/可选回退），由服务端环境变量管理。",
       usage: ["素材文件与音视频保存"],
       defaults: {},
       managedBy: "ENVIRONMENT",

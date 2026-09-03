@@ -30,6 +30,8 @@ pnpm dev
 
 Web 默认运行在 `http://localhost:3000`，MinIO Console 默认运行在 `http://localhost:9001`。
 
+生产 V1 使用 Render Media Relay：Render Web 独占 Persistent Disk，Worker 通过受保护的内部 HTTP 流式读写；MinIO / S3-compatible（包括 R2 兼容配置）保留为可选部署模式。配置与安全边界见 [`docs/render-media-storage.md`](docs/render-media-storage.md) 和 [`docs/production-storage.md`](docs/production-storage.md)。
+
 ## Services
 
 | Service | 用途 | 默认端口 |
@@ -123,17 +125,17 @@ Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 
 - 显式 Mock Provider：返回 `providerMode: MOCK` 并记录 `MOCK_PROVIDER_USED`。
 - Web 创建 `SYSTEM_HEALTH_CHECK`，Redis/BullMQ Worker 消费并完成任务。
 - MinIO 上传、Signed URL 和删除。
-- Storage 统一使用 S3-compatible Provider：开发环境为 MinIO，生产环境可使用 Cloudflare R2；生产对象保持私有，仅通过 5 分钟短时 Signed URL 播放或下载。
+- Storage 统一使用 `StorageProvider`：开发默认 MinIO / S3-compatible，生产 V1 默认 Render Media Relay；对象保持私有，仅通过 5 分钟短时 URL 播放或下载。S3-compatible（包括 R2）是可选回退模式。
 - Dashboard 的计数来自 Workspace 范围内的数据库查询；空库显示真实的 `0`。
 - 「AI 与外部服务」页面从 Workspace `IntegrationConfig` 读取 RedFox、豆包语音识别、Kimi AI 状态，支持 OWNER/ADMIN 保存、禁用、启用和删除；API 只返回公开配置与 `lastFour`。
 - Provider secret 通过 AES-256-GCM、随机 IV 和认证标签加密保存；Worker 使用同一 Workspace scoped IntegrationService 解密入口。
 - Storage 继续由服务端环境变量管理，并明确显示 `Environment Managed`。
 - RedFoxSourceProvider：只开放明确的抖音作品链接/分享文案，使用 Workspace 解密后的 API Key 调用真实 RedFox 解析协议。
-- RedFox 媒体经 SSRF/DNS/重定向/超时/大小/MIME 校验后流式落入私有 MinIO，素材页只使用 5 分钟 Signed URL。
+- RedFox 媒体经 SSRF/DNS/重定向/超时/大小/MIME 校验后流式落入当前 StorageProvider；Render 生产由 Web Persistent Disk 持有，素材页只使用 5 分钟受保护 URL。
 - `SourceAsset` 显式记录 REMOTE/DOWNLOADING/STORED/FAILED；至少一个 Asset 为 STORED 才允许 SourceItem READY。
 - `ApiUsage` 对每次 RedFox `PARSE_WORK` 调用记录 1 unit；官方未返回成本时 `cost = null`。
 - READY 抖音 canonical URL 在同一 Workspace 内禁止重复收录，避免重复调用；FAILED 素材可显式重试。
-- `TRANSCRIBE_SOURCE` 独立队列：已保存视频通过 FFmpeg 提取 MP3（mono / 16 kHz / 64 kbps），落入私有 MinIO 后调用真实 DoubaoTranscriptionProvider。
+- `TRANSCRIBE_SOURCE` 独立队列：已保存视频通过 FFmpeg 提取 MP3（mono / 16 kHz / 64 kbps），通过当前 StorageProvider 保存后调用真实 DoubaoTranscriptionProvider。
 - 同一 `TRANSCRIBE_SOURCE` 队列支持默认免费本地 FunASR；`TranscriptionQualityResolver` 根据硬件、已安装模型和本机 benchmark 解析质量档，本地失败不会默认转豆包。
 - Doubao 支持公网 Signed URL 和受控小文件 `audio.data` 两条输入路径；localhost 不会作为远端音频地址交给云端。
 - Transcript 显式标记 `DOUBAO_ASR / REAL`，展示全文和毫秒分段；允许 OWNER/ADMIN/EDITOR 转写或重新转写，VIEWER 只读。
@@ -168,6 +170,7 @@ Prisma 固定在 `6.19.3`：阶段初始化时 `prisma` 的 npm `latest` 指向 
 - 极速 ASR 在调用前强制检查 2 小时 / 100 MB 限制；私网音频只有在不超过 20 MB 时才允许二进制上传。
 - 网页正文只保存和渲染 normalized plain text，不把远端 HTML 注入页面。
 - `IntegrationConfig` 将 public config 与 AES-256-GCM encrypted secret 分开保存；缺少 master key 时 fail closed，不写明文。
+- Render Media Relay 的内部 Secret 和签名 Secret 只在 Web/Worker 服务端环境变量中使用；内部上传/读取/删除要求 workspace/source/asset 三重 scope，公网媒体 token 有效期最多按用途控制为 5/15 分钟。
 - 真实外部发布必须等待后续阶段实现 `APPROVED` 人工审核门。
 
 ## Reference Research

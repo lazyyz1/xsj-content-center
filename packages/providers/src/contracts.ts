@@ -53,12 +53,21 @@ export interface StorageProvider {
     body: Uint8Array | Readable;
     contentType?: string;
     contentLength?: number;
+    assetScope?: StorageAssetScope;
   }): Promise<ProviderResult<{ key: string }>>;
-  delete(key: string): Promise<ProviderResult<{ key: string }>>;
+  delete(key: string, assetScope?: StorageAssetScope): Promise<ProviderResult<{ key: string }>>;
   getSignedUrl(key: string, expiresInSeconds?: number, options?: StorageSignedUrlOptions): Promise<ProviderResult<{ url: string }>>;
 }
+
+export type StorageAssetScope = {
+  workspaceId: string;
+  sourceItemId: string;
+  assetId: string;
+};
 
 export type StorageSignedUrlOptions = {
   disposition?: "inline" | "attachment";
   filename?: string;
+  purpose?: "browser" | "doubao";
+  assetScope?: StorageAssetScope;
 };

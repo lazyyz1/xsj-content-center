@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { auth } from "@/lib/auth";
 import { db, ensurePersonalWorkspaceForUser } from "@content-center/db";
-import { buildSourceAssetObjectKey, getStorageProvider } from "@content-center/providers";
+import { buildSourceAssetObjectKey, createMediaRelayToken, getStorageProvider } from "@content-center/providers";
 import { expect, test, type Page } from "@playwright/test";
 
 const runId = randomUUID();
@@ -41,8 +41,8 @@ test.beforeAll(async () => {
   const keyA = buildSourceAssetObjectKey({ workspaceId: a.workspaceId, sourceItemId: sourceA.id, assetId: assetA.id, assetType: "VIDEO", mimeType: "video/mp4" });
   const keyB = buildSourceAssetObjectKey({ workspaceId: b.workspaceId, sourceItemId: sourceB.id, assetId: assetB.id, assetType: "VIDEO", mimeType: "video/mp4" });
   await Promise.all([
-    storage.upload({ key: keyA, body: new TextEncoder().encode("private asset A"), contentType: "video/mp4" }),
-    storage.upload({ key: keyB, body: new TextEncoder().encode("private asset B"), contentType: "video/mp4" }),
+    storage.upload({ key: keyA, body: new TextEncoder().encode("private asset A"), contentType: "video/mp4", assetScope: { workspaceId: a.workspaceId, sourceItemId: sourceA.id, assetId: assetA.id } }),
+    storage.upload({ key: keyB, body: new TextEncoder().encode("private asset B"), contentType: "video/mp4", assetScope: { workspaceId: b.workspaceId, sourceItemId: sourceB.id, assetId: assetB.id } }),
     db.sourceAsset.update({ where: { id: assetA.id }, data: { storageKey: keyA } }),
     db.sourceAsset.update({ where: { id: assetB.id }, data: { storageKey: keyB } }),
   ]);
@@ -55,9 +55,9 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   const users = await db.user.findMany({ where: { email: { in: [emails.a, emails.b] } }, select: { id: true } });
   const userIds = users.map(({ id }) => id);
-  const assets = await db.sourceAsset.findMany({ where: { id: { in: [ids.assetA, ids.assetB].filter((id): id is string => Boolean(id)) } }, select: { storageKey: true } });
+  const assets = await db.sourceAsset.findMany({ where: { id: { in: [ids.assetA, ids.assetB].filter((id): id is string => Boolean(id)) } }, select: { id: true, workspaceId: true, sourceItemId: true, storageKey: true } });
   const storage = getStorageProvider();
-  for (const asset of assets) if (asset.storageKey) await storage.delete(asset.storageKey);
+  for (const asset of assets) if (asset.storageKey) await storage.delete(asset.storageKey, { workspaceId: asset.workspaceId, sourceItemId: asset.sourceItemId, assetId: asset.id });
   if (userIds.length) await db.workspace.deleteMany({ where: { members: { some: { userId: { in: userIds } } } } });
   await db.user.deleteMany({ where: { id: { in: userIds } } });
   await db.$disconnect();
@@ -69,7 +69,8 @@ test("signs only the current user's stored asset and never accepts a raw objectK
   expect(own.status()).toBe(200);
   const ownBody = await own.json() as { url: string; expiresInSeconds: number; disposition: string; storageKey?: string };
   expect(ownBody).toMatchObject({ expiresInSeconds: 300, disposition: "attachment" });
-  expect(ownBody.url).toContain("X-Amz-Signature");
+  if (process.env.STORAGE_DRIVER === "RENDER_MEDIA_RELAY") expect(ownBody.url).toContain("/api/media/");
+  else expect(ownBody.url).toContain("X-Amz-Signature");
   expect(JSON.stringify(ownBody)).not.toContain("storageKey");
   expect((await page.request.get(ownBody.url)).status()).toBe(200);
   const sourceBody = await (await page.request.get(`/api/source-items/${ids.sourceA}`)).json();
@@ -79,4 +80,14 @@ test("signs only the current user's stored asset and never accepts a raw objectK
   expect((await page.request.get(`/api/source-items/${ids.sourceA}/assets/${ids.assetB}/access`)).status()).toBe(404);
   expect((await page.request.get(`/api/source-items/${ids.sourceA}/assets/${ids.assetA}/access?objectKey=workspaces/other/private`)).status()).toBe(400);
   expect((await page.request.get(`/api/storage/access?objectKey=${encodeURIComponent("workspaces/other/private")}`)).status()).toBe(404);
+  if (process.env.STORAGE_DRIVER === "RENDER_MEDIA_RELAY") {
+    const expired = createMediaRelayToken({
+      scope: { workspaceId: "unknown-workspace", sourceItemId: "unknown-source", assetId: "unknown-asset" },
+      expiresInSeconds: 1,
+      secret: process.env.MEDIA_RELAY_SIGNING_SECRET || "test-signing-secret",
+      now: Date.now() - 5_000,
+    });
+    expect((await page.request.get(`/api/media/${expired}`)).status()).toBe(404);
+    expect((await page.request.put(`/api/internal/media-storage/${ids.assetA}`, { data: "browser cannot upload" })).status()).toBe(404);
+  }
 });

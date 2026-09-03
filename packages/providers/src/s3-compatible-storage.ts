@@ -8,6 +8,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { StorageProvider, StorageSignedUrlOptions } from "./contracts";
+import { renderMediaRelayStorageFromEnv, readRenderMediaRelayConfig } from "./render-media-relay";
 
 export type S3CompatibleStorageConfig = {
   endpoint: string;
@@ -67,7 +68,8 @@ export function readS3CompatibleStorageConfig(env: StorageEnvironment = process.
 
 export function storageHealthFromEnv(env: StorageEnvironment = process.env): "CONFIGURED" | "UNCONFIGURED" {
   try {
-    readS3CompatibleStorageConfig(env);
+    if ((env.STORAGE_DRIVER?.trim() || "S3_COMPATIBLE") === "RENDER_MEDIA_RELAY") readRenderMediaRelayConfig(env);
+    else readS3CompatibleStorageConfig(env);
     return "CONFIGURED";
   } catch {
     return "UNCONFIGURED";
@@ -134,11 +136,13 @@ export class S3CompatibleStorageProvider implements StorageProvider {
   }
 }
 
-export function getStorageProvider(): S3CompatibleStorageProvider {
+export function getStorageProvider(): StorageProvider {
+  const driver = process.env.STORAGE_DRIVER?.trim() || "S3_COMPATIBLE";
+  if (driver === "RENDER_MEDIA_RELAY") return renderMediaRelayStorageFromEnv();
   return new S3CompatibleStorageProvider(readS3CompatibleStorageConfig());
 }
 
 /** @deprecated Use getStorageProvider. Kept for existing integrations and tests. */
 export function minioStorageFromEnv(): S3CompatibleStorageProvider {
-  return getStorageProvider();
+  return new S3CompatibleStorageProvider(readS3CompatibleStorageConfig());
 }

@@ -52,7 +52,11 @@ export async function DELETE(_request: Request, route: RouteContext) {
   for (const asset of storedAssets) {
     if (!asset.storageKey) continue;
     try {
-      await storage!.delete(asset.storageKey!);
+      await storage!.delete(asset.storageKey!, {
+        workspaceId: context.workspace.id,
+        sourceItemId: source.id,
+        assetId: asset.id,
+      });
     } catch {
       await db.auditLog.create({
         data: {

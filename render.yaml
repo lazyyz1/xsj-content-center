@@ -1,0 +1,78 @@
+services:
+  - type: web
+    name: xsj-content-center-web
+    runtime: node
+    buildCommand: pnpm install --frozen-lockfile && pnpm exec turbo build
+    startCommand: pnpm --filter @content-center/web start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: STORAGE_DRIVER
+        value: RENDER_MEDIA_RELAY
+      - key: MEDIA_STORAGE_ROOT
+        value: /var/data/xsj-media
+      - key: APP_URL
+        sync: false
+      - key: MEDIA_RELAY_INTERNAL_BASE_URL
+        sync: false
+      - key: MEDIA_RELAY_INTERNAL_SECRET
+        sync: false
+      - key: MEDIA_RELAY_SIGNING_SECRET
+        sync: false
+      - key: ASR_AUDIO_RETENTION_HOURS
+        value: "24"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: xsj-content-center-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: xsj-content-center-kv
+          property: connectionString
+      - key: AUTH_SECRET
+        sync: false
+      - key: INTEGRATION_ENCRYPTION_KEY
+        sync: false
+    disk:
+      name: xsj-content-center-media
+      mountPath: /var/data
+      sizeGB: 10
+
+  - type: worker
+    name: xsj-content-center-worker
+    runtime: node
+    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @content-center/worker build
+    startCommand: pnpm --filter @content-center/worker start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: STORAGE_DRIVER
+        value: RENDER_MEDIA_RELAY
+      - key: MEDIA_RELAY_INTERNAL_BASE_URL
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: MEDIA_RELAY_INTERNAL_SECRET
+        sync: false
+      - key: MEDIA_RELAY_SIGNING_SECRET
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: xsj-content-center-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: xsj-content-center-kv
+          property: connectionString
+      - key: AUTH_SECRET
+        sync: false
+      - key: INTEGRATION_ENCRYPTION_KEY
+        sync: false
+
+  - type: keyvalue
+    name: xsj-content-center-kv
+
+databases:
+  - name: xsj-content-center-db

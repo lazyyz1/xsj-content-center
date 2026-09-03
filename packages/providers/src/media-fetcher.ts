@@ -13,7 +13,7 @@ import {
   MEDIA_DOWNLOAD_MAX_REDIRECTS,
   MEDIA_DOWNLOAD_TIMEOUT_MS,
 } from "@content-center/config";
-import type { StorageProvider } from "./contracts";
+import type { StorageAssetScope, StorageProvider } from "./contracts";
 import { IngestProviderError } from "./ingest-error";
 import { resolvePublicAddress, type AddressResolver, type ResolvedAddress } from "./safe-url";
 import { RedFoxError } from "./redfox/errors";
@@ -103,6 +103,7 @@ export class MediaFetcher {
     remoteUrl: string;
     kind: MediaKind;
     storageKey: string | ((input: { mimeType: string }) => string);
+    assetScope?: StorageAssetScope;
     onBeforeStore?: () => void | Promise<void>;
   }) {
     const maxBytes = input.kind === "VIDEO"
@@ -157,6 +158,7 @@ export class MediaFetcher {
           body: createReadStream(tempFile),
           contentType: mimeType,
           contentLength: sizeBytes,
+          assetScope: input.assetScope,
         });
         return { storageKey, mimeType, sizeBytes, finalUrl: url.toString() };
       }

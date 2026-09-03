@@ -48,7 +48,9 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
   const transcriptionBusy = latestTranscription?.status === "QUEUED" || latestTranscription?.status === "RUNNING";
   const stored = source.assets.filter((asset) => asset.status === "STORED" && asset.storageKey && asset.assetType !== "AUDIO");
   const storage = stored.length ? getStorageProvider() : null;
-  const playable = await Promise.all(stored.map(async (asset) => ({ ...asset, signedUrl: (await storage!.getSignedUrl(asset.storageKey!, 300)).data.url })));
+  const playable = await Promise.all(stored.map(async (asset) => ({ ...asset, signedUrl: (await storage!.getSignedUrl(asset.storageKey!, 300, {
+    assetScope: { workspaceId: workspace.id, sourceItemId: source.id, assetId: asset.id },
+  })).data.url })));
   const [doubao, transcription, localAsr] = source.sourcePlatform === "DOUYIN" ? await Promise.all([integration.getIntegrationStatus(workspace.id, "DOUBAO_ASR"), integration.getIntegrationStatus(workspace.id, "TRANSCRIPTION"), getLocalAsrDisplay(workspace.id)]) : [null, null, null];
   const transcriptionConfig = parseProviderConfig("TRANSCRIPTION", transcription?.publicConfig ?? {}) as { source: "LOCAL_FUNASR" | "DOUBAO"; qualityMode: "FAST" | "BALANCED" | "QUALITY" };
   const selectedQuality = localAsr?.qualityModes[transcriptionConfig.qualityMode];
