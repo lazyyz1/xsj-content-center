@@ -88,9 +88,9 @@ test("OWNER configures RedFox and ingests a Douyin video into private MinIO stor
   await page.getByLabel("RedFox Base URL").fill(fixtureOrigin);
   await page.getByLabel("RedFox API Key").fill("ak_redfox_e2e_fixture");
   await page.getByLabel("RedFox 配置").getByRole("button", { name: "保存配置" }).click();
-  await expect(page.getByRole("button", { name: "配置格式有效 · 无轻量 Live Test" }).first()).toBeVisible();
+  await expect(page.getByText("已配置", { exact: true }).first()).toBeVisible();
   await page.getByLabel("RedFox 配置").getByRole("button", { name: "禁用" }).click();
-  await expect(page.getByText("Disabled", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("已禁用", { exact: true }).first()).toBeVisible();
 
   await page.goto("/library");
   await page.getByRole("button", { name: "收录内容" }).click();
@@ -112,11 +112,11 @@ test("OWNER configures RedFox and ingests a Douyin video into private MinIO stor
   await page.getByRole("link", { name: "查看素材" }).click();
   await expect(page.getByText("已完成", { exact: true }).first()).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole("heading", { name: "RedFox E2E 真实链路" })).toBeVisible();
-  await page.getByText("高级信息与处理记录", { exact: true }).click();
-  await expect(page.getByRole("cell", { name: "REDFOX", exact: true })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "REAL", exact: true })).toBeVisible();
-  await expect(page.getByText("豆包 ASR 未配置。", { exact: false })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "视频转写" })).toBeVisible();
+  await page.getByRole("tab", { name: "处理", exact: true }).click();
+  await page.getByText("高级处理信息", { exact: true }).click();
+  await expect(page.getByText(/PROCESS_MEDIA · SUCCEEDED · REAL/)).toBeVisible();
+  await expect(page.getByText("语音转写服务暂时不可用，请联系管理员。", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "转写文本" })).toBeVisible();
   const video = page.locator("video");
   await expect(video).toBeVisible();
   const signedUrl = await video.getAttribute("src");
@@ -145,6 +145,7 @@ test("OWNER configures RedFox and ingests a Douyin video into private MinIO stor
   expect(parseCalls).toBe(1);
   await page.getByRole("link", { name: "查看已有素材" }).click();
   page.once("dialog", (dialog) => dialog.accept());
+  await page.getByLabel("更多操作").click();
   await page.getByRole("button", { name: "删除" }).click();
   await expect(page).toHaveURL(/\/library$/);
   await expect(db.sourceItem.findUnique({ where: { id: sourceId } })).resolves.toBeNull();
