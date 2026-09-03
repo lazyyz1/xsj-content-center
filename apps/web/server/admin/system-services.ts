@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getSystemProviderConfig, systemManagedProvidersEnabled } from "@content-center/integrations";
+import { getSystemProviderConfig, resolveSystemProviderConfig, systemManagedProvidersEnabled } from "@content-center/integrations";
 
 const configured = (...names: string[]) => names.every((name) => Boolean(process.env[name]?.trim()));
 
@@ -22,7 +22,7 @@ export async function getSystemServiceStatuses() {
     policy: systemManagedProvidersEnabled() ? "ENV_MANAGED" as const : "WORKSPACE_MANAGED" as const,
     kimi: getSystemProviderConfig("LLM") ? "CONFIGURED" as const : "UNCONFIGURED" as const,
     redfox: getSystemProviderConfig("REDFOX") ? "CONFIGURED" as const : "UNCONFIGURED" as const,
-    doubao: getSystemProviderConfig("DOUBAO_ASR") ? "CONFIGURED" as const : "UNCONFIGURED" as const,
+    doubao: (await resolveSystemProviderConfig("DOUBAO_ASR")) ? "CONFIGURED" as const : "UNCONFIGURED" as const,
     localFunAsr: await localFunAsrStatus(),
     storage: configured("S3_ENDPOINT", "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY")
       ? "CONFIGURED" as const

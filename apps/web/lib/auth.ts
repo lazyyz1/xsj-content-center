@@ -8,5 +8,15 @@ export const auth = betterAuth({
   secret: process.env.AUTH_SECRET,
   database: prismaAdapter(db, { provider: "postgresql" }),
   emailAndPassword: { enabled: true },
+  databaseHooks: {
+    session: {
+      create: {
+        before: async (session) => {
+          const user = await db.user.findUnique({ where: { id: session.userId }, select: { disabledAt: true } });
+          if (user?.disabledAt) return false;
+        },
+      },
+    },
+  },
   trustedOrigins: process.env.APP_URL ? [process.env.APP_URL] : [],
 });

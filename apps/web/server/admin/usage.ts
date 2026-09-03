@@ -1,6 +1,7 @@
 import "server-only";
 
-import { db, type Prisma } from "@content-center/db";
+import { db } from "@content-center/db";
+import { successfulTranscriptionDurationMs } from "../../lib/transcription-usage";
 
 export type UsageRange = "today" | "7d" | "month";
 
@@ -8,15 +9,6 @@ function rangeStart(range: UsageRange, now = new Date()) {
   if (range === "7d") return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1_000);
   if (range === "month") return new Date(now.getFullYear(), now.getMonth(), 1);
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-}
-
-function object(value: Prisma.JsonValue | null): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-function durationMs(value: Prisma.JsonValue | null) {
-  const raw = object(value).durationMs;
-  return typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
 }
 
 export async function getAdminUsage(range: UsageRange, selectedUserId?: string) {
@@ -56,9 +48,9 @@ export async function getAdminUsage(range: UsageRange, selectedUserId?: string) 
       redfoxCalls: redfox.length,
       redfoxSuccess: redfox.filter((row) => row.success).length,
       redfoxFailed: redfox.filter((row) => !row.success).length,
-      transcriptionMinutes: Math.round(asr.reduce((sum, row) => sum + durationMs(row.metadata), 0) / 60_000 * 10) / 10,
-      doubaoMinutes: Math.round(asr.filter((row) => row.provider === "DOUBAO_ASR").reduce((sum, row) => sum + durationMs(row.metadata), 0) / 60_000 * 10) / 10,
-      localFunAsrMinutes: Math.round(asr.filter((row) => row.provider === "LOCAL_FUNASR").reduce((sum, row) => sum + durationMs(row.metadata), 0) / 60_000 * 10) / 10,
+      transcriptionMinutes: Math.round(successfulTranscriptionDurationMs(asr) / 60_000 * 10) / 10,
+      doubaoMinutes: Math.round(successfulTranscriptionDurationMs(asr.filter((row) => row.provider === "DOUBAO_ASR")) / 60_000 * 10) / 10,
+      localFunAsrMinutes: Math.round(successfulTranscriptionDurationMs(asr.filter((row) => row.provider === "LOCAL_FUNASR")) / 60_000 * 10) / 10,
       asrFailed: asr.filter((row) => !row.success).length,
       materialCount: materialCounts.find((item) => item.createdById === user.id)?._count._all ?? 0,
       projectCount: projectCounts.find((item) => item.createdById === user.id)?._count._all ?? 0,

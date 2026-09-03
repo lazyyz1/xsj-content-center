@@ -137,8 +137,8 @@ export function DeepContentWorkspace({ projectId, initialPackage, editable, inte
   return <section className="space-y-5">
     <Card className="p-4"><p className="text-xs font-medium text-[var(--text-secondary)]">推荐顺序</p><p className="mt-2 text-sm">1 素材 → 2 观点 / 证据 → 3 深度创作包 → 4 复制给 GPT → 5 导入核心母稿 → 6 多平台适配</p></Card>
     <Card className="p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">深度创作包</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">整理选题、观点、证据、表达和结构，保存后再交给最终主笔。</p></div><div className="flex gap-2"><Badge>{integrationStatus === "MOCK" ? "MOCK MODE" : integrationStatus}</Badge>{saved ? <Badge>v{saved.version} · {saved.status === "READY" ? "已保存" : saved.status}</Badge> : null}</div></div>
-      {!configured ? <p className="mt-4 rounded-xl border border-dashed p-4 text-sm">{integrationStatus === "DISABLED" ? "AI 模型已禁用" : "UNCONFIGURED：尚未配置内容空间 AI 模型"}</p> : null}
+      <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">深度创作包</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">整理选题、观点、证据、表达和结构，保存后再交给最终主笔。</p></div><div className="flex gap-2">{saved ? <Badge>v{saved.version} · {saved.status === "READY" ? "已保存" : saved.status}</Badge> : null}</div></div>
+      {!configured ? <p className="mt-4 rounded-xl border border-dashed p-4 text-sm">内容生成服务暂时不可用，请联系管理员。</p> : null}
       {editable && configured ? <div className="mt-4 flex gap-2"><Button disabled={busy} onClick={generate}>{saved ? "重新生成深度创作包" : "生成深度创作包"}</Button></div> : null}
       {busy ? <p role="status" className="mt-3 text-sm text-[var(--text-secondary)]">正在处理…</p> : null}
       {error ? <p role="alert" className="mt-3 text-sm text-[var(--danger)]">{error}</p> : null}

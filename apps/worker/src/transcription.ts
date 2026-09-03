@@ -272,6 +272,7 @@ async function recordUsage(input: {
   success: boolean;
   providerRequestId?: string;
   metadata?: Record<string, unknown>;
+  protocol?: "FLASH" | "RECORDING_FILE_2_0";
   errorCode?: string;
 }) {
   await db.apiUsage.create({
@@ -279,7 +280,7 @@ async function recordUsage(input: {
       workspaceId: input.record.workspaceId,
       userId: input.record.requestedById,
       provider: input.provider,
-      operation: input.provider === "LOCAL_FUNASR" ? "TRANSCRIBE_LOCAL" : input.metadata?.protocol === "RECORDING_FILE_2_0" ? "TRANSCRIBE_RECORDING_FILE_2_0" : "TRANSCRIBE_FLASH",
+      operation: transcriptionUsageOperation(input.provider, input.protocol ?? (input.metadata?.protocol as "FLASH" | "RECORDING_FILE_2_0" | undefined)),
       requestId: `${input.record.id}:${input.attempt}:${input.provider}`,
       providerRequestId: input.providerRequestId,
       success: input.success,
@@ -297,6 +298,11 @@ async function recordUsage(input: {
       }),
     },
   });
+}
+
+export function transcriptionUsageOperation(provider: TranscriptionProviderName, protocol?: "FLASH" | "RECORDING_FILE_2_0") {
+  if (provider === "LOCAL_FUNASR") return "TRANSCRIBE_LOCAL" as const;
+  return protocol === "RECORDING_FILE_2_0" ? "TRANSCRIBE_RECORDING_FILE_2_0" as const : "TRANSCRIBE_FLASH" as const;
 }
 
 async function localAudioInput(input: { signedUrl: string; extractedPath?: string }): Promise<TranscriptionInput> {
@@ -399,6 +405,7 @@ async function transcribeWithProvider(input: {
       durationMs: input.durationMs,
       processingMs: Date.now() - started,
       success: true,
+      protocol: recordingFile ? "RECORDING_FILE_2_0" : "FLASH",
       providerRequestId: metadata.providerRequestId,
       metadata: { ...metadata, protocol: recordingFile ? "RECORDING_FILE_2_0" : "FLASH" },
     });
@@ -413,6 +420,7 @@ async function transcribeWithProvider(input: {
       durationMs: input.durationMs,
       processingMs: Date.now() - started,
       success: false,
+      protocol: recordingFile ? "RECORDING_FILE_2_0" : "FLASH",
       providerRequestId: metadata.providerRequestId,
       metadata: { ...metadata, ...errorMetadata },
       errorCode: error instanceof DoubaoError ? error.code : "DOUBAO_INVALID_RESPONSE",

@@ -85,7 +85,6 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
         <section aria-label="素材列表" className={listView ? "grid gap-3" : "grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"}>
           {items.map((item) => {
             const latestJob = item.ingestJobs[0];
-            const isMock = item.transcript?.providerMode === "MOCK" || latestJob?.providerMode === "MOCK";
             const processing = getSourceProcessingState({
               sourceStatus: item.status,
               hasTranscript: Boolean(item.transcript),
@@ -99,7 +98,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
                   {item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" className="h-full w-full rounded-[inherit] object-cover" /> : <div className="grid h-full place-items-center text-xs text-[var(--text-secondary)]">{item.sourcePlatform === "DOUYIN" ? <span className="inline-flex items-center gap-1"><Music2 size={16} />抖音</span> : sourceTypeLabels[item.sourceType] || item.sourceType}</div>}
                 </div>
                 <div className={listView ? "min-w-0 flex-1" : "p-4"}>
-                  <div className="mb-2 flex flex-wrap gap-1.5"><Badge>{sourcePlatformLabels[item.sourcePlatform] || item.sourcePlatform}</Badge><Badge>{sourceTypeLabels[item.sourceType] || item.sourceType}</Badge><Badge>{item.sourceType === "VIDEO" ? processing.libraryLabel : sourceStatusLabels[item.status] || item.status}</Badge>{isMock ? <Badge className="border-[var(--warning)] text-[var(--warning)]">MOCK MODE</Badge> : null}</div>
+                  <div className="mb-2 flex flex-wrap gap-1.5"><Badge>{sourcePlatformLabels[item.sourcePlatform] || item.sourcePlatform}</Badge><Badge>{sourceTypeLabels[item.sourceType] || item.sourceType}</Badge><Badge>{item.sourceType === "VIDEO" ? processing.libraryLabel : sourceStatusLabels[item.status] || item.status}</Badge></div>
                   <Link href={`/library/${item.id}`} className="line-clamp-2 font-semibold hover:text-[var(--accent)]">{displayName}</Link>
                   <p className="mt-2 truncate text-xs text-[var(--text-secondary)]">{item.author || "未知作者"} · {item.createdAt.toLocaleString("zh-CN")}</p>
                   <div className="mt-3 flex flex-wrap gap-1">{item.tags.map(({ tag }) => <span key={tag.id} className="rounded-full bg-[var(--surface-elevated)] px-2 py-1 text-xs">#{tag.name}</span>)}</div>

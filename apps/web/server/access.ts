@@ -7,6 +7,8 @@ import { auth } from "@/lib/auth";
 export async function requireSession() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect("/login");
+  const user = await db.user.findUnique({ where: { id: session.user.id }, select: { disabledAt: true } });
+  if (!user || user.disabledAt) redirect("/login");
   return session;
 }
 
@@ -40,9 +42,9 @@ export async function requireSystemAdmin() {
   const session = await requireSession();
   const user = await db.user.findUnique({
     where: { id: session.user.id },
-    select: { id: true, name: true, email: true, systemRole: true },
+    select: { id: true, name: true, email: true, systemRole: true, disabledAt: true },
   });
-  if (!user || user.systemRole !== "SYSTEM_ADMIN") redirect("/dashboard");
+  if (!user || user.systemRole !== "SYSTEM_ADMIN" || user.disabledAt) redirect("/dashboard");
   return { session, user };
 }
 

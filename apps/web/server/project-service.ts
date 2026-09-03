@@ -7,6 +7,7 @@ import {
   type ContentProjectStatus,
 } from "@content-center/core";
 import { db, findProjectForUser, type Prisma } from "@content-center/db";
+import { getProjectNextAction } from "../lib/project-next-action";
 
 export class ProjectServiceError extends Error {
   constructor(readonly code: "PROJECT_NOT_FOUND" | "SOURCE_NOT_FOUND" | "SOURCE_ALREADY_ADDED") {
@@ -71,6 +72,10 @@ export async function listProjects(workspaceId: string, query: ProjectListQuery)
         createdAt: true,
         createdBy: { select: { name: true } },
         _count: { select: { sources: true, evidenceItems: true } },
+        sources: { select: { sourceItem: { select: { materialAnalyses: { where: { status: "COMPLETED" }, take: 1, select: { id: true } } } } } },
+        creativeBrief: { select: { coreMessage: true } },
+        motherContent: { select: { body: true, version: true, confirmedVersion: true } },
+        platformVariants: { select: { status: true } },
       },
       orderBy: query.sort === "oldest" ? { createdAt: "asc" } : { createdAt: "desc" },
       skip: (page - 1) * pageSize,
@@ -78,7 +83,7 @@ export async function listProjects(workspaceId: string, query: ProjectListQuery)
     }),
     db.contentProject.count({ where }),
   ]);
-  return { items, total, page, pageSize, pages: Math.max(1, Math.ceil(total / pageSize)) };
+  return { items: items.map((item) => ({ ...item, nextAction: getProjectNextAction({ sources: item.sources.map(({ sourceItem }) => ({ completedAnalysis: sourceItem.materialAnalyses.length > 0 })), supplement: item.creativeBrief?.coreMessage, mother: item.motherContent, platformStatuses: item.platformVariants.map(({ status }) => status) }) })), total, page, pageSize, pages: Math.max(1, Math.ceil(total / pageSize)) };
 }
 
 export function getProjectForUser(input: { userId: string; workspaceId: string; projectId: string }) {

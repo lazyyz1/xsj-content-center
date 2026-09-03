@@ -7,7 +7,7 @@ type SaveState = "IDLE" | "DIRTY" | "SAVING" | "SAVED" | "FAILED";
 
 const labels: Record<SaveState, string> = { IDLE: "已保存", DIRTY: "等待保存", SAVING: "正在保存", SAVED: "已保存", FAILED: "保存失败" };
 
-export function MotherContentEditor({ projectId, initial, editable, onSaved }: { projectId: string; initial: { title: string; body: string; outline: string[]; version: number; origin?: "HUMAN" | "KIMI" | "GPT_WEB"; originNote?: string | null }; editable: boolean; onSaved?: (version: number) => void }) {
+export function MotherContentEditor({ projectId, initial, editable, onSaved }: { projectId: string; initial: { title: string; body: string; outline: string[]; version: number; origin?: "HUMAN" | "KIMI" | "GPT_WEB"; originNote?: string | null }; editable: boolean; onSaved?: (version: number, snapshot: Snapshot) => void }) {
   const [title, setTitle] = useState(initial.title);
   const [body, setBody] = useState(initial.body);
   const [outlineText, setOutlineText] = useState(initial.outline.join("\n"));
@@ -34,7 +34,7 @@ export function MotherContentEditor({ projectId, initial, editable, onSaved }: {
       if (!response.ok) throw new Error(result.message || result.error || "保存失败");
       version.current = result.version;
       lastSaved.current = snapshot;
-      onSaved?.(result.version);
+      onSaved?.(result.version, snapshot);
       setError("");
       setSaveState(pending.current ? "DIRTY" : "SAVED");
     } catch (cause) {

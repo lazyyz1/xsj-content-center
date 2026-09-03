@@ -14,10 +14,10 @@ export async function GET() {
   const context = await getSystemAdminApiContext();
   if ("response" in context) return context.response;
   const users = await db.user.findMany({
-    select: { id: true, name: true, email: true, systemRole: true, createdAt: true, workspaceMemberships: { select: { role: true, workspace: { select: { id: true, name: true } } } }, sessions: { take: 1, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } } },
+    select: { id: true, name: true, email: true, systemRole: true, disabledAt: true, createdAt: true, workspaceMemberships: { select: { role: true, workspace: { select: { id: true, name: true } } } }, sessions: { take: 1, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } } },
     orderBy: { createdAt: "desc" },
   });
-  return NextResponse.json({ users: users.map((user) => ({ ...user, status: "ACTIVE" as const })) });
+  return NextResponse.json({ users: users.map((user) => ({ ...user, status: user.disabledAt ? "DISABLED" as const : "ACTIVE" as const })) });
 }
 
 export async function POST(request: Request) {

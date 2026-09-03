@@ -52,6 +52,11 @@ export async function getPlatformVariant(input: { workspaceId: string; userId: s
 }
 
 export async function generatePlatformPreviews(input: { workspaceId: string; userId: string; projectId: string; platforms: SupportedPlatform[]; parameters?: Partial<Record<SupportedPlatform, PlatformParameters>> }, dependencies: { runtime?: LLMRuntime } = {}) {
+  const project = await scopedProject(input);
+  if (!project.motherContent) throw new PlatformVariantError("MOTHER_CONTENT_REQUIRED", "请先完成并确认口播稿。");
+  if (project.motherContent.confirmedVersion !== project.motherContent.version) throw new PlatformVariantError("MOTHER_CONFIRMATION_REQUIRED", "请先确认当前口播稿，再生成平台版本。");
+  const running = await db.aIRun.findFirst({ where: { workspaceId: input.workspaceId, projectId: input.projectId, action: "ADAPT_PLATFORM", status: "RUNNING" }, select: { id: true } });
+  if (running) throw new PlatformVariantError("PLATFORM_RUN_IN_PROGRESS", "平台内容正在生成，请稍候。");
   const runtime = dependencies.runtime ?? await loadLLMRuntime(input.workspaceId);
   const results = [];
   for (const platform of input.platforms) {
@@ -119,5 +124,5 @@ export async function updatePlatformVariant(input: { workspaceId: string; userId
 }
 
 export class PlatformVariantError extends Error {
-  constructor(readonly code: "MOTHER_CONTENT_REQUIRED" | "PLATFORM_RUN_INVALID" | "PLATFORM_VERSION_CONFLICT" | "PLATFORM_VARIANT_NOT_FOUND" | "PLATFORM_OUTPUT_INVALID", message: string) { super(message); this.name = "PlatformVariantError"; }
+  constructor(readonly code: "MOTHER_CONTENT_REQUIRED" | "MOTHER_CONFIRMATION_REQUIRED" | "PLATFORM_RUN_IN_PROGRESS" | "PLATFORM_RUN_INVALID" | "PLATFORM_VERSION_CONFLICT" | "PLATFORM_VARIANT_NOT_FOUND" | "PLATFORM_OUTPUT_INVALID", message: string) { super(message); this.name = "PlatformVariantError"; }
 }

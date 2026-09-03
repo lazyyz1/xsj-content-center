@@ -266,6 +266,7 @@ model User {
   createdAt               DateTime             @default(now())
   updatedAt               DateTime             @updatedAt
   systemRole              SystemRole           @default(USER)
+  disabledAt              DateTime?
   sessions                Session[]
   accounts                Account[]
   workspaceMemberships    WorkspaceMember[]
@@ -292,6 +293,7 @@ model User {
   createdUnifiedCreativeAnalyses UnifiedCreativeAnalysis[] @relation("UnifiedCreativeAnalysisCreatedBy")
 
   @@index([systemRole])
+  @@index([disabledAt])
 }
 
 model Session {
@@ -934,6 +936,8 @@ model MotherContent {
   body             String
   outline          Json
   version          Int                 @default(1)
+  confirmedVersion Int?
+  confirmedWarnings Json?
   origin           MotherContentOrigin @default(HUMAN)
   originNote       String?
   createdById      String

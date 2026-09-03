@@ -55,10 +55,10 @@ test("MotherContent → Douyin Preview/Apply/edit → Xiaohongshu → stale → 
   const membership = user.workspaceMemberships[0]!;
   await new IntegrationService().saveIntegrationConfig({ workspaceId: membership.workspaceId, userId: user.id, provider: "LLM", mode: "FIXTURE", config: { provider: "fixture-openai-compatible", baseUrl: fixtureOrigin, apiKey: "platform-fixture-key", model: "fixture-model" } });
   const profile = await db.creatorProfile.create({ data: { workspaceId: membership.workspaceId, userId: user.id, displayName: "Platform Creator", positioning: "可靠内容方法", targetAudience: "内容团队", tone: "直接、具体", preferredStyle: "自然", forbiddenStyle: "口号", coreTopics: [], personalViews: ["证据先于写作"], brandTerms: [], forbiddenTerms: [], hookPreferences: [], structurePreferences: [], ctaPreferences: [], examplePhrases: [] } });
-  const project = await db.contentProject.create({ data: { workspaceId: membership.workspaceId, createdById: user.id, creatorProfileId: profile.id, title: "阶段六平台内容项目", motherContent: { create: { workspaceId: membership.workspaceId, createdById: user.id, title: "阶段六母稿", body: "可靠内容需要先整理来源和证据，再选择角度，最后重建表达。", outline: ["问题", "方法", "结尾"] } }, creativeBrief: { create: { workspaceId: membership.workspaceId, createdById: user.id, topic: "可靠 AI 内容", angle: "证据优先", audience: "内容团队", coreMessage: "证据先于写作", keyPoints: ["来源", "证据", "表达"], structure: ["问题", "方法"], tone: "直接", risks: [] } } } });
+  const project = await db.contentProject.create({ data: { workspaceId: membership.workspaceId, createdById: user.id, creatorProfileId: profile.id, title: "阶段六平台内容项目", motherContent: { create: { workspaceId: membership.workspaceId, createdById: user.id, title: "阶段六母稿", body: "可靠内容需要先整理来源和证据，再选择角度，最后重建表达。", outline: ["问题", "方法", "结尾"], confirmedVersion: 1 } }, creativeBrief: { create: { workspaceId: membership.workspaceId, createdById: user.id, topic: "可靠 AI 内容", angle: "证据优先", audience: "内容团队", coreMessage: "证据先于写作", keyPoints: ["来源", "证据", "表达"], structure: ["问题", "方法"], tone: "直接", risks: [] } } } });
 
   await page.goto(`/projects/${project.id}/studio`);
-  await page.getByRole("button", { name: /3 · 平台内容与审核/ }).click();
+  await page.getByRole("button", { name: "平台内容与审核", exact: true }).click();
   await page.getByRole("button", { name: /^抖音/ }).click();
   await page.getByRole("button", { name: "生成抖音" }).click();
   await expect(page.getByRole("heading", { name: "抖音预览" })).toBeVisible({ timeout: 30_000 });
@@ -74,17 +74,17 @@ test("MotherContent → Douyin Preview/Apply/edit → Xiaohongshu → stale → 
   await page.getByRole("button", { name: "应用为小红书版本" }).click();
   await expect(page.getByLabel("小红书标题")).toHaveValue("AI 写作别跳过这一步");
 
-  await page.getByRole("button", { name: /1 · 准备与核心母稿/ }).click();
-  await page.getByLabel("母稿正文").fill("母稿已经更新：可靠内容需要先整理证据，再重新组织平台表达。");
+  await page.getByRole("button", { name: "创作", exact: true }).click();
+  await page.getByLabel("口播稿正文").fill("母稿已经更新：可靠内容需要先整理证据，再重新组织平台表达。");
   await expect.poll(async () => (await db.motherContent.findUnique({ where: { projectId: project.id } }))?.version, { timeout: 10_000 }).toBe(2);
-  await expect(page.getByText("2 个平台版本需要更新", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: /3 · 平台内容与审核/ }).click();
+  await page.getByRole("button", { name: "确认这版口播稿，进入平台适配" }).click();
+  await page.getByRole("button", { name: "平台内容与审核", exact: true }).click();
   await page.getByRole("button", { name: /^抖音/ }).click();
   await expect(page.getByText("当前平台版本基于旧母稿，不会自动覆盖。", { exact: true })).toBeVisible();
 
   await db.workspaceMember.update({ where: { id: membership.id }, data: { role: "VIEWER" } });
   await page.reload();
-  await page.getByRole("button", { name: /3 · 平台内容与审核/ }).click();
+  await page.getByRole("button", { name: "平台内容与审核", exact: true }).click();
   await page.getByRole("button", { name: /^抖音/ }).click();
   await expect(page.getByLabel("抖音正文")).toBeDisabled();
   await expect(page.getByRole("button", { name: "重新生成抖音" })).toHaveCount(0);

@@ -20,5 +20,7 @@ describe("Better Auth integration", () => {
 
     const login = await auth.api.signInEmail({ body: { email, password: "safe-test-password" } });
     expect(login.user.email).toBe(email);
+    await db.user.update({ where: { id: registration.user.id }, data: { disabledAt: new Date() } });
+    await expect(auth.api.signInEmail({ body: { email, password: "safe-test-password" } })).rejects.toThrow();
   });
 });

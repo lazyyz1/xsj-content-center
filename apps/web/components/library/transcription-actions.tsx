@@ -50,11 +50,12 @@ export function TranscriptionActions({
 
   return (
     <div className="mt-4 flex flex-wrap items-center gap-2">
-      {canTranscribe && configured ? (
-        <Button disabled={busy || alreadyBusy} onClick={transcribe}>
+      {canTranscribe ? (
+        <Button disabled={!configured || busy || alreadyBusy} onClick={transcribe}>
           {alreadyBusy ? "转写中…" : hasTranscript ? "重新转写" : "开始转写"}
         </Button>
       ) : null}
+      {canTranscribe && !configured && !alreadyBusy ? <span className="text-sm text-[var(--text-secondary)]">语音转写服务暂时不可用，请联系管理员。</span> : null}
       {fullText ? <Button variant="secondary" disabled={busy} onClick={copy}>复制全文</Button> : null}
       {message ? <span role="status" className="text-sm text-[var(--text-secondary)]">{message}</span> : null}
     </div>

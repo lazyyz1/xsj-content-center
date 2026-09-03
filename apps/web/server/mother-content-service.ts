@@ -25,6 +25,13 @@ export type MotherContentVersion = {
   current: boolean;
 };
 
+export class MotherContentConfirmationError extends Error {
+  constructor(readonly code: "MOTHER_CONTENT_NOT_FOUND" | "MOTHER_VERSION_CONFLICT" | "MOTHER_WARNINGS_UNCONFIRMED", message: string) {
+    super(message);
+    this.name = "MotherContentConfirmationError";
+  }
+}
+
 function stringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
@@ -63,6 +70,8 @@ export async function saveMotherContent(input: { workspaceId: string; userId: st
             outline: input.data.outline,
             ...(input.data.origin === undefined ? {} : { origin: input.data.origin }),
             ...(input.data.originNote === undefined ? {} : { originNote: input.data.originNote }),
+            confirmedVersion: null,
+            confirmedWarnings: { set: null },
             version: { increment: 1 },
           },
         });
@@ -80,6 +89,7 @@ export async function saveMotherContent(input: { workspaceId: string; userId: st
             origin: input.data.origin ?? "HUMAN",
             originNote: input.data.originNote ?? null,
             createdById: input.userId,
+            confirmedVersion: null,
           },
         });
       }
@@ -101,6 +111,30 @@ export async function saveMotherContent(input: { workspaceId: string; userId: st
     }
     throw error;
   }
+}
+
+export async function saveMotherWarningConfirmations(input: { workspaceId: string; userId: string; projectId: string; version: number; warningKeys: string[] }) {
+  const project = await db.contentProject.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId, workspace: { members: { some: { userId: input.userId } } } }, select: { motherContent: true } });
+  if (!project?.motherContent) throw new MotherContentConfirmationError("MOTHER_CONTENT_NOT_FOUND", "口播稿不存在。");
+  if (project.motherContent.version !== input.version) throw new MotherContentConfirmationError("MOTHER_VERSION_CONFLICT", "口播稿已更新，请重新确认当前版本。");
+  return db.motherContent.update({ where: { id: project.motherContent.id }, data: { confirmedWarnings: input.warningKeys } });
+}
+
+export async function confirmMotherContent(input: { workspaceId: string; userId: string; projectId: string; version: number; warningKeys: string[]; currentWarningKeys: string[] }) {
+  const project = await db.contentProject.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId, workspace: { members: { some: { userId: input.userId } } } }, select: { motherContent: true } });
+  if (!project?.motherContent) throw new MotherContentConfirmationError("MOTHER_CONTENT_NOT_FOUND", "口播稿不存在。");
+  if (project.motherContent.version !== input.version) throw new MotherContentConfirmationError("MOTHER_VERSION_CONFLICT", "口播稿已更新，请重新确认当前版本。");
+  const confirmed = new Set(input.warningKeys);
+  if (input.currentWarningKeys.some((key) => !confirmed.has(key))) throw new MotherContentConfirmationError("MOTHER_WARNINGS_UNCONFIRMED", "还有内容需要确认后才能进入平台适配。");
+  const content = await db.$transaction(async (tx) => {
+    const updated = await tx.motherContent.updateMany({ where: { id: project.motherContent!.id, version: input.version }, data: { confirmedVersion: input.version, confirmedWarnings: input.warningKeys } });
+    if (updated.count !== 1) throw new MotherContentConfirmationError("MOTHER_VERSION_CONFLICT", "口播稿已更新，请重新确认当前版本。");
+    const value = await tx.motherContent.findUniqueOrThrow({ where: { id: project.motherContent!.id } });
+    const workspaceMember = await tx.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: input.workspaceId, userId: input.userId } } });
+    if (workspaceMember) await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "mother_content.confirmed", resourceType: "mother_content", resourceId: value.id, metadata: { projectId: input.projectId, version: input.version, warningCount: input.currentWarningKeys.length } } });
+    return value;
+  });
+  return content;
 }
 
 export async function listMotherContentVersions(input: { workspaceId: string; userId: string; projectId: string }): Promise<MotherContentVersion[]> {

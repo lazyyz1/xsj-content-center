@@ -15,7 +15,7 @@ test.afterAll(async () => {
   await db.$disconnect();
 });
 
-test("library source → project → evidence → brief → mother content → review with isolation", async ({ page }) => {
+test("library source → project → my supplement with isolation", async ({ page }) => {
   await page.goto("/register");
   await page.getByLabel("姓名").fill("Project E2E User");
   await page.getByLabel("邮箱").fill(email);
@@ -38,43 +38,16 @@ test("library source → project → evidence → brief → mother content → r
   const evidence = await page.request.post(`/api/projects/${projectId}/evidence`, { data: { type: "VIEWPOINT", sourceItemId: source.id, claim: "素材支持阶段四核心观点", excerpt: "真实项目闭环的素材正文" } });
   expect(evidence.status()).toBe(201);
   await page.reload();
-  await page.getByRole("button", { name: "查看依据" }).click();
-  await expect(page.getByRole("paragraph").filter({ hasText: "素材支持阶段四核心观点" })).toBeVisible();
-  await page.getByRole("button", { name: "关闭" }).click();
+  await expect(page.getByRole("heading", { name: "1. 参考素材" })).toBeVisible();
 
-  await page.getByRole("button", { name: "编辑方案" }).click();
-  await page.getByLabel("主题").fill("阶段四创作工作台");
-  await page.getByLabel("素材核心观点").fill("先组织证据，再写可靠母稿");
-  await page.getByLabel("关键要点（每行一点）").fill("素材关联\n证据整理\n人工审核");
-  await page.getByRole("button", { name: "保存创作方案" }).click();
-  await expect(page.getByRole("status")).toHaveText("创作方案已保存");
-  await page.getByRole("button", { name: "确认并开始创作" }).click();
-  await page.getByRole("button", { name: "手动开始写" }).click();
-  await expect(page.getByRole("button", { name: "提交人工审核" })).toBeVisible();
-
-  await page.getByLabel("母稿标题").fill("阶段四母稿");
-  await page.getByLabel("母稿大纲").fill("开场\n论证\n结尾");
-  await page.getByLabel("母稿正文").fill("这是经过素材与 Evidence 支撑的真实持久化母稿正文。");
-  await expect.poll(async () => (await db.motherContent.findUnique({ where: { projectId } }))?.body, { timeout: 10_000 }).toBe("这是经过素材与 Evidence 支撑的真实持久化母稿正文。");
-  await page.getByText("项目管理与高级状态", { exact: true }).click();
-  await page.getByRole("button", { name: "提交人工审核", exact: true }).click();
-  await expect.poll(async () => (await db.contentProject.findUniqueOrThrow({ where: { id: projectId } })).status).toBe("IN_REVIEW");
-  await page.reload();
-  await page.getByText("项目管理与高级状态", { exact: true }).click();
-  await expect(page.getByRole("button", { name: "批准母稿" })).toBeVisible();
-
-  await expect(page.getByLabel("母稿标题")).toHaveValue("阶段四母稿");
-  await expect(page.getByLabel("母稿正文")).toHaveValue("这是经过素材与 Evidence 支撑的真实持久化母稿正文。");
-  await page.getByRole("button", { name: "查看创作方案" }).click();
-  await expect(page.getByRole("dialog", { name: "创作方案" })).toContainText("阶段四创作工作台");
-  await page.getByRole("button", { name: "关闭" }).click();
-  await page.getByRole("button", { name: "查看依据" }).click();
-  await expect(page.getByRole("paragraph").filter({ hasText: "素材支持阶段四核心观点" })).toBeVisible();
-
+  await page.getByLabel("我的核心观点").fill("先组织证据，再写可靠母稿");
+  await page.getByRole("button", { name: "保存我的补充" }).click();
+  await expect(page.getByRole("status")).toHaveText("已保存");
+  await expect(page.getByRole("heading", { name: "3. 我的口播稿" })).toBeVisible();
   const otherUser = await db.user.create({ data: { name: "Other Project User", email: otherEmail } });
   const otherWorkspace = await db.workspace.create({ data: { name: "Other Project Workspace", slug: `project-other-${runId}`, members: { create: { userId: otherUser.id, role: "OWNER" } } } });
   const otherProject = await db.contentProject.create({ data: { workspaceId: otherWorkspace.id, createdById: otherUser.id, title: "Other private project" } });
   expect((await page.request.get(`/api/projects/${otherProject.id}`)).status()).toBe(404);
   expect((await page.request.post(`/api/projects/${otherProject.id}/sources`, { data: { sourceItemId: source.id, role: "REFERENCE" } })).status()).toBe(404);
-  expect((await db.contentProject.findUniqueOrThrow({ where: { id: projectId } })).status).toBe("IN_REVIEW");
+  expect((await db.contentProject.findUniqueOrThrow({ where: { id: projectId } })).status).toBe("DRAFT");
 });

@@ -97,6 +97,8 @@ test("ordinary users receive 403 from every system-admin API", async ({ page }) 
   expect((await page.request.get("/api/admin/users")).status()).toBe(403);
   expect((await page.request.get("/api/admin/system")).status()).toBe(403);
   expect((await page.request.put("/api/admin/system/providers/KIMI", { data: {} })).status()).toBe(403);
+  expect((await page.request.get("/api/admin/system/providers/DOUBAO_ASR")).status()).toBe(403);
+  expect((await page.request.put("/api/admin/system/providers/DOUBAO_ASR", { data: { config: {} } })).status()).toBe(403);
 });
 
 test("System Admin sees system pages but ordinary content APIs stay workspace-scoped", async ({ page }) => {
@@ -105,6 +107,18 @@ test("System Admin sees system pages but ordinary content APIs stay workspace-sc
   await expect(page.getByRole("heading", { name: "用户管理" })).toBeVisible();
   await page.goto("/admin/system");
   await expect(page.getByRole("heading", { name: "系统服务" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "豆包录音文件识别 2.0", exact: true })).toBeVisible();
+  await expect(page.getByText("协议：Recording File 2.0（固定）")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "豆包 API Key" })).toHaveAttribute("type", "password");
+  const doubaoView = await page.request.get("/api/admin/system/providers/DOUBAO_ASR");
+  expect(doubaoView.status()).toBe(200);
+  const doubaoBody = await doubaoView.json();
+  expect(JSON.stringify(doubaoBody)).not.toContain("apiKey");
+  expect(JSON.stringify(doubaoBody)).not.toContain("accessToken");
+  const invalidDoubao = await page.request.put("/api/admin/system/providers/DOUBAO_ASR", {
+    data: { config: { authMode: "API_KEY", baseUrl: "not-a-url", resourceId: "", apiKey: "never-saved" } },
+  });
+  expect(invalidDoubao.status()).toBe(400);
   await page.goto("/admin/usage");
   await expect(page.getByRole("heading", { name: "用量中心" })).toBeVisible();
   const usageA = await page.request.get(`/api/admin/usage?range=7d&userId=${ids.userA}`);
