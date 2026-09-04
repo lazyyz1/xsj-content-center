@@ -5,6 +5,7 @@ import { db, type Prisma } from "@content-center/db";
 import { LLMError, type LLMProvider } from "@content-center/providers";
 import { executeStructuredAIRun } from "../../ai/ai-run-service";
 import { loadLLMRuntime, type LLMRuntime } from "../../ai/llm-runtime";
+import { isLlmConfigurationError } from "../../ai/llm-api-status";
 import { renderPrompt, selectPromptTemplate } from "../../ai/prompt-service";
 import { externalContentSchema, type ExternalContentInput } from "../schemas";
 import { getTrendOpportunity } from "./read-model";
@@ -59,7 +60,7 @@ export async function generateTopicCandidates(input: {
   try {
     runtime = dependencies.runtime ?? await loadLLMRuntime(input.workspaceId);
   } catch (error) {
-    if (error instanceof LLMError && ["LLM_NOT_CONFIGURED", "LLM_DISABLED"].includes(error.code)) throw new TrendServiceError("TREND_AI_NOT_CONFIGURED", "AI 创作服务尚未配置。");
+    if (error instanceof LLMError && isLlmConfigurationError(error)) throw new TrendServiceError("TREND_AI_NOT_CONFIGURED", "AI 创作服务尚未配置。");
     throw error;
   }
   try {

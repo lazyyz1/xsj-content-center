@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyLLMConfig, CURRENT_KIMI_PRODUCT_MODEL, KIMI_PRODUCT_MODEL_ALLOWLIST } from "./kimi-model-policy";
+import { classifyLLMConfig, CURRENT_KIMI_PRODUCT_MODEL, kimiRuntimeConfig, KIMI_PRODUCT_MODEL_ALLOWLIST } from "./kimi-model-policy";
 
 describe("KimiModelPolicy", () => {
   it("has a single frozen product model", () => {
@@ -15,5 +15,11 @@ describe("KimiModelPolicy", () => {
   it("never silently upgrades legacy or alternate product configs", () => {
     expect(classifyLLMConfig({ provider: "kimi", label: "legacy-alternate", modelId: "legacy-id" })).toBe("NEEDS_RECONFIGURATION");
     expect(classifyLLMConfig({ provider: "compatible", label: "legacy-custom", modelId: "legacy-id" })).toBe("NEEDS_RECONFIGURATION");
+  });
+
+  it("keeps K3 reserved and out of the normal analysis runtime", () => {
+    const k3Config = { integrationType: "KIMI", productModel: "KIMI_K3", apiModelId: "kimi-k3" };
+    expect(classifyLLMConfig(k3Config)).toBe("NEEDS_RECONFIGURATION");
+    expect(kimiRuntimeConfig(k3Config, { apiKey: "test-secret" })).toBeNull();
   });
 });

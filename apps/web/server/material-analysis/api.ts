@@ -1,5 +1,6 @@
 import { LLMError } from "@content-center/providers";
 import { NextResponse } from "next/server";
+import { llmApiStatus } from "../ai/llm-api-status";
 import { MaterialAnalysisError } from "./service";
 
 export function materialAnalysisApiError(error: unknown) {
@@ -11,8 +12,7 @@ export function materialAnalysisApiError(error: unknown) {
     return NextResponse.json({ error: error.code, message: error.message }, { status });
   }
   if (error instanceof LLMError) {
-    const status = error.code.includes("NOT_CONFIGURED") || error.code.includes("MODEL_ID_MISSING") || error.code === "LLM_DISABLED" ? 503 : 502;
-    return NextResponse.json({ error: error.code, message: error.message }, { status });
+    return NextResponse.json({ error: error.code, message: error.message }, { status: llmApiStatus(error) });
   }
   return null;
 }

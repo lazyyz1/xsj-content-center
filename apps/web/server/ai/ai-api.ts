@@ -2,6 +2,7 @@ import { LLMError } from "@content-center/providers";
 import { NextResponse } from "next/server";
 import { projectApiError } from "../project-api";
 import { AIServiceError } from "./ai-run-service";
+import { llmApiStatus } from "./llm-api-status";
 import { UnifiedCreativeAnalysisError } from "../unified-analysis/service";
 
 export function aiApiError(error: unknown) {
@@ -15,8 +16,7 @@ export function aiApiError(error: unknown) {
     return NextResponse.json({ error: error.code, message: error.message }, { status: error.code === "UNIFIED_ANALYSIS_IN_PROGRESS" ? 409 : 422 });
   }
   if (error instanceof LLMError) {
-    const status = error.code === "LLM_RATE_LIMITED" ? 429 : error.code === "LLM_TIMEOUT" ? 504 : error.code === "LLM_CONTEXT_TOO_LARGE" ? 413 : error.code === "LLM_NOT_CONFIGURED" || error.code === "LLM_DISABLED" ? 409 : 502;
-    return NextResponse.json({ error: error.code, message: error.message }, { status });
+    return NextResponse.json({ error: error.code, message: error.message }, { status: llmApiStatus(error) });
   }
   return NextResponse.json({ error: "LLM_GENERATION_FAILED", message: "AI 生成失败，请重试。" }, { status: 500 });
 }

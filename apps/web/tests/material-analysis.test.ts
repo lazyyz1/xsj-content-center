@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { db } from "@content-center/db";
+import { IntegrationService } from "@content-center/integrations";
 import { MockLLMProvider } from "@content-center/providers";
 import { analyzeMaterial, createProjectFromMaterial, getMaterialAnalysis, updateMaterialAnalysis } from "../server/material-analysis/service";
 import { readMaterialAnalysisBriefMetadata } from "../server/material-analysis/brief-mapper";
@@ -34,7 +35,7 @@ describe("V1.2B-1 smart material analysis", () => {
     workspaceAId = workspaceA.id; workspaceBId = workspaceB.id;
     const [sourceA, sourceB] = await Promise.all([
       db.sourceItem.create({ data: { workspaceId: workspaceAId, createdById: userAId, sourceType: "VIDEO", sourcePlatform: "DOUYIN", title: "素材 A", description: "市场信号只用于辅助理解", status: "READY", transcript: { create: { workspaceId: workspaceAId, provider: "LOCAL_FUNASR", providerMode: "REAL", fullText: "这是一段关于素材整理、人工确认与可靠创作流程的中文转写。", segments: [] } } } }),
-      db.sourceItem.create({ data: { workspaceId: workspaceBId, createdById: userBId, sourceType: "VIDEO", sourcePlatform: "DOUYIN", title: "私有素材 B", status: "READY", transcript: { create: { workspaceId: workspaceBId, provider: "LOCAL_FUNASR", providerMode: "REAL", fullText: "另一个工作区的私有转写。", segments: [] } } } }),
+      db.sourceItem.create({ data: { workspaceId: workspaceBId, createdById: userBId, sourceType: "TEXT", sourcePlatform: "GENERIC", title: "私有文本素材 B", rawText: "这是一条可以直接进入项目的已有文本素材。", status: "READY", transcript: { create: { workspaceId: workspaceBId, provider: "MANUAL_TEXT", providerMode: "REAL", fullText: "这是一条已有文本或字幕素材，不需要云端转写。", segments: [] } } } }),
     ]);
     sourceAId = sourceA.id; sourceBId = sourceB.id;
   });
@@ -113,7 +114,10 @@ describe("V1.2B-1 smart material analysis", () => {
     expect(readMaterialAnalysisBriefMetadata((await db.creativeBrief.findUniqueOrThrow({ where: { id: initialBrief.id } })).metadata)?.materialAnalysisVersion).toBe(provenance?.materialAnalysisVersion);
   });
 
-  it("keeps no-analysis projects compatible and enforces workspace isolation", async () => {
+  it("keeps text material project work available without RedFox or Doubao", async () => {
+    const integrations = new IntegrationService();
+    await expect(integrations.getIntegrationStatus(workspaceBId, "REDFOX")).resolves.toMatchObject({ status: "UNCONFIGURED", configured: false });
+    await expect(integrations.getIntegrationStatus(workspaceBId, "DOUBAO_ASR")).resolves.toMatchObject({ status: "UNCONFIGURED", configured: false });
     const first = await createProjectFromMaterial({ workspaceId: workspaceBId, sourceItemId: sourceBId, userId: userBId });
     expect(first).toMatchObject({ created: true, briefInitialized: false });
     await expect(db.creativeBrief.findUnique({ where: { projectId: first.projectId } })).resolves.toBeNull();

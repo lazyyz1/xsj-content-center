@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { projectApiError } from "../project-api";
+import { llmApiStatus } from "../ai/llm-api-status";
 import { PlatformContextError } from "./platform-context";
 import { PlatformVariantError } from "./platform-variant-service";
 import { LLMError } from "@content-center/providers";
@@ -13,8 +14,7 @@ export function platformApiError(error: unknown) {
     return NextResponse.json({ error: error.code, message: error.message }, { status });
   }
   if (error instanceof LLMError) {
-    const status = error.code === "LLM_RATE_LIMITED" ? 429 : error.code === "LLM_TIMEOUT" ? 504 : error.code === "LLM_CONTEXT_TOO_LARGE" ? 413 : error.code === "LLM_NOT_CONFIGURED" || error.code === "LLM_DISABLED" ? 409 : 502;
-    return NextResponse.json({ error: error.code, message: error.message }, { status });
+    return NextResponse.json({ error: error.code, message: error.message }, { status: llmApiStatus(error) });
   }
   return NextResponse.json({ error: "PLATFORM_OPERATION_FAILED", message: "平台内容操作失败，请重试。" }, { status: 500 });
 }
