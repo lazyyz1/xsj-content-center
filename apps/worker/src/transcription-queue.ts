@@ -1,4 +1,5 @@
 import { Queue, type ConnectionOptions } from "bullmq";
+import { createRedisConnection } from "./redis-connection";
 
 export const TRANSCRIBE_SOURCE_QUEUE = "transcribe-source";
 export const TRANSCRIBE_SOURCE = "TRANSCRIBE_SOURCE";
@@ -12,14 +13,7 @@ export type TranscribeSourcePayload = {
 };
 
 function connection(): ConnectionOptions {
-  const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
-  return {
-    host: redisUrl.hostname,
-    port: Number(redisUrl.port || 6379),
-    username: redisUrl.username || undefined,
-    password: redisUrl.password || undefined,
-    db: Number(redisUrl.pathname.slice(1) || 0),
-  };
+  return createRedisConnection();
 }
 
 export function createTranscribeSourceQueue() {

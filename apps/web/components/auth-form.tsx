@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { authClient } from "@/lib/auth-client";
 
-export function AuthForm({ mode }: { mode: "login" | "register" }) {
+export function AuthForm({ mode, allowRegistration = false }: { mode: "login" | "register"; allowRegistration?: boolean }) {
   const router = useRouter();
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
@@ -18,9 +18,24 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
     const form = new FormData(event.currentTarget);
     const email = String(form.get("email"));
     const password = String(form.get("password"));
-    const result = mode === "register"
-      ? await authClient.signUp.email({ name: String(form.get("name")), email, password })
-      : await authClient.signIn.email({ email, password });
+    if (mode === "register") {
+      const response = await fetch("/api/internal-signup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: String(form.get("name")), email, password, inviteCode: String(form.get("inviteCode")) }),
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => null) as { message?: string } | null;
+        setError(result?.message ?? "注册失败，请检查公司邀请码后重试。");
+        setPending(false);
+        return;
+      }
+      router.push("/dashboard");
+      router.refresh();
+      return;
+    }
+
+    const result = await authClient.signIn.email({ email, password });
 
     if (result.error) {
       setError(result.error.message ?? "请求失败，请重试。");
@@ -28,7 +43,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
       return;
     }
 
-    router.push(mode === "register" ? "/onboarding" : "/dashboard");
+    router.push("/dashboard");
     router.refresh();
   }
 
@@ -49,11 +64,17 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
         <span>密码</span>
         <Input name="password" type="password" autoComplete={isRegister ? "new-password" : "current-password"} minLength={8} required />
       </label>
+      {isRegister ? (
+        <label className="block space-y-2 text-sm font-medium">
+          <span>公司邀请码</span>
+          <Input name="inviteCode" type="password" autoComplete="off" required />
+        </label>
+      ) : null}
       {error ? <p role="alert" className="text-sm text-[var(--danger)]">{error}</p> : null}
       <Button className="w-full" disabled={pending}>
-        {pending ? "处理中…" : isRegister ? "创建账号" : "登录"}
+        {pending ? "处理中…" : isRegister ? "注册并进入" : "登录"}
       </Button>
-      {isRegister || process.env.NEXT_PUBLIC_ALLOW_PUBLIC_SIGNUP === "true" ? <p className="text-center text-sm text-[var(--text-secondary)]">
+      {isRegister || allowRegistration ? <p className="text-center text-sm text-[var(--text-secondary)]">
         {isRegister ? "已有账号？" : "还没有账号？"}{" "}
         <Link className="font-medium text-[var(--accent)]" href={isRegister ? "/login" : "/register"}>
           {isRegister ? "去登录" : "注册"}

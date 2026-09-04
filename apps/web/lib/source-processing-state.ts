@@ -48,6 +48,7 @@ export function getSourceProcessingState(input: SourceProcessingInput) {
   const failedAudio = input.assets.some((asset) => asset.assetType === "AUDIO" && asset.status === "FAILED");
   const transcriptionConfigured = input.transcriptionStatus === "CONFIGURED";
   const stage = progressStage(transcriptionJob?.metadata);
+  const redfoxStage = progressStage(redfoxJob?.metadata);
 
   let transcription: TranscriptionState;
   if (transcriptionJob?.status === "FAILED") transcription = "FAILED";
@@ -58,12 +59,12 @@ export function getSourceProcessingState(input: SourceProcessingInput) {
   else if (!transcriptionConfigured) transcription = "NOT_CONFIGURED";
   else transcription = "NOT_STARTED";
 
-  const redfoxParse: ProcessingStepState = redfoxJob?.status === "FAILED"
+  const redfoxParse: ProcessingStepState = redfoxJob?.status === "FAILED" && !storedPrimaryMedia
     ? "FAILED"
-    : redfoxJob?.status === "RUNNING"
-      ? "PROCESSING"
-      : redfoxJob?.status === "SUCCEEDED" || storedPrimaryMedia
+    : redfoxJob?.status === "SUCCEEDED" || storedPrimaryMedia || redfoxStage === "DOWNLOADING_MEDIA" || redfoxStage === "STORING" || redfoxStage === "DONE"
         ? "SUCCEEDED"
+      : redfoxJob?.status === "RUNNING"
+        ? "PROCESSING"
         : redfoxJob?.status === "CANCELLED"
           ? "SKIPPED"
           : "WAITING";
@@ -74,7 +75,7 @@ export function getSourceProcessingState(input: SourceProcessingInput) {
       ? "FAILED"
       : redfoxParse === "FAILED" || redfoxParse === "SKIPPED"
         ? "SKIPPED"
-        : redfoxJob?.status === "RUNNING"
+        : redfoxJob?.status === "RUNNING" && (redfoxStage === "DOWNLOADING_MEDIA" || redfoxStage === "STORING")
           ? "PROCESSING"
           : "WAITING";
 
@@ -110,11 +111,30 @@ export function getSourceProcessingState(input: SourceProcessingInput) {
       ? "失败"
       : "处理中";
 
+  const currentLabel = redfoxJob?.status === "RUNNING"
+    ? redfoxStage === "DOWNLOADING_MEDIA"
+      ? "下载视频中"
+      : redfoxStage === "STORING"
+        ? "保存视频中"
+        : "收录中"
+    : transcription === "QUEUED"
+      ? "等待转写"
+      : transcription === "EXTRACTING_AUDIO"
+        ? "正在提取音频"
+        : transcription === "TRANSCRIBING"
+          ? "转写中"
+          : transcription === "SUCCEEDED"
+            ? "已完成"
+            : transcription === "FAILED"
+              ? "转写失败"
+              : libraryLabel;
+
   return {
     steps: { redfoxParse, videoSave, audioExtraction, aiTranscription },
     transcription,
     transcriptionLabel: transcriptionStateLabels[transcription],
     libraryLabel,
+    currentLabel,
     busy: input.sourceStatus === "PENDING" || input.sourceStatus === "PROCESSING" || transcription === "QUEUED" || transcription === "EXTRACTING_AUDIO" || transcription === "TRANSCRIBING",
   };
 }

@@ -38,6 +38,18 @@ describe("getSourceProcessingState", () => {
     })).toMatchObject({ transcription: "SUCCEEDED", transcriptionLabel: "已完成", libraryLabel: "已转写" });
   });
 
+  it("reports the real RedFox download and storage stages", () => {
+    const base = { sourceStatus: "PROCESSING", transcriptionStatus: "CONFIGURED", hasTranscript: false, assets: [], jobs: [] } as const;
+    expect(getSourceProcessingState({
+      ...base,
+      jobs: [{ jobType: "PROCESS_MEDIA", provider: "REDFOX", status: "RUNNING", metadata: { progressStage: "DOWNLOADING_MEDIA" } }],
+    })).toMatchObject({ currentLabel: "下载视频中", steps: { redfoxParse: "SUCCEEDED", videoSave: "PROCESSING" } });
+    expect(getSourceProcessingState({
+      ...base,
+      jobs: [{ jobType: "PROCESS_MEDIA", provider: "REDFOX", status: "RUNNING", metadata: { progressStage: "STORING" } }],
+    })).toMatchObject({ currentLabel: "保存视频中", steps: { redfoxParse: "SUCCEEDED", videoSave: "PROCESSING" } });
+  });
+
   it("keeps an old transcript visible while exposing the latest retry failure", () => {
     expect(getSourceProcessingState({
       sourceStatus: "READY",
