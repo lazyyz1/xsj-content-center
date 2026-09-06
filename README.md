@@ -1,6 +1,10 @@
 # AI 内容生产中心
 
-> **Current Release: V1 Internal Trial**
+> **主仓定位：** [`lazyyz1/xsj-content-center`](https://github.com/lazyyz1/xsj-content-center) 是 AI 内容生产中心后续开发、问题跟踪和文档维护的唯一主仓。新功能和修复应从本仓选择明确的目标分支开始；当前 Cleanup 尚未建立 `main`，也未切换 GitHub 默认分支。
+
+旧仓 [`lazyyz1/XSJ`](https://github.com/lazyyz1/XSJ) 仅作为历史实现、数据和迁移参考保留，不再作为后续开发入口。旧仓仍有未提交代码、本地数据库及交付资产，备份和恢复状态尚未完整验证；引用其中内容前须重新审查，不能把旧仓状态当作本仓事实。
+
+> **当前阶段：V1 内部试用候选。** 本仓包含内部试用所需的业务代码和部署配置，但最新 Cleanup 验证仍为部分完成：完整认证与内容生产 E2E 尚未通过，目标提交的真实 Provider、生产数据及完整业务链路也未完成验收。配置文件存在不代表当前线上绑定或部署状态已确认。
 
 内部试用文档：
 
@@ -30,7 +34,7 @@ pnpm dev
 
 Web 默认运行在 `http://localhost:3000`，MinIO Console 默认运行在 `http://localhost:9001`。
 
-生产 V1 使用 Render Media Relay：Render Web 独占 Persistent Disk，Worker 通过受保护的内部 HTTP 流式读写；MinIO / S3-compatible（包括 R2 兼容配置）保留为可选部署模式。配置与安全边界见 [`docs/render-media-storage.md`](docs/render-media-storage.md) 和 [`docs/production-storage.md`](docs/production-storage.md)。
+标准生产 Blueprint 设计为使用 Render Media Relay：Render Web 独占 Persistent Disk，Worker 通过受保护的内部 HTTP 流式读写；MinIO / S3-compatible（包括 R2 兼容配置）保留为可选部署模式。free-staging 配置不包含相同的独立 Worker/Persistent Disk 拓扑；当前实际平台绑定待核实。配置与安全边界见 [`docs/render-media-storage.md`](docs/render-media-storage.md) 和 [`docs/production-storage.md`](docs/production-storage.md)。
 
 ## Services
 
