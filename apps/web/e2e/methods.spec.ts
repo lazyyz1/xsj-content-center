@@ -1,21 +1,46 @@
 import { randomUUID } from "node:crypto";
+import { createServer, type Server } from "node:http";
 import { db, ensurePersonalWorkspaceForUser } from "@content-center/db";
+import { IntegrationService } from "@content-center/integrations";
 import { expect, test } from "@playwright/test";
 import { auth } from "../lib/auth";
 
 const runId = randomUUID();
 const email = `methods-${runId}@example.test`;
 const otherEmail = `methods-other-${runId}@example.test`;
+const studioEmail = `methods-studio-${runId}@example.test`;
 const password = "safe-e2e-password";
+let fixture: Server;
+let fixtureOrigin = "";
+const prompts: string[] = [];
+
+test.beforeAll(async () => {
+  fixture = createServer((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => { body += String(chunk); });
+    request.on("end", () => {
+      const parsed = JSON.parse(body) as { messages: Array<{ content: string }> };
+      prompts.push(parsed.messages.at(-1)?.content ?? "");
+      const index = prompts.length;
+      response.writeHead(request.headers.authorization === "Bearer methods-fixture-key" ? 200 : 401, { "content-type": "application/json", "x-request-id": `methods-${index}` });
+      response.end(JSON.stringify({ id: `methods-${index}`, model: "kimi-2.6-fixture", choices: [{ message: { content: JSON.stringify({ recommendedAngle: "先说清问题", alternativeAngles: ["从误区切入"], recommendedTitle: `方法生成稿 ${index}`, alternativeTitles: ["为什么先说问题？", "一个问题的处理方式"], openingHook: "先把问题说清楚。", outline: ["问题", "方法"], body: "我从来没有做过加盟业务。先把问题说清楚，再给出自己的处理方式。", evidenceIds: [], sourceItemIds: [] }) } }], usage: { prompt_tokens: 120, completion_tokens: 55 } }));
+    });
+  });
+  await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
+  const address = fixture.address();
+  if (!address || typeof address === "string") throw new Error("Methods fixture did not bind");
+  fixtureOrigin = `http://127.0.0.1:${address.port}/v1`;
+});
 
 test.afterAll(async () => {
-  const user = await db.user.findUnique({ where: { email }, select: { id: true } });
-  if (user) {
-    const workspaces = await db.workspace.findMany({ where: { members: { some: { userId: user.id } } }, select: { id: true } });
+  await new Promise<void>((resolve) => fixture.close(() => resolve()));
+  const users = await db.user.findMany({ where: { email: { in: [email, otherEmail, studioEmail] } }, select: { id: true } });
+  if (users.length) {
+    const workspaces = await db.workspace.findMany({ where: { members: { some: { userId: { in: users.map(({ id }) => id) } } } }, select: { id: true } });
     await db.methodAsset.deleteMany({ where: { workspaceId: { in: workspaces.map(({ id }) => id) } } });
     await db.workspace.deleteMany({ where: { id: { in: workspaces.map(({ id }) => id) } } });
   }
-  await db.user.deleteMany({ where: { email: { in: [email, otherEmail] } } });
+  await db.user.deleteMany({ where: { email: { in: [email, otherEmail, studioEmail] } } });
   await db.$disconnect();
 });
 
@@ -27,8 +52,8 @@ function sessionCookies(response: Response) {
   });
 }
 
-async function signIn(page: import("@playwright/test").Page) {
-  const response = await auth.api.signUpEmail({ body: { name: "Methods Owner", email, password }, asResponse: true });
+async function signIn(page: import("@playwright/test").Page, userEmail = email, name = "Methods Owner") {
+  const response = await auth.api.signUpEmail({ body: { name, email: userEmail, password }, asResponse: true });
   expect(response.ok).toBe(true);
   const body = await response.clone().json() as { user: { id: string } };
   await ensurePersonalWorkspaceForUser(db, { userId: body.user.id });
@@ -114,4 +139,65 @@ test("saves, edits, versions, and privately manages an M1 method", async ({ page
   await expect(db.methodAsset.findUniqueOrThrow({ where: { id: methodId } })).resolves.toMatchObject({ status: "CORE" });
   await expect(db.methodVersion.count({ where: { assetId: methodId } })).resolves.toBe(2);
   expect(analysis.id).toBeTruthy();
+});
+
+test("uses explicit method versions in Studio and records each real generation attempt", async ({ page }) => {
+  test.setTimeout(90_000);
+  const user = await signIn(page, studioEmail, "Studio Methods Owner");
+  const workspaceId = user.workspaceMemberships[0]!.workspaceId;
+  await new IntegrationService().saveIntegrationConfig({ workspaceId, userId: user.id, provider: "LLM", config: { integrationType: "KIMI", productModel: "KIMI_2_6", baseUrl: fixtureOrigin, apiKey: "methods-fixture-key", apiModelId: "kimi-2.6-fixture" } });
+  const source = await db.sourceItem.create({ data: { workspaceId, createdById: user.id, sourceType: "VIDEO", sourcePlatform: "DOUYIN", title: "Studio 方法来源", status: "READY", transcript: { create: { workspaceId, provider: "LOCAL_FUNASR", providerMode: "REAL", fullText: "先说清问题，再进入处理方式。", segments: [{ startMs: 1_000, endMs: 4_000, text: "先说清问题，再进入处理方式。" }] } } } });
+  const transcript = await db.transcript.findUniqueOrThrow({ where: { sourceItemId: source.id } });
+  const analysis = await db.materialAnalysis.create({ data: { workspaceId, sourceItemId: source.id, createdById: user.id, version: 1, status: "COMPLETED", tags: [], keywords: [], keyPoints: ["问题", "方法"], summary: "Studio 方法来源", understanding: {}, transcriptUpdatedAtAtAnalysis: transcript.updatedAt } });
+  const asset = await db.methodAsset.create({ data: { workspaceId, ownerUserId: user.id, status: "SAVED" } });
+  const oldVersion = await db.methodVersion.create({ data: { assetId: asset.id, version: 1, title: "先说问题（旧版）", steps: ["先说清问题"], applicableScenarios: ["需要解释问题时"], boundaries: ["不要虚构经历"], sourceItemId: source.id, sourceMaterialAnalysisId: analysis.id, sourceTranscriptId: transcript.id, sourceTranscriptUpdatedAt: transcript.updatedAt, evidence: [{ quote: "先说清问题，再进入处理方式。" }], editedById: user.id } });
+  const latestVersion = await db.methodVersion.create({ data: { assetId: asset.id, version: 2, title: "先说问题（最新版）", steps: ["先说清问题，再给方法"], applicableScenarios: ["需要解释复杂问题时"], boundaries: ["不要虚构经历"], sourceItemId: source.id, sourceMaterialAnalysisId: analysis.id, sourceTranscriptId: transcript.id, sourceTranscriptUpdatedAt: transcript.updatedAt, evidence: [{ quote: "第三方客户和收入案例不应进入 Prompt" }], editedById: user.id } });
+  const project = await db.contentProject.create({ data: { workspaceId, createdById: user.id, title: "方法版本锁定项目", sources: { create: { sourceItemId: source.id, role: "REFERENCE" } } } });
+  await db.creativeBrief.create({ data: { workspaceId, projectId: project.id, createdById: user.id, topic: "可靠表达", angle: "先讲事实", audience: "内容团队", coreMessage: "我从来没有做过加盟业务。", background: "", keyPoints: [], structure: [], tone: "直接", risks: [] } });
+
+  await page.goto(`/projects/${project.id}/studio`);
+  const selector = page.getByTestId("studio-method-selector");
+  await expect(selector).toContainText("这次不选方法，继续按原有方式生成");
+  await page.getByRole("button", { name: "生成我的口播稿" }).click();
+  await expect(page.getByLabel("口播稿正文")).toHaveValue(/我从来没有做过加盟业务/);
+  const zeroMethodRun = await db.aIRun.findFirstOrThrow({ where: { projectId: project.id, action: "GENERATE_MOTHER_CONTENT", status: "SUCCEEDED" }, orderBy: { createdAt: "desc" } });
+  await expect(db.methodUsage.count({ where: { aiRunId: zeroMethodRun.id } })).resolves.toBe(0);
+  expect(prompts.at(-1)).not.toContain('"selectedMethods":');
+
+  await db.projectMethodSelection.create({ data: { projectId: project.id, methodAssetId: asset.id, methodVersionId: oldVersion.id, selectedByUserId: user.id } });
+  await page.reload();
+  await expect(selector).toContainText("这个方法后来修改过");
+  await selector.getByRole("button", { name: "选择我的方法" }).click();
+  const drawer = page.getByRole("dialog", { name: "选择我的方法" });
+  const latest = drawer.locator("article").filter({ hasText: "先说问题（最新版）" });
+  await expect(latest.getByRole("button", { name: "选择", exact: true })).toBeDisabled();
+  await expect(latest.getByRole("button", { name: "已选择", exact: true })).toHaveCount(0);
+  await drawer.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(selector.getByRole("button", { name: "换用最新版", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "重新生成我的口播稿" }).click();
+  await expect(page.getByLabel("口播稿标题")).toHaveValue("方法生成稿 2");
+  await expect.poll(() => db.methodUsage.count({ where: { projectId: project.id, methodVersionId: oldVersion.id } })).toBe(1);
+  expect(prompts.at(-1)).toContain("先说问题（旧版）");
+  expect(prompts.at(-1)).not.toContain("第三方客户和收入案例");
+  await selector.getByRole("button", { name: "换用最新版", exact: true }).click();
+  await expect(selector).toContainText("先说问题（最新版）");
+  await page.getByRole("button", { name: "重新生成我的口播稿" }).click();
+  await expect(page.getByLabel("口播稿标题")).toHaveValue("方法生成稿 3");
+  await expect.poll(() => db.methodUsage.count({ where: { projectId: project.id, methodVersionId: latestVersion.id } })).toBe(1);
+  await page.getByLabel("口播稿正文").fill("人工修改后的口播稿。");
+  await expect.poll(async () => (await db.motherContent.findUniqueOrThrow({ where: { projectId: project.id } })).body).toBe("人工修改后的口播稿。");
+
+  await page.goto(`/library/methods/${asset.id}`);
+  await page.getByTestId("method-detail").getByRole("button", { name: "已停用", exact: true }).click();
+  await page.goto(`/projects/${project.id}/studio`);
+  await expect(page.getByTestId("studio-method-selector")).toContainText("这个方法已经停用");
+  const runCount = await db.aIRun.count({ where: { projectId: project.id, action: "GENERATE_MOTHER_CONTENT" } });
+  await page.getByRole("button", { name: "重新生成我的口播稿" }).click();
+  await expect(page.getByLabel("口播稿标题")).toHaveValue("方法生成稿 4");
+  await expect.poll(() => db.aIRun.count({ where: { projectId: project.id, action: "GENERATE_MOTHER_CONTENT" } })).toBe(runCount + 1);
+  const disabledRun = await db.aIRun.findFirstOrThrow({ where: { projectId: project.id, action: "GENERATE_MOTHER_CONTENT" }, orderBy: { createdAt: "desc" } });
+  await expect(db.methodUsage.count({ where: { aiRunId: disabledRun.id } })).resolves.toBe(0);
+  expect(prompts.at(-1)).not.toContain('"selectedMethods":');
+  expect(await page.getByTestId("studio-method-selector").innerText()).not.toMatch(/ProjectMethodSelection|MethodUsage|MethodVersion|AIRun|context block|CORE|TRIAL|DISABLED|workspaceId|ownerUserId|version mismatch|stale method/);
 });

@@ -301,6 +301,8 @@ model User {
   createdUnifiedCreativeAnalyses UnifiedCreativeAnalysis[] @relation("UnifiedCreativeAnalysisCreatedBy")
   ownedMethodAssets       MethodAsset[]                @relation("MethodAssetOwner")
   editedMethodVersions    MethodVersion[]              @relation("MethodVersionEditedBy")
+  selectedProjectMethods  ProjectMethodSelection[]     @relation("ProjectMethodSelectionUser")
+  methodUsages            MethodUsage[]                @relation("MethodUsageUser")
 
   @@index([systemRole])
   @@index([disabledAt])
@@ -651,6 +653,8 @@ model ContentProject {
   contentIdea         ContentIdea?
   recommendationItems RecommendationItem[]
   unifiedCreativeAnalyses UnifiedCreativeAnalysis[]
+  methodSelections       ProjectMethodSelection[]
+  methodUsages            MethodUsage[]
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
@@ -902,6 +906,8 @@ model MethodAsset {
   workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   owner          User         @relation("MethodAssetOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
   versions       MethodVersion[]
+  projectMethodSelections ProjectMethodSelection[]
+  methodUsages            MethodUsage[]
 
   @@index([workspaceId, ownerUserId, status, updatedAt])
 }
@@ -926,11 +932,50 @@ model MethodVersion {
   sourceMaterialAnalysis MaterialAnalysis @relation("MethodVersionSourceAnalysis", fields: [sourceMaterialAnalysisId], references: [id], onDelete: Restrict)
   sourceTranscript       Transcript      @relation("MethodVersionSourceTranscript", fields: [sourceTranscriptId], references: [id], onDelete: Restrict)
   editedBy               User            @relation("MethodVersionEditedBy", fields: [editedById], references: [id], onDelete: Restrict)
+  projectSelections      ProjectMethodSelection[]
+  methodUsages           MethodUsage[]
 
   @@unique([assetId, version])
   @@index([sourceItemId])
   @@index([sourceMaterialAnalysisId])
   @@index([sourceTranscriptId])
+}
+
+model ProjectMethodSelection {
+  id               String       @id @default(cuid())
+  projectId        String
+  methodAssetId    String
+  methodVersionId  String
+  selectedByUserId String
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  project          ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  methodAsset      MethodAsset    @relation(fields: [methodAssetId], references: [id], onDelete: Cascade)
+  methodVersion    MethodVersion  @relation(fields: [methodVersionId], references: [id], onDelete: Cascade)
+  selectedBy       User           @relation("ProjectMethodSelectionUser", fields: [selectedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, selectedByUserId, methodAssetId])
+  @@index([projectId, selectedByUserId])
+  @@index([methodVersionId])
+}
+
+model MethodUsage {
+  id              String        @id @default(cuid())
+  projectId       String
+  methodAssetId   String
+  methodVersionId String
+  aiRunId         String
+  userId          String
+  createdAt       DateTime      @default(now())
+  project         ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  methodAsset     MethodAsset   @relation(fields: [methodAssetId], references: [id], onDelete: Cascade)
+  methodVersion   MethodVersion @relation(fields: [methodVersionId], references: [id], onDelete: Cascade)
+  aiRun           AIRun         @relation(fields: [aiRunId], references: [id], onDelete: Cascade)
+  user            User          @relation("MethodUsageUser", fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([aiRunId, methodVersionId])
+  @@index([projectId, userId, createdAt])
+  @@index([methodAssetId, methodVersionId])
 }
 
 model EvidenceItem {
@@ -1233,6 +1278,7 @@ model AIRun {
   recommendationBatch RecommendationBatch?
   materialAnalysis    MaterialAnalysis?
   unifiedCreativeAnalysis UnifiedCreativeAnalysis?
+  methodUsages        MethodUsage[]
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, projectId, createdAt])

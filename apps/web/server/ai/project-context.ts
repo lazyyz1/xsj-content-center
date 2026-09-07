@@ -6,6 +6,7 @@ import type { AIAction } from "./schemas";
 import { materialAnalysisOutputSchema } from "../material-analysis/schemas";
 import type { MaterialAnalysisOutput } from "../material-analysis/schemas";
 import { resolveOwnContribution } from "../../lib/content-production";
+import { getSelectedGenerationMethods } from "../project-methods/service";
 
 export type ContextBudgetLimits = { perSourceChars: number; totalSourceChars: number; totalEvidenceChars: number };
 const defaults: ContextBudgetLimits = { perSourceChars: 8_000, totalSourceChars: 24_000, totalEvidenceChars: 12_000 };
@@ -33,6 +34,10 @@ export class ProjectContextBuilder {
       needsEvidence ? db.evidenceItem.findMany({ where: { projectId: project.id, workspaceId: input.workspaceId }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], select: { id: true, type: true, excerpt: true, claim: true, note: true, sourceItemId: true } }) : [],
       needsBrief ? db.creativeBrief.findFirst({ where: { projectId: project.id, workspaceId: input.workspaceId } }) : null,
     ]);
+    const selectedMethods = input.action === "GENERATE_MOTHER_CONTENT"
+      ? await getSelectedGenerationMethods({ workspaceId: input.workspaceId, userId: input.userId, projectId: project.id })
+      : [];
+    const selectedMethodContext = selectedMethods.map(({ title, steps, applicableScenarios, boundaries }) => ({ title, steps, applicableScenarios, boundaries }));
     let contextTruncated = false;
     let sourceBudget = this.limits.totalSourceChars;
     type BuiltSource = { id: string; title: string | null; platform: string; role?: string; text?: string; materialAnalysis?: Record<string, unknown> | null; materialUnderstanding?: MaterialAnalysisOutput | { whatItSays: { summary: string; keyPoints: string[] }; reusable: never[]; doNotCopy: never[]; uncertain: never[] } | { reusable: MaterialAnalysisOutput["reusable"]; prohibitedReferenceClaims: Array<{ content: string; reason: string }> } | null };
@@ -68,8 +73,8 @@ export class ProjectContextBuilder {
     const ownContribution = resolveOwnContribution({ coreMessage: briefData?.coreMessage, background: briefData?.background, audience: briefData?.audience });
     const hasOwnBackground = Boolean(briefData?.background?.trim());
     const context = input.action === "GENERATE_MOTHER_CONTENT"
-      ? { project: { title: project.title }, mySupplement: briefData ? { myCoreViewpoint: briefData.coreMessage, audience: briefData.audience, ownBusinessExperienceOrCases: briefData.background, otherRequirements: briefData.angle } : null, ownContribution, creatorProfile: profile, materialUnderstanding: sources, confirmedFacts: evidence.map((item) => item.content) }
+      ? { project: { title: project.title }, mySupplement: briefData ? { myCoreViewpoint: briefData.coreMessage, audience: briefData.audience, ownBusinessExperienceOrCases: briefData.background, otherRequirements: briefData.angle } : null, ownContribution, creatorProfile: profile, materialUnderstanding: sources, confirmedFacts: evidence.map((item) => item.content), ...(selectedMethodContext.length ? { selectedMethods: selectedMethodContext } : {}) }
       : { project: { id: project.id, title: project.title, description: project.description, goal: project.goal, audience: project.audience }, creatorProfile: profile, sources, evidence, creativeBasis: evidence.map((item) => ({ ...item, status: "ADOPTED", verificationRequired: false })), creativeBrief: briefData };
-    return { context, ownContribution, hasOwnBackground, contextTruncated, inputSummary: { action: input.action, sourceCount: sources.length, evidenceCount: evidence.length, materialAnalysisCount: sourceRows.filter(({ sourceItem }) => sourceItem.materialAnalyses.length > 0).length, hasUnifiedCreativeAnalysis: false, hasCreativeBrief: Boolean(brief), contextChars: JSON.stringify(context).length, hasCreatorProfile: Boolean(profile), ownContribution, hasOwnBackground, contextTruncated } };
+    return { context, ownContribution, hasOwnBackground, contextTruncated, selectedMethods, inputSummary: { action: input.action, sourceCount: sources.length, evidenceCount: evidence.length, materialAnalysisCount: sourceRows.filter(({ sourceItem }) => sourceItem.materialAnalyses.length > 0).length, hasUnifiedCreativeAnalysis: false, hasCreativeBrief: Boolean(brief), contextChars: JSON.stringify(context).length, hasCreatorProfile: Boolean(profile), ownContribution, hasOwnBackground, contextTruncated, ...(selectedMethods.length ? { selectedMethodCount: selectedMethods.length, selectedMethodVersionIds: selectedMethods.map(({ methodVersionId }) => methodVersionId) } : {}) } };
   }
 }

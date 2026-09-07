@@ -71,6 +71,7 @@ describe("AI creation engine", () => {
     expect(JSON.stringify(motherUnderstanding)).toContain("当天成交13个");
     expect(JSON.stringify(mother.context)).not.toContain("Unified interpretation");
     expect(JSON.stringify(mother.context)).not.toContain("A".repeat(50));
+    expect(JSON.stringify(mother.context)).not.toContain("selectedMethods");
     expect(mother.inputSummary).toMatchObject({ materialAnalysisCount: 1, hasUnifiedCreativeAnalysis: false, hasCreatorProfile: true });
     const rewrite = await builder.build({ workspaceId: workspaceAId, userId: userAId, projectId, action: "HUMANIZE" });
     expect("sources" in rewrite.context ? rewrite.context.sources : []).toEqual([]);
@@ -101,6 +102,7 @@ describe("AI creation engine", () => {
     await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: briefRun.id, expectedVersion: 1 });
     const motherRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "GENERATE_MOTHER_CONTENT" }, { runtime });
     expect(motherCalls).toBe(1);
+    await expect(db.methodUsage.count({ where: { aiRunId: motherRun.id } })).resolves.toBe(0);
     expect(motherRun.output).toMatchObject({ recommendedAngle: "Evidence before drafting", alternativeAngles: expect.any(Array), alternativeTitles: expect.any(Array), openingHook: "Mother body", estimatedCharacterCount: 10, estimatedDurationSeconds: 2 });
     expect(motherPrompt).not.toContain("Material summary");
     expect(motherPrompt).toContain("prohibitedReferenceClaims");
