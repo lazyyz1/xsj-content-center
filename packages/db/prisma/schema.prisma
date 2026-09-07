@@ -272,6 +272,18 @@ enum MethodStatus {
   DISABLED
 }
 
+enum CreationFeedbackOutcome {
+  DIRECTLY_USED
+  USED_AFTER_EDIT
+  NOT_USED
+}
+
+enum MethodUsageFeedbackRating {
+  HELPFUL
+  NEUTRAL
+  NOT_SUITABLE
+}
+
 model User {
   id                      String               @id @default(cuid())
   name                    String
@@ -311,6 +323,8 @@ model User {
   editedMethodVersions    MethodVersion[]              @relation("MethodVersionEditedBy")
   selectedProjectMethods  ProjectMethodSelection[]     @relation("ProjectMethodSelectionUser")
   methodUsages            MethodUsage[]                @relation("MethodUsageUser")
+  creationFeedbacks       CreationFeedback[]           @relation("CreationFeedbackUser")
+  methodUsageFeedbacks    MethodUsageFeedback[]        @relation("MethodUsageFeedbackUser")
 
   @@index([systemRole])
   @@index([disabledAt])
@@ -401,6 +415,7 @@ model Workspace {
   materialAnalyses       MaterialAnalysis[]
   unifiedCreativeAnalyses UnifiedCreativeAnalysis[]
   methodAssets           MethodAsset[]
+  creationFeedbacks      CreationFeedback[]
 }
 
 model WorkspaceMember {
@@ -665,6 +680,7 @@ model ContentProject {
   unifiedCreativeAnalyses UnifiedCreativeAnalysis[]
   methodSelections       ProjectMethodSelection[]
   methodUsages            MethodUsage[]
+  creationFeedbacks      CreationFeedback[]
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
@@ -995,6 +1011,7 @@ model MethodVersion {
   editedBy               User            @relation("MethodVersionEditedBy", fields: [editedById], references: [id], onDelete: Restrict)
   projectSelections      ProjectMethodSelection[]
   methodUsages           MethodUsage[]
+  feedbacks               MethodUsageFeedback[]
 
   @@unique([assetId, version])
   @@index([sourceItemId])
@@ -1034,6 +1051,7 @@ model MethodUsage {
   methodVersion   MethodVersion @relation(fields: [methodVersionId], references: [id], onDelete: Cascade)
   aiRun           AIRun         @relation(fields: [aiRunId], references: [id], onDelete: Cascade)
   user            User          @relation("MethodUsageUser", fields: [userId], references: [id], onDelete: Restrict)
+  feedbacks       MethodUsageFeedback[]
 
   @@unique([aiRunId, methodVersionId])
   @@index([projectId, userId, createdAt])
@@ -1110,9 +1128,54 @@ model MotherContent {
   project          ContentProject      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   createdBy        User                @relation("MotherContentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   platformVariants PlatformVariant[]
+  creationFeedbacks CreationFeedback[]
 
   @@index([workspaceId, updatedAt])
   @@index([createdById])
+}
+
+model CreationFeedback {
+  id                   String                 @id @default(cuid())
+  workspaceId          String
+  projectId            String
+  userId               String
+  motherContentId      String
+  motherContentVersion Int
+  sourceAiRunId        String
+  outcome              CreationFeedbackOutcome
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  workspace            Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project              ContentProject         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user                 User                   @relation("CreationFeedbackUser", fields: [userId], references: [id], onDelete: Restrict)
+  motherContent        MotherContent          @relation(fields: [motherContentId], references: [id], onDelete: Cascade)
+  sourceAiRun          AIRun                  @relation("CreationFeedbackSourceRun", fields: [sourceAiRunId], references: [id], onDelete: Cascade)
+  methodFeedbacks      MethodUsageFeedback[]
+
+  @@unique([userId, projectId])
+  @@index([workspaceId, projectId, createdAt])
+  @@index([sourceAiRunId])
+  @@index([motherContentId, motherContentVersion])
+}
+
+model MethodUsageFeedback {
+  id                 String                    @id @default(cuid())
+  creationFeedbackId String
+  methodUsageId      String
+  methodVersionId    String
+  userId             String
+  rating             MethodUsageFeedbackRating
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  creationFeedback  CreationFeedback          @relation(fields: [creationFeedbackId], references: [id], onDelete: Cascade)
+  methodUsage       MethodUsage               @relation(fields: [methodUsageId], references: [id], onDelete: Cascade)
+  methodVersion     MethodVersion             @relation(fields: [methodVersionId], references: [id], onDelete: Cascade)
+  user              User                      @relation("MethodUsageFeedbackUser", fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([creationFeedbackId, methodUsageId])
+  @@index([methodUsageId])
+  @@index([methodVersionId])
+  @@index([userId, createdAt])
 }
 
 model CreatorProfile {
@@ -1342,6 +1405,7 @@ model AIRun {
   benchmarkStudy      BenchmarkStudy?
   unifiedCreativeAnalysis UnifiedCreativeAnalysis?
   methodUsages        MethodUsage[]
+  creationFeedbacks   CreationFeedback[] @relation("CreationFeedbackSourceRun")
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, projectId, createdAt])
