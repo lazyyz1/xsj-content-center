@@ -52,6 +52,8 @@ export type ProviderInput = { prompt: string };
 export type LLMGenerateInput = ProviderInput & {
   systemPrompt?: string;
   temperature?: number;
+  maxCompletionTokens?: number;
+  structuredOutput?: { preferJsonSchema?: boolean; schemaName?: string };
 };
 
 export type LLMTokenUsage = {

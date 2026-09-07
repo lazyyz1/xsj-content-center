@@ -20,6 +20,16 @@ export function findSourceForUser(
   });
 }
 
+export async function hasSourceDeletionReferences(prisma: PrismaClient, sourceItemId: string) {
+  const [methodVersion, benchmarkStudySample, materialDistillation, distillationMethodVersion] = await Promise.all([
+    prisma.methodVersion.findFirst({ where: { sourceItemId }, select: { id: true } }),
+    prisma.benchmarkStudySample.findFirst({ where: { sourceItemId }, select: { id: true } }),
+    prisma.materialDistillation.findFirst({ where: { sourceItemId }, select: { id: true } }),
+    prisma.methodVersion.findFirst({ where: { sourceMaterialDistillation: { sourceItemId } }, select: { id: true } }),
+  ]);
+  return Boolean(methodVersion || benchmarkStudySample || materialDistillation || distillationMethodVersion);
+}
+
 export function findIngestJobForUser(
   prisma: PrismaClient,
   input: { userId: string; workspaceId: string; jobId: string },

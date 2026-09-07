@@ -6,6 +6,7 @@ import {
   OpenAICompatibleLLMProvider,
   materialAnalysisOutputSchema,
   materialDistillationGenerationSchema,
+  materialDistillationGenerationSchemaForMode,
   materialDistillationOutputInstruction,
   materialDistillationSystemBoundary,
   openAICompatibleConfigSchema,
@@ -16,7 +17,7 @@ import {
 import { UnrecoverableError, type Job } from "bullmq";
 import type { ContentIngestPayload } from "./queue";
 
-export const MATERIAL_DISTILLATION_SCHEMA_VERSION = "material-distillation-v1" as const;
+export const MATERIAL_DISTILLATION_SCHEMA_VERSION = "material-distillation-v2" as const;
 
 type DistillationRuntime = {
   provider: LLMProvider;
@@ -28,8 +29,6 @@ type DistillationRuntime = {
 };
 
 type TranscriptSegment = { text: string; startMs?: number; endMs?: number };
-type DistillationEvidence = { segmentIndex?: number; quote?: string };
-
 function json(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
@@ -56,51 +55,49 @@ function segmentsForContext(segments: TranscriptSegment[], maximum: number) {
     if (!segment.text || characters >= maximum) return [];
     const text = segment.text.slice(0, maximum - characters);
     characters += text.length;
-    return text ? [{ segmentIndex: index, text }] : [];
+    return text ? [{ ref: `S${String(index + 1).padStart(3, "0")}`, text }] : [];
   });
 }
 
-function evidence(reference: DistillationEvidence, fullText: string, segments: TranscriptSegment[]) {
-  const quote = reference.quote?.trim();
-  if (reference.segmentIndex !== undefined) {
-    const segment = segments[reference.segmentIndex];
-    if (!segment?.text || (quote && !segment.text.includes(quote))) return null;
-    return { quote: (quote || segment.text).slice(0, 500), segmentIndex: reference.segmentIndex };
-  }
-  return quote && fullText.includes(quote) ? { quote: quote.slice(0, 500) } : null;
+function evidence(reference: string, segments: TranscriptSegment[]) {
+  const match = /^S(\d{3,})$/.exec(reference);
+  const segmentIndex = match ? Number(match[1]) - 1 : -1;
+  const segment = segments[segmentIndex];
+  return segment?.text ? { quote: segment.text.slice(0, 500), segmentIndex } : null;
 }
 
-function evidenceList(items: DistillationEvidence[], fullText: string, segments: TranscriptSegment[]) {
-  return items.flatMap((item) => {
-    const match = evidence(item, fullText, segments);
+function evidenceList(items: string[], segments: TranscriptSegment[]) {
+  return [...new Set(items)].flatMap((item) => {
+    const match = evidence(item, segments);
     return match ? [match] : [];
   });
 }
 
 /** Re-ground every retained item in the current transcript before persistence. */
-export function normalizeMaterialDistillationOutput(input: MaterialDistillationGeneration, mode: MaterialDistillationMode, fullText: string, segments: TranscriptSegment[]) {
-  const highlights = input.hasLongTermValue ? input.highlights.flatMap((item) => {
-    const grounded = evidenceList(item.evidence, fullText, segments);
-    return grounded.length ? [{ ...item, evidence: grounded }] : [];
+export function normalizeMaterialDistillationOutput(input: MaterialDistillationGeneration, mode: MaterialDistillationMode, segments: TranscriptSegment[]) {
+  const highlights = mode === "COMPREHENSIVE" && input.mode === "COMPREHENSIVE" ? input.highlights.flatMap((item) => {
+    const grounded = evidenceList(item.sourceRefs, segments);
+    return grounded.length ? [{ type: item.type, quality: item.quality, title: item.title, essence: item.shortExplanation, whyWorthAttention: "", howTo: [], applicable: [], boundaries: [], evidence: grounded }] : [];
   }) : [];
-  const copywriting = input.hasLongTermValue && input.copywriting
+  const copywriting = mode === "COPYWRITING" && input.mode === "COPYWRITING" && input.copywriting
     ? (() => {
-      const grounded = evidenceList(input.copywriting.evidence, fullText, segments);
-      return grounded.length ? { ...input.copywriting, evidence: grounded } : null;
+      const { sourceRefs, ...content } = input.copywriting;
+      const grounded = evidenceList(sourceRefs, segments);
+      return grounded.length ? { ...content, evidence: grounded } : null;
     })()
     : null;
-  const durable = highlights.length > 0 || Boolean(copywriting);
+  const durable = highlights.some((item) => item.quality === "WORTH_KEEPING") || Boolean(copywriting);
   return materialDistillationGenerationSchema.parse({
     mode,
     hasLongTermValue: durable,
     message: input.message.trim() || (durable ? "已根据视频文字稿整理出可继续参考的内容。" : "这条视频暂时没有足够依据形成可长期复用的总结。"),
-    highlights: durable ? highlights : [],
+    highlights,
     copywriting,
   });
 }
 
 export function buildMaterialDistillationPrompt(mode: MaterialDistillationMode, context: unknown) {
-  return "Action: DISTILL_MATERIAL\nMode: " + mode + "\nContext:\n" + JSON.stringify(context, null, 2) + "\n" + materialDistillationOutputInstruction;
+  return "Action: DISTILL_MATERIAL\nMode: " + mode + "\nContext:\n" + JSON.stringify(context, null, 2) + "\n" + materialDistillationOutputInstruction(mode);
 }
 
 async function loadRuntime(workspaceId: string): Promise<DistillationRuntime> {
@@ -123,7 +120,7 @@ async function loadRuntime(workspaceId: string): Promise<DistillationRuntime> {
 }
 
 function failure(error: unknown) {
-  if (error instanceof LLMError) return { code: error.code, message: error.message, retryable: error.retryable };
+  if (error instanceof LLMError) return { code: error.code, message: error.message, retryable: error.retryable, validationIssues: error.details.validationIssues };
   return { code: "MATERIAL_DISTILLATION_FAILED", message: "这次精华提炼没有完成，请重试。", retryable: false };
 }
 
@@ -207,22 +204,25 @@ export async function processMaterialDistillationJob(job: Job<ContentIngestPaylo
   let runId: string | undefined;
   try {
     const runtime = dependencies.runtime ?? await loadRuntime(record.workspaceId);
-    const systemPrompt = materialDistillationSystemBoundary + "\n\nReturn plain Simplified Chinese and exactly the requested JSON shape. Requested mode: " + distillation.mode + ". Preserve uncertainty; do not invent a durable lesson.";
-    const prompt = buildMaterialDistillationPrompt(distillation.mode as MaterialDistillationMode, context);
+    const mode = distillation.mode as MaterialDistillationMode;
+    const systemPrompt = materialDistillationSystemBoundary + "\n\nReturn plain Simplified Chinese and exactly the requested JSON schema. Requested mode: " + mode + ". Preserve uncertainty; do not invent a durable lesson.";
+    const prompt = buildMaterialDistillationPrompt(mode, context);
     const run = await db.$transaction(async (tx) => {
-      const created = await tx.aIRun.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "DISTILL_MATERIAL", provider: runtime.providerName, model: runtime.model, promptVersion: 1, status: "RUNNING", inputSummary: json(summary), metadata: json({ materialDistillationId: distillation.id, materialDistillationVersion: distillation.version, sourceItemId: record.sourceItemId, schemaVersion: MATERIAL_DISTILLATION_SCHEMA_VERSION, providerMode: runtime.mode ?? "REAL", productModel: runtime.productModel ?? null, apiModelId: runtime.apiModelId ?? runtime.model }), contextTruncated } });
+      const created = await tx.aIRun.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "DISTILL_MATERIAL", provider: runtime.providerName, model: runtime.model, promptVersion: 2, status: "RUNNING", inputSummary: json(summary), metadata: json({ materialDistillationId: distillation.id, materialDistillationVersion: distillation.version, sourceItemId: record.sourceItemId, schemaVersion: MATERIAL_DISTILLATION_SCHEMA_VERSION, structuredOutput: "JSON_SCHEMA_WHEN_SUPPORTED", providerMode: runtime.mode ?? "REAL", productModel: runtime.productModel ?? null, apiModelId: runtime.apiModelId ?? runtime.model }), contextTruncated } });
       await tx.materialDistillation.update({ where: { id: distillation.id }, data: { aiRunId: created.id } });
-      await tx.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "ai.run_started", resourceType: "ai_run", resourceId: created.id, metadata: json({ action: "DISTILL_MATERIAL", promptVersion: 1, contextTruncated, materialDistillationId: distillation.id }) } });
+      await tx.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "ai.run_started", resourceType: "ai_run", resourceId: created.id, metadata: json({ action: "DISTILL_MATERIAL", promptVersion: 2, contextTruncated, materialDistillationId: distillation.id }) } });
       return created;
     });
     runId = run.id;
-    const result = await runtime.provider.generateStructured({ systemPrompt, prompt }, materialDistillationGenerationSchema);
-    const output = normalizeMaterialDistillationOutput(result.data.value, distillation.mode as MaterialDistillationMode, fullText, segments);
+    const result = mode === "COPYWRITING"
+      ? await runtime.provider.generateStructured({ systemPrompt, prompt, maxCompletionTokens: 3_000, structuredOutput: { preferJsonSchema: true, schemaName: "material_copywriting_v2" } }, materialDistillationGenerationSchemaForMode("COPYWRITING"))
+      : await runtime.provider.generateStructured({ systemPrompt, prompt, maxCompletionTokens: 2_000, structuredOutput: { preferJsonSchema: true, schemaName: "material_discovery_v2" } }, materialDistillationGenerationSchemaForMode("COMPREHENSIVE"));
+    const output = normalizeMaterialDistillationOutput(result.data.value, mode, segments);
     const latencyMs = Date.now() - startedAt.getTime();
     await db.$transaction([
       db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(output), providerRequestId: result.data.providerRequestId, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, finishedAt: new Date() } }),
       db.materialDistillation.update({ where: { id: distillation.id }, data: { status: "COMPLETED", output: json(output), errorCode: null, errorMessage: null } }),
-      db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, provider: "LLM", operation: "DISTILL_MATERIAL", requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, metadata: json({ airRunId: run.id, sourceItemId: record.sourceItemId, materialDistillationId: distillation.id, promptVersion: 1, contextTruncated, latencyMs, providerMode: runtime.mode ?? "REAL", productModel: runtime.productModel ?? null, apiModelId: runtime.apiModelId ?? runtime.model }) } }),
+      db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, provider: "LLM", operation: "DISTILL_MATERIAL", requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, metadata: json({ airRunId: run.id, sourceItemId: record.sourceItemId, materialDistillationId: distillation.id, promptVersion: 2, contextTruncated, latencyMs, providerMode: runtime.mode ?? "REAL", productModel: runtime.productModel ?? null, apiModelId: runtime.apiModelId ?? runtime.model }) } }),
       db.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "material_distillation.succeeded", resourceType: "material_distillation", resourceId: distillation.id, metadata: json({ sourceItemId: record.sourceItemId, version: distillation.version, mode: distillation.mode, attempt, highlightCount: output.highlights.length, hasLongTermValue: output.hasLongTermValue }) } }),
       db.ingestJob.update({ where: { id: record.id }, data: { status: "SUCCEEDED", progress: 100, finishedAt: new Date(), errorCode: null, errorMessage: null, metadata: json({ ...metadata, progressStage: "SUCCEEDED", materialDistillationId: distillation.id, aiRunId: run.id }) } }),
     ]);
@@ -232,14 +232,14 @@ export async function processMaterialDistillationJob(job: Job<ContentIngestPaylo
     if (runId) {
       await db.$transaction([
         db.aIRun.update({ where: { id: runId }, data: { status: "FAILED", errorCode: failed.code, errorMessage: "精华提炼未完成。", finishedAt: new Date() } }),
-        db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, provider: "LLM", operation: "DISTILL_MATERIAL", requestId: runId, success: false, units: 1, cost: null, metadata: json({ airRunId: runId, sourceItemId: record.sourceItemId, materialDistillationId: distillation.id, errorCode: failed.code }) } }),
+        db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, provider: "LLM", operation: "DISTILL_MATERIAL", requestId: runId, success: false, units: 1, cost: null, metadata: json({ airRunId: runId, sourceItemId: record.sourceItemId, materialDistillationId: distillation.id, errorCode: failed.code, validationIssues: failed.validationIssues ?? [] }) } }),
       ]).catch(() => undefined);
     }
     const willRetry = failed.retryable && attempt < record.maxAttempts;
     await db.$transaction([
       db.ingestJob.update({ where: { id: record.id }, data: { status: willRetry ? "QUEUED" : "FAILED", progress: 0, errorCode: failed.code, errorMessage: failed.message, finishedAt: willRetry ? null : new Date() } }),
       db.materialDistillation.update({ where: { id: distillation.id }, data: { status: willRetry ? "PROCESSING" : "FAILED", errorCode: willRetry ? null : failed.code, errorMessage: willRetry ? null : failed.message } }),
-      db.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "material_distillation.failed", resourceType: "material_distillation", resourceId: distillation.id, metadata: json({ sourceItemId: record.sourceItemId, version: distillation.version, attempt, retrying: willRetry, errorCode: failed.code }) } }),
+      db.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "material_distillation.failed", resourceType: "material_distillation", resourceId: distillation.id, metadata: json({ sourceItemId: record.sourceItemId, version: distillation.version, attempt, retrying: willRetry, errorCode: failed.code, validationIssues: failed.validationIssues ?? [] }) } }),
     ]).catch(() => undefined);
     if (!failed.retryable) throw new UnrecoverableError(failed.code + ": " + failed.message);
     throw error;

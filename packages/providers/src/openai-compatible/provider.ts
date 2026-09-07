@@ -1,4 +1,4 @@
-import type { ZodType } from "zod";
+import { z, type ZodIssue, type ZodType } from "zod";
 import type { LLMProvider } from "../contracts";
 import type { LLMGenerateInput, LLMTextResult, ProviderResult } from "../types";
 import { LLMError } from "./errors";
@@ -8,15 +8,45 @@ export type OpenAICompatibleOptions = { fetch?: typeof fetch; timeoutMs?: number
 
 type RequestCapabilities = {
   supportsTemperature: boolean;
+  supportsJsonSchema: boolean;
   thinking?: { type: "disabled" };
   timeoutMs: number;
 };
 
 function resolveRequestCapabilities(config: OpenAICompatibleConfig): RequestCapabilities {
   if (config.provider.toUpperCase() === "KIMI" && config.model === "kimi-k2.6") {
-    return { supportsTemperature: false, thinking: { type: "disabled" }, timeoutMs: 120_000 };
+    return { supportsTemperature: false, supportsJsonSchema: true, thinking: { type: "disabled" }, timeoutMs: 120_000 };
   }
-  return { supportsTemperature: true, timeoutMs: 30_000 };
+  return { supportsTemperature: true, supportsJsonSchema: false, timeoutMs: 30_000 };
+}
+
+type ResponseFormat = { type: "json_object" } | { type: "json_schema"; json_schema: { name: string; strict: true; schema: Record<string, unknown> } };
+
+function receivedType(value: unknown) {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+function valueAtPath(value: unknown, path: PropertyKey[]) {
+  return path.reduce<unknown>((current, key) => current && typeof current === "object" ? (current as Record<PropertyKey, unknown>)[key] : undefined, value);
+}
+
+function validationIssue(issue: ZodIssue, raw: unknown) {
+  const expected = "expected" in issue && typeof issue.expected === "string" ? issue.expected : undefined;
+  return {
+    path: issue.path.length ? issue.path.map(String).join(".") : "root",
+    code: issue.code,
+    ...(expected ? { expected } : {}),
+    receivedType: receivedType(valueAtPath(raw, issue.path)),
+  };
+}
+
+function jsonSchemaResponseFormat(schema: ZodType, name: string): ResponseFormat {
+  const generated = z.toJSONSchema(schema) as Record<string, unknown>;
+  const portableSchema = { ...generated };
+  delete portableSchema.$schema;
+  return { type: "json_schema", json_schema: { name: name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64) || "structured_response", strict: true, schema: portableSchema } };
 }
 
 function parseStructuredJson(text: string) {
@@ -56,10 +86,14 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
   }
 
   async generateText(input: LLMGenerateInput): Promise<ProviderResult<LLMTextResult>> {
+    return this.requestWithRetries(input, { type: "json_object" });
+  }
+
+  private async requestWithRetries(input: LLMGenerateInput, responseFormat: ResponseFormat): Promise<ProviderResult<LLMTextResult>> {
     let lastError: unknown;
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
       try {
-        return await this.request(input);
+        return await this.request(input, responseFormat);
       } catch (error) {
         lastError = error;
         if (!(error instanceof LLMError) || !error.retryable || attempt >= this.maxRetries) throw error;
@@ -69,7 +103,11 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
   }
 
   async generateStructured<T>(input: LLMGenerateInput, schema: ZodType<T>) {
-    const result = await this.generateText(input);
+    const capabilities = resolveRequestCapabilities(this.config);
+    const responseFormat = input.structuredOutput?.preferJsonSchema && capabilities.supportsJsonSchema
+      ? jsonSchemaResponseFormat(schema, input.structuredOutput.schemaName ?? "structured_response")
+      : { type: "json_object" } as const;
+    const result = await this.requestWithRetries(input, responseFormat);
     let raw: unknown;
     try {
       raw = parseStructuredJson(result.data.text);
@@ -78,7 +116,10 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
     }
     const parsed = schema.safeParse(raw);
     if (!parsed.success) {
-      throw new LLMError("LLM_INVALID_RESPONSE", "AI 模型返回的数据结构不符合要求。", false, { providerRequestId: result.data.providerRequestId });
+      throw new LLMError("LLM_INVALID_RESPONSE", "AI 模型返回的数据结构不符合要求。", false, {
+        providerRequestId: result.data.providerRequestId,
+        validationIssues: parsed.error.issues.slice(0, 20).map((issue) => validationIssue(issue, raw)),
+      });
     }
     return { ...result, data: { ...result.data, value: parsed.data } };
   }
@@ -89,7 +130,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
   async classify(input: { prompt: string }) { const result = await this.generateText(input); return { providerMode: result.providerMode, data: { labels: [result.data.text] } }; }
   async adapt(input: { prompt: string; platform: string }) { return this.generate({ prompt: input.prompt }); }
 
-  private async request(input: LLMGenerateInput): Promise<ProviderResult<LLMTextResult>> {
+  private async request(input: LLMGenerateInput, responseFormat: ResponseFormat): Promise<ProviderResult<LLMTextResult>> {
     let response: Response;
     const capabilities = resolveRequestCapabilities(this.config);
     try {
@@ -104,7 +145,8 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
           ],
           ...(capabilities.supportsTemperature ? { temperature: input.temperature ?? 0.4 } : {}),
           ...(capabilities.thinking ? { thinking: capabilities.thinking } : {}),
-          response_format: { type: "json_object" },
+          ...(input.maxCompletionTokens ? { max_completion_tokens: input.maxCompletionTokens } : {}),
+          response_format: responseFormat,
         }),
         signal: AbortSignal.timeout(this.timeoutMs),
       });

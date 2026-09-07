@@ -18,7 +18,11 @@ export class LLMError extends Error {
     readonly code: LLMErrorCode,
     message: string,
     readonly retryable: boolean,
-    readonly details: { httpStatus?: number; providerRequestId?: string } = {},
+    readonly details: {
+      httpStatus?: number;
+      providerRequestId?: string;
+      validationIssues?: Array<{ path: string; code: string; expected?: string; receivedType: string }>;
+    } = {},
   ) {
     super(message);
     this.name = "LLMError";

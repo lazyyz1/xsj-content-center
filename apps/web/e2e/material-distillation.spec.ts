@@ -15,15 +15,8 @@ let worker: ReturnType<typeof createContentIngestWorker>;
 const prompts: string[] = [];
 
 function generation(mode: "COMPREHENSIVE" | "COPYWRITING") {
-  const evidence = [{ segmentIndex: 0 }];
-  const copywriting = { coreProposition: "先给判断标准，再给行动步骤", angle: "从用户不知道如何判断切入", openingLogic: "先指出判断困难", progression: ["问题", "标准", "步骤"], skeleton: ["提出问题", "给判断标准", "给行动步骤"], evidenceFunction: "原文用于支持判断顺序", reusableStrategies: ["先判断再行动"], doNotCopy: ["来源作者的客户和增长数字"], secondEditDirections: ["换成自己的真实案例", "换目标受众"], rewriteSkeleton: ["新场景", "自己的判断", "可执行动作"], evidence };
-  return {
-    mode,
-    hasLongTermValue: true,
-    message: mode === "COPYWRITING" ? "这条文案的组织方式值得参考。" : "这条视频有一项值得以后复用的方法。",
-    highlights: [{ type: mode === "COPYWRITING" ? "copy_structure" : "method", quality: "WORTH_KEEPING", title: mode === "COPYWRITING" ? "先判断再行动的文案骨架" : "先判断再行动", essence: "先明确判断标准，再给具体步骤。", whyWorthAttention: "可以迁移到其他解释型内容。", howTo: ["先给判断标准", "再给具体步骤"], applicable: ["需要解释复杂问题时"], boundaries: ["不要把来源作者的客户经历当成自己的事实"], evidence }],
-    copywriting,
-  };
+  if (mode === "COMPREHENSIVE") return { mode, message: "这条视频有一项值得以后复用的方法。", highlights: [{ type: "method", quality: "WORTH_KEEPING", title: "先判断再行动", shortExplanation: "先明确判断标准，再给具体步骤。", sourceRefs: ["S001"] }] };
+  return { mode, message: "这条文案的组织方式值得参考。", copywriting: { coreProposition: "先给判断标准，再给行动步骤", angle: "从用户不知道如何判断切入", openingLogic: "先指出判断困难", progression: ["问题", "标准", "步骤"], skeleton: ["提出问题", "给判断标准", "给行动步骤"], evidenceFunction: "原文用于支持判断顺序", reusableStrategies: ["先判断再行动"], doNotCopy: ["来源作者的客户和增长数字"], secondEditDirections: ["换成自己的真实案例", "换目标受众"], rewriteSkeleton: ["新场景", "自己的判断", "可执行动作"], sourceRefs: ["S001"] } };
 }
 
 function m1Understanding() {
@@ -99,11 +92,14 @@ test("distills one transcript, restores results, preserves history, and saves gr
   await expect(db.aIRun.count({ where: { workspaceId, action: "DISTILL_MATERIAL" } })).resolves.toBe(1);
   const complete = page.getByTestId("material-distillation-card");
   await expect(complete).toContainText("值得留下");
-  await expect(complete.getByRole("heading", { name: "这条文案怎么组织" })).toBeVisible();
+  await expect(complete.getByRole("heading", { name: "这条文案怎么组织" })).toHaveCount(0);
   await complete.getByText(/为什么这么总结/).first().click();
   await expect(complete.getByText("先明确判断标准，再给具体步骤。", { exact: true }).first()).toBeVisible();
   await complete.getByRole("button", { name: "留下这个" }).click();
   await complete.getByLabel("方法名称").fill("我想试试的判断方法");
+  await complete.getByLabel("怎么用").fill("先给判断标准\n再给具体步骤");
+  await complete.getByLabel("适合什么时候用").fill("需要解释复杂问题时");
+  await complete.getByLabel("什么时候不太适合").fill("不要把来源作者的客户经历当成自己的事实");
   await complete.getByRole("button", { name: "保存方法" }).dblclick();
   await expect(complete).toContainText("已保存到我的方法");
   await expect(db.methodAsset.count({ where: { workspaceId, ownerUserId: user.id } })).resolves.toBe(1);
@@ -113,6 +109,9 @@ test("distills one transcript, restores results, preserves history, and saves gr
   const methodDetail = page.getByTestId("method-detail");
   await expect(methodDetail).toContainText("单条视频精华提炼 · 值得提炼的视频");
   await expect(methodDetail).toContainText("仅自己可见");
+  const blockedDelete = await page.request.delete(`/api/source-items/${source.id}`);
+  expect(blockedDelete.status()).toBe(409);
+  await expect(blockedDelete.json()).resolves.toMatchObject({ error: "SOURCE_IN_USE", message: "这条素材已经被研究结果或方法引用，暂时不能永久删除。你可以先归档。" });
   const storedMethod = await db.methodVersion.findFirstOrThrow({ where: { sourceMaterialDistillationId: { not: null }, asset: { workspaceId, ownerUserId: user.id } } });
   expect(storedMethod).toMatchObject({ sourceItemId: null, sourceMaterialAnalysisId: null, sourceBenchmarkStudyId: null });
 
@@ -125,7 +124,7 @@ test("distills one transcript, restores results, preserves history, and saves gr
   await page.getByTestId("material-distillation-card").getByRole("button", { name: "重新提炼" }).click();
   await page.getByTestId("material-distillation-card").getByRole("button", { name: "重点看看这条文案怎么写" }).click();
   await page.getByTestId("material-distillation-card").getByRole("button", { name: "确认并开始" }).click();
-  await expect(page.getByTestId("material-distillation-card")).toContainText("先判断再行动的文案骨架", { timeout: 20_000 });
+  await expect(page.getByTestId("material-distillation-card")).toContainText("这条文案怎么组织", { timeout: 20_000 });
   await expect(page.getByTestId("material-distillation-card")).toContainText("历史提炼");
   await expect(db.materialDistillation.count({ where: { sourceItemId: source.id } })).resolves.toBe(3);
   expect(completed.id).toBeTruthy();
@@ -145,5 +144,10 @@ test("distills one transcript, restores results, preserves history, and saves gr
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.reload();
   await expect(page.getByTestId("material-distillation-card").getByRole("button", { name: "重新提炼" })).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "素材工作栏" }).click();
+  const viewerWorkspace = page.getByRole("dialog", { name: "素材工作栏" });
+  await viewerWorkspace.getByRole("tab", { name: "处理" }).click();
+  await expect(viewerWorkspace.getByText("高级处理信息", { exact: true })).toHaveCount(0);
   expect((await page.request.post(`/api/source-items/${source.id}/distillation`, { data: { mode: "COMPREHENSIVE" } })).status()).toBe(403);
 });

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { db, findCollectionForUser, findIngestJobForUser, findSourceAssetForUser, findSourceForUser, findTagForUser } from "./index";
+import { db, findCollectionForUser, findIngestJobForUser, findSourceAssetForUser, findSourceForUser, findTagForUser, hasSourceDeletionReferences } from "./index";
 
 describe("source domain workspace isolation", () => {
   const runId = randomUUID();
@@ -56,5 +56,27 @@ describe("source domain workspace isolation", () => {
   it("enforces collection item uniqueness", async () => {
     await db.collectionItem.create({ data: { collectionId: collectionBId, sourceItemId: sourceBId } });
     await expect(db.collectionItem.create({ data: { collectionId: collectionBId, sourceItemId: sourceBId } })).rejects.toMatchObject({ code: "P2002" });
+  });
+
+  it("detects every durable source reference before permanent deletion", async () => {
+    const transcript = await db.transcript.create({ data: { workspaceId: workspaceBId, sourceItemId: sourceBId, provider: "MANUAL", providerMode: "REAL", fullText: "来源文字", segments: [] } });
+    const analysis = await db.materialAnalysis.create({ data: { workspaceId: workspaceBId, sourceItemId: sourceBId, createdById: userBId, version: 1, status: "COMPLETED", tags: [], keywords: [], keyPoints: [], transcriptUpdatedAtAtAnalysis: transcript.updatedAt } });
+    const methodAsset = await db.methodAsset.create({ data: { workspaceId: workspaceBId, ownerUserId: userBId } });
+    const distillation = await db.materialDistillation.create({ data: { workspaceId: workspaceBId, sourceItemId: sourceBId, createdById: userBId, version: 1, mode: "COMPREHENSIVE", status: "COMPLETED", schemaVersion: "material-distillation-v1", output: {}, transcriptUpdatedAtAtDistillation: transcript.updatedAt } });
+    await db.methodVersion.createMany({ data: [
+      { assetId: methodAsset.id, version: 1, title: "直接来源方法", steps: ["一步"], applicableScenarios: ["场景"], boundaries: ["边界"], sourceItemId: sourceBId, sourceMaterialAnalysisId: analysis.id, sourceTranscriptId: transcript.id, sourceTranscriptUpdatedAt: transcript.updatedAt, evidence: [], editedById: userBId },
+      { assetId: methodAsset.id, version: 2, title: "提炼方法", steps: ["一步"], applicableScenarios: ["场景"], boundaries: ["边界"], sourceMaterialDistillationId: distillation.id, evidence: [], editedById: userBId },
+    ] });
+    const account = await db.benchmarkAccount.create({ data: { workspaceId: workspaceBId, platform: "DOUYIN", externalAccountId: `source-delete-${runId}`, name: "删除预检", createdById: userBId } });
+    const study = await db.benchmarkStudy.create({ data: { workspaceId: workspaceBId, benchmarkAccountId: account.id, createdById: userBId, version: 1, status: "COMPLETED", sampleCount: 1, insufficientSamples: true, output: {} } });
+    await db.benchmarkStudySample.create({ data: { studyId: study.id, sourceItemId: sourceBId, materialAnalysisId: analysis.id } });
+
+    await expect(hasSourceDeletionReferences(db, sourceBId)).resolves.toBe(true);
+    await db.methodAsset.delete({ where: { id: methodAsset.id } });
+    await expect(hasSourceDeletionReferences(db, sourceBId)).resolves.toBe(true);
+    await db.benchmarkStudy.delete({ where: { id: study.id } });
+    await expect(hasSourceDeletionReferences(db, sourceBId)).resolves.toBe(true);
+    await db.materialDistillation.delete({ where: { id: distillation.id } });
+    await expect(hasSourceDeletionReferences(db, sourceBId)).resolves.toBe(false);
   });
 });

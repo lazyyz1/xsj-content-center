@@ -61,6 +61,26 @@ describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
     expect(lastRequestBody).not.toHaveProperty("temperature");
   });
 
+  it("uses native JSON Schema only when a supported Kimi call requests it", async () => {
+    const schema = z.object({ ok: z.boolean(), title: z.string() }).strict();
+    await kimiProvider().generateStructured({ prompt: "KIMI_STRUCTURED", maxCompletionTokens: 2_000, structuredOutput: { preferJsonSchema: true, schemaName: "material_discovery_v2" } }, schema);
+    expect(lastRequestBody).toMatchObject({
+      max_completion_tokens: 2_000,
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: "material_discovery_v2", strict: true, schema: { type: "object", additionalProperties: false } },
+      },
+    });
+
+    await provider().generateStructured({ prompt: "GENERIC_STRUCTURED", structuredOutput: { preferJsonSchema: true } }, schema);
+    expect(lastRequestBody).toMatchObject({ response_format: { type: "json_object" } });
+  });
+
+  it("keeps existing Kimi structured calls on JSON mode unless they opt in", async () => {
+    await kimiProvider().generateStructured({ prompt: "KIMI_EXISTING_STRUCTURED" }, z.object({ ok: z.boolean(), title: z.string() }));
+    expect(lastRequestBody).toMatchObject({ response_format: { type: "json_object" } });
+  });
+
   it("keeps the existing temperature behavior for other compatible providers", async () => {
     await provider().generateText({ prompt: "GENERIC_SUCCESS" });
     expect(lastRequestBody).toMatchObject({ model: "fixture-model", temperature: 0.4, response_format: { type: "json_object" } });
@@ -96,6 +116,9 @@ describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
   });
 
   it("rejects invalid structured output", async () => {
-    await expect(provider().generateStructured({ prompt: "INVALID_STRUCTURED" }, z.object({ ok: z.boolean(), title: z.string() }))).rejects.toMatchObject({ code: "LLM_INVALID_RESPONSE" });
+    await expect(provider().generateStructured({ prompt: "INVALID_STRUCTURED" }, z.object({ ok: z.boolean(), title: z.string() }))).rejects.toMatchObject({
+      code: "LLM_INVALID_RESPONSE",
+      details: { validationIssues: expect.arrayContaining([expect.objectContaining({ path: "ok", code: "invalid_type", expected: "boolean", receivedType: "undefined" })]) },
+    });
   });
 });
