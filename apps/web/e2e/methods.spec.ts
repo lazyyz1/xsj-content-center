@@ -11,6 +11,8 @@ const email = `methods-${runId}@example.test`;
 const otherEmail = `methods-other-${runId}@example.test`;
 const studioEmail = `methods-studio-${runId}@example.test`;
 const journeyEmail = `methods-journey-${runId}@example.test`;
+const creatorMethodsEmail = `creator-methods-${runId}@example.test`;
+const creatorMethodsOtherEmail = `creator-methods-other-${runId}@example.test`;
 const password = "safe-e2e-password";
 let fixture: Server;
 let fixtureOrigin = "";
@@ -59,13 +61,14 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await worker?.close();
   await new Promise<void>((resolve) => fixture.close(() => resolve()));
-  const users = await db.user.findMany({ where: { email: { in: [email, otherEmail, studioEmail, journeyEmail] } }, select: { id: true } });
+  const users = await db.user.findMany({ where: { email: { in: [email, otherEmail, studioEmail, journeyEmail, creatorMethodsEmail, creatorMethodsOtherEmail] } }, select: { id: true } });
   if (users.length) {
     const workspaces = await db.workspace.findMany({ where: { members: { some: { userId: { in: users.map(({ id }) => id) } } } }, select: { id: true } });
     await db.methodAsset.deleteMany({ where: { workspaceId: { in: workspaces.map(({ id }) => id) } } });
+    await db.benchmarkStudy.deleteMany({ where: { workspaceId: { in: workspaces.map(({ id }) => id) } } });
     await db.workspace.deleteMany({ where: { id: { in: workspaces.map(({ id }) => id) } } });
   }
-  await db.user.deleteMany({ where: { email: { in: [email, otherEmail, studioEmail, journeyEmail] } } });
+  await db.user.deleteMany({ where: { email: { in: [email, otherEmail, studioEmail, journeyEmail, creatorMethodsEmail, creatorMethodsOtherEmail] } } });
   await db.$disconnect();
 });
 
@@ -314,4 +317,83 @@ test("completes one continuous first-phase journey from transcript to an editabl
   await expect(page.getByTestId("studio-method-selector")).toContainText("连续旅程方法");
   await expect(page.getByLabel("有什么只有我们能讲的？")).toHaveValue("我们只验证过两次内部流程，这是我自己的事实。");
   expect(await page.locator("main.app-main").innerText()).not.toMatch(/MaterialAnalysis|IngestJob|Queue|Worker|AIRun|ApiUsage|Workspace|Provider|MethodAsset|MethodVersion|MethodUsage|ProjectMethodSelection|Transcript ID|SourceItem ID|enum|JSON|Schema|Prompt|context|token|stale|version mismatch|optimistic lock/i);
+});
+
+test("shows personal method status and real 30-day usage without inferring a habit", async ({ page, browser }) => {
+  test.setTimeout(90_000);
+  const user = await signIn(page, creatorMethodsEmail, "Creator Methods Owner");
+  const workspaceId = user.workspaceMemberships[0]!.workspaceId;
+  const source = await db.sourceItem.create({ data: { workspaceId, createdById: user.id, sourceType: "VIDEO", sourcePlatform: "DOUYIN", title: "单条内容方法来源", status: "READY", transcript: { create: { workspaceId, provider: "FIXTURE", providerMode: "REAL", fullText: "可靠的方法来源。", segments: [] } } } });
+  const transcript = await db.transcript.findUniqueOrThrow({ where: { sourceItemId: source.id } });
+  const analysis = await db.materialAnalysis.create({ data: { workspaceId, sourceItemId: source.id, createdById: user.id, version: 1, status: "COMPLETED", tags: [], keywords: [], keyPoints: [], understanding: {}, transcriptUpdatedAtAtAnalysis: transcript.updatedAt } });
+  const singleSource = { sourceItemId: source.id, sourceMaterialAnalysisId: analysis.id, sourceTranscriptId: transcript.id, sourceTranscriptUpdatedAt: transcript.updatedAt };
+  async function singleMethod(status: "CORE" | "TRIAL" | "SAVED" | "DISABLED", title: string) {
+    const asset = await db.methodAsset.create({ data: { workspaceId, ownerUserId: user.id, status } });
+    const version = await db.methodVersion.create({ data: { assetId: asset.id, version: 1, title, steps: ["先说清问题"], applicableScenarios: ["需要解释时"], boundaries: ["不要虚构事实"], ...singleSource, evidence: [], editedById: user.id } });
+    return { asset, version };
+  }
+  const core = await singleMethod("CORE", "我确认的常用方法");
+  const trial = await singleMethod("TRIAL", "我正在试的方法");
+  const disabled = await singleMethod("DISABLED", "我已停用的方法");
+
+  const benchmark = await db.benchmarkAccount.create({ data: { workspaceId, platform: "DOUYIN", externalAccountId: `creator-methods-${runId}`, name: "方法来源账号", createdById: user.id } });
+  const samples: Array<{ sourceItemId: string; materialAnalysisId: string }> = [];
+  for (let index = 0; index < 6; index += 1) {
+    const item = await db.sourceItem.create({ data: { workspaceId, createdById: user.id, sourceType: "VIDEO", sourcePlatform: "DOUYIN", externalId: `creator-method-source-${runId}-${index}`, title: `账号代表内容 ${index + 1}`, status: "READY", transcript: { create: { workspaceId, provider: "FIXTURE", providerMode: "REAL", fullText: `账号依据 ${index + 1}`, segments: [] } } } });
+    const itemTranscript = await db.transcript.findUniqueOrThrow({ where: { sourceItemId: item.id } });
+    const itemAnalysis = await db.materialAnalysis.create({ data: { workspaceId, sourceItemId: item.id, createdById: user.id, version: 1, status: "COMPLETED", tags: [], keywords: [], keyPoints: [], understanding: {}, transcriptUpdatedAtAtAnalysis: itemTranscript.updatedAt } });
+    samples.push({ sourceItemId: item.id, materialAnalysisId: itemAnalysis.id });
+  }
+  const study = await db.benchmarkStudy.create({ data: { workspaceId, benchmarkAccountId: benchmark.id, createdById: user.id, version: 1, status: "COMPLETED", sampleCount: 6, insufficientSamples: false, output: {}, samples: { create: samples } } });
+  const savedAsset = await db.methodAsset.create({ data: { workspaceId, ownerUserId: user.id, status: "SAVED" } });
+  await db.methodVersion.create({ data: { assetId: savedAsset.id, version: 1, title: "刚收藏的对标方法", steps: ["只作为表达参考"], applicableScenarios: ["需要时"], boundaries: ["不复制来源事实"], sourceBenchmarkStudyId: study.id, evidence: [], editedById: user.id } });
+
+  const project = await db.contentProject.create({ data: { workspaceId, createdById: user.id, title: "最近使用项目" } });
+  async function run(status: "SUCCEEDED" | "FAILED") { return db.aIRun.create({ data: { workspaceId, projectId: project.id, userId: user.id, action: "GENERATE_MOTHER_CONTENT", provider: "FIXTURE", model: "fixture", promptVersion: 1, status, inputSummary: {}, createdAt: new Date(), finishedAt: new Date() } }); }
+  const [coreRun, trialRun, disabledRun] = await Promise.all([run("SUCCEEDED"), run("FAILED"), run("SUCCEEDED")]);
+  await run("SUCCEEDED");
+  await db.methodUsage.createMany({ data: [
+    { projectId: project.id, methodAssetId: core.asset.id, methodVersionId: core.version.id, aiRunId: coreRun.id, userId: user.id },
+    { projectId: project.id, methodAssetId: trial.asset.id, methodVersionId: trial.version.id, aiRunId: trialRun.id, userId: user.id },
+    { projectId: project.id, methodAssetId: disabled.asset.id, methodVersionId: disabled.version.id, aiRunId: disabledRun.id, userId: user.id },
+  ] });
+
+  await page.goto("/projects");
+  await page.getByRole("link", { name: "我的创作方法" }).click();
+  await expect(page.getByRole("heading", { name: "我的创作方法" })).toBeVisible();
+  await expect(page.getByText(/不会因为一次收藏或一次生成/)).toBeVisible();
+  await expect(page.getByTestId("creator-methods-summary")).toContainText("4 次口播稿生成记录");
+  await expect(page.getByTestId("core-methods")).toContainText("我确认的常用方法");
+  await expect(page.getByTestId("core-methods")).not.toContainText("刚收藏的对标方法");
+  await expect(page.getByTestId("trial-methods")).toContainText("我正在试的方法");
+  await expect(page.getByTestId("saved-methods")).toContainText("刚收藏的对标方法");
+  await expect(page.getByTestId("saved-methods")).toContainText("来源：方法来源账号 · 本次 6 条代表内容研究");
+  const recent = page.getByTestId("recently-used-methods");
+  await expect(recent).toContainText("实际尝试 1 次 · 成功生成 1 次 · 生成失败 0 次");
+  await expect(recent).toContainText("实际尝试 1 次 · 成功生成 0 次 · 生成失败 1 次");
+  await page.getByTestId("disabled-methods").locator("summary").click();
+  await expect(page.getByTestId("disabled-methods")).toContainText("我已停用的方法");
+  await expect(page.getByTestId("disabled-methods")).toContainText("过去使用过，当前已停用");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  expect(await page.locator("main.app-main").innerText()).not.toMatch(/CreatorMethodProfile|PersonalMethodProfile|MethodUsage|AIRun|MethodAsset|MethodVersion|CORE|TRIAL|DISABLED|Workspace|ownerUserId|usage count query|aggregation|score|confidence/i);
+
+  const otherRegistration = await auth.api.signUpEmail({ body: { name: "Creator Methods Other", email: creatorMethodsOtherEmail, password }, asResponse: true });
+  const other = await otherRegistration.clone().json() as { user: { id: string } };
+  await db.workspaceMember.create({ data: { workspaceId, userId: other.user.id, role: "EDITOR" } });
+  const otherContext = await browser.newContext({ baseURL: process.env.APP_URL ?? "http://localhost:3000" });
+  await otherContext.addCookies(sessionCookies(otherRegistration));
+  const otherPage = await otherContext.newPage();
+  await otherPage.goto("/projects/methods");
+  await expect(otherPage.getByText("还没有创作方法")).toBeVisible();
+  expect(await otherPage.locator("main.app-main").innerText()).not.toContain("我确认的常用方法");
+  await otherContext.close();
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByTestId("core-methods").getByRole("link", { name: "查看/调整方法" }).click();
+  await page.getByTestId("method-detail").getByRole("button", { name: "试用中", exact: true }).click();
+  await expect(page.getByTestId("method-detail")).toContainText("方法状态已更新");
+  await page.goto("/projects/methods");
+  await expect(page.getByTestId("core-methods")).not.toContainText("我确认的常用方法");
+  await expect(page.getByTestId("trial-methods")).toContainText("我确认的常用方法");
 });
