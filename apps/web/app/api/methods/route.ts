@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
-import { createMethodFromAnalysis, createMethodSchema, listMethods, methodStatusSchema, MethodError } from "@/server/methods/service";
+import { createMethodFromAnalysis, createMethodFromBenchmarkStudy, createMethodSchema, listMethods, methodStatusSchema, MethodError } from "@/server/methods/service";
 
 function methodApiError(error: unknown) {
   if (!(error instanceof MethodError)) return null;
@@ -27,7 +27,11 @@ export async function POST(request: Request) {
   const parsed = createMethodSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return apiError("INVALID_METHOD_INPUT", 400, "请检查方法名称、步骤和适用边界。");
   try {
-    return NextResponse.json(await createMethodFromAnalysis({ ...parsed.data, workspaceId: context.workspace.id, ownerUserId: context.session.user.id }), { status: 201 });
+    const data = parsed.data;
+    if ("benchmarkStudyId" in data) {
+      return NextResponse.json(await createMethodFromBenchmarkStudy({ ...data, workspaceId: context.workspace.id, ownerUserId: context.session.user.id }), { status: 201 });
+    }
+    return NextResponse.json(await createMethodFromAnalysis({ ...data, workspaceId: context.workspace.id, ownerUserId: context.session.user.id }), { status: 201 });
   } catch (error) {
     return methodApiError(error) ?? apiError("METHOD_CREATE_FAILED", 500, "无法保存方法。");
   }

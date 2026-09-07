@@ -2,6 +2,7 @@ import "server-only";
 
 import { db, type Prisma } from "@content-center/db";
 import { materialAnalysisOutputSchema, type CurrentMaterialAnalysisOutput } from "../material-analysis/schemas";
+import { benchmarkAnalysisOutputSchema, type BenchmarkCommonMethod } from "@content-center/providers";
 import { z } from "zod";
 
 const requiredText = (maximum: number) => z.string().trim().min(1).max(maximum);
@@ -13,10 +14,15 @@ export const methodContentSchema = z.object({
   boundaries: z.array(requiredText(300)).min(1).max(8),
 }).strict();
 
-export const createMethodSchema = methodContentSchema.extend({
+const createMethodFromAnalysisSchema = methodContentSchema.extend({
   materialAnalysisId: z.string().trim().min(1).max(200),
   methodIndex: z.number().int().min(0).max(20),
 }).strict();
+const createMethodFromBenchmarkSchema = methodContentSchema.partial().extend({
+  benchmarkStudyId: z.string().trim().min(1).max(200),
+  methodIndex: z.number().int().min(0).max(20),
+}).strict();
+export const createMethodSchema = z.union([createMethodFromAnalysisSchema, createMethodFromBenchmarkSchema]);
 
 export const updateMethodSchema = methodContentSchema.extend({ expectedVersion: z.number().int().min(1) }).strict();
 export const methodStatusSchema = z.enum(["SAVED", "TRIAL", "CORE", "DISABLED"]);
@@ -28,7 +34,7 @@ export class MethodError extends Error {
   }
 }
 
-type MethodEvidenceDTO = { quote: string; segmentIndex?: number; startMs?: number; endMs?: number };
+type MethodEvidenceDTO = { quote: string; sampleId?: string; segmentIndex?: number; startMs?: number; endMs?: number };
 
 export type MethodVersionDTO = {
   id: string;
@@ -39,13 +45,17 @@ export type MethodVersionDTO = {
   boundaries: string[];
   evidence: MethodEvidenceDTO[];
   source: {
-    sourceItemId: string;
+    sourceItemId: string | null;
     title: string;
-    platform: string;
-    materialAnalysisId: string;
-    transcriptId: string;
-    transcriptUpdatedAt: string;
+    platform: string | null;
+    materialAnalysisId: string | null;
+    transcriptId: string | null;
+    transcriptUpdatedAt: string | null;
     stale: boolean;
+    benchmarkStudyId: string | null;
+    benchmarkAccountName: string | null;
+    sampleCount: number | null;
+    samples: { sourceItemId: string; title: string }[];
   };
   editedBy: string;
   createdAt: string;
@@ -77,6 +87,7 @@ function evidence(value: Prisma.JsonValue): MethodEvidenceDTO[] {
     if (typeof candidate.quote !== "string" || !candidate.quote.trim()) return [];
     return [{
       quote: candidate.quote,
+      ...(typeof candidate.sampleId === "string" ? { sampleId: candidate.sampleId } : {}),
       ...(typeof candidate.segmentIndex === "number" ? { segmentIndex: candidate.segmentIndex } : {}),
       ...(typeof candidate.startMs === "number" ? { startMs: candidate.startMs } : {}),
       ...(typeof candidate.endMs === "number" ? { endMs: candidate.endMs } : {}),
@@ -93,10 +104,24 @@ function evidenceMatchesTranscript(item: { quote: string; segmentIndex?: number 
   return typeof text === "string" && (text === item.quote || text.startsWith(item.quote));
 }
 
+function m1EvidenceQuotes(value: unknown, quotes = new Set<string>()) {
+  if (Array.isArray(value)) { value.forEach((item) => m1EvidenceQuotes(item, quotes)); return quotes; }
+  if (!value || typeof value !== "object") return quotes;
+  for (const [key, child] of Object.entries(value)) {
+    if (key === "evidence" && Array.isArray(child)) for (const item of child) {
+      const quote = item && typeof item === "object" && !Array.isArray(item) ? (item as Record<string, unknown>).quote : undefined;
+      if (typeof quote === "string" && quote.trim()) quotes.add(quote.trim());
+    }
+    m1EvidenceQuotes(child, quotes);
+  }
+  return quotes;
+}
+
 const methodVersionInclude = {
   sourceItem: { select: { id: true, title: true, sourcePlatform: true } },
   sourceMaterialAnalysis: { select: { id: true } },
   sourceTranscript: { select: { id: true, updatedAt: true } },
+  sourceBenchmarkStudy: { select: { id: true, sampleCount: true, benchmarkAccount: { select: { name: true } }, samples: { orderBy: { createdAt: "asc" }, select: { sourceItemId: true, sourceItem: { select: { title: true } } } } } },
   editedBy: { select: { name: true } },
 } as const;
 
@@ -104,6 +129,10 @@ type MethodAssetRow = Prisma.MethodAssetGetPayload<{ include: { versions: { incl
 type MethodVersionRow = MethodAssetRow["versions"][number];
 
 function toVersionDTO(row: MethodVersionRow): MethodVersionDTO {
+  const study = row.sourceBenchmarkStudy;
+  const sourceItem = row.sourceItem;
+  const sourceAnalysis = row.sourceMaterialAnalysis;
+  const sourceTranscript = row.sourceTranscript;
   return {
     id: row.id,
     version: row.version,
@@ -113,13 +142,17 @@ function toVersionDTO(row: MethodVersionRow): MethodVersionDTO {
     boundaries: strings(row.boundaries),
     evidence: evidence(row.evidence),
     source: {
-      sourceItemId: row.sourceItem.id,
-      title: row.sourceItem.title || "未命名素材",
-      platform: row.sourceItem.sourcePlatform,
-      materialAnalysisId: row.sourceMaterialAnalysis.id,
-      transcriptId: row.sourceTranscript.id,
-      transcriptUpdatedAt: row.sourceTranscriptUpdatedAt.toISOString(),
-      stale: row.sourceTranscript.updatedAt > row.sourceTranscriptUpdatedAt,
+      sourceItemId: sourceItem?.id ?? null,
+      title: study ? `${study.benchmarkAccount.name} · 本次 ${study.sampleCount} 条代表内容研究` : sourceItem?.title || "未命名素材",
+      platform: sourceItem?.sourcePlatform ?? null,
+      materialAnalysisId: sourceAnalysis?.id ?? null,
+      transcriptId: sourceTranscript?.id ?? null,
+      transcriptUpdatedAt: row.sourceTranscriptUpdatedAt?.toISOString() ?? null,
+      stale: Boolean(sourceTranscript && row.sourceTranscriptUpdatedAt && sourceTranscript.updatedAt > row.sourceTranscriptUpdatedAt),
+      benchmarkStudyId: study?.id ?? null,
+      benchmarkAccountName: study?.benchmarkAccount.name ?? null,
+      sampleCount: study?.sampleCount ?? null,
+      samples: study?.samples.map((sample) => ({ sourceItemId: sample.sourceItemId, title: sample.sourceItem.title || "未命名内容" })) ?? [],
     },
     editedBy: row.editedBy.name,
     createdAt: row.createdAt.toISOString(),
@@ -226,6 +259,67 @@ export async function createMethodFromAnalysis(input: {
   return result;
 }
 
+function benchmarkMethodContent(method: BenchmarkCommonMethod, input: { title?: string; steps?: string[]; applicableScenarios?: string[]; boundaries?: string[] }) {
+  return methodContentSchema.safeParse({
+    title: input.title ?? method.title,
+    steps: input.steps ?? (typeof method.howTo === "string" ? [method.howTo] : method.howTo),
+    applicableScenarios: input.applicableScenarios ?? (typeof method.applicable === "string" ? [method.applicable] : method.applicable),
+    boundaries: input.boundaries ?? (typeof method.boundaries === "string" ? [method.boundaries] : method.boundaries),
+  });
+}
+
+export async function createMethodFromBenchmarkStudy(input: {
+  workspaceId: string;
+  ownerUserId: string;
+  benchmarkStudyId: string;
+  methodIndex: number;
+  title?: string;
+  steps?: string[];
+  applicableScenarios?: string[];
+  boundaries?: string[];
+}) {
+  await assertMethodEditor({ workspaceId: input.workspaceId, userId: input.ownerUserId });
+  if (!Number.isInteger(input.methodIndex) || input.methodIndex < 0) throw new MethodError("METHOD_INVALID", "这次研究暂时没有可保存的方法。");
+  const study = await db.benchmarkStudy.findFirst({
+    where: { id: input.benchmarkStudyId, workspaceId: input.workspaceId, status: "COMPLETED" },
+    include: { samples: { select: { id: true, sourceItemId: true, materialAnalysis: { select: { understanding: true } } } } },
+  });
+  if (!study) throw new MethodError("METHOD_INVALID", "这次研究暂时没有可保存的方法。");
+  const parsedOutput = benchmarkAnalysisOutputSchema.safeParse(study.output);
+  const method = parsedOutput.success && parsedOutput.data.stableMethodsFound ? parsedOutput.data.commonMethods[input.methodIndex] : undefined;
+  if (!method) throw new MethodError("METHOD_INVALID", "这次研究暂时没有可保存的方法。");
+  const content = benchmarkMethodContent(method, input);
+  if (!content.success) throw new MethodError("METHOD_INVALID", "请检查方法名称、步骤和适用边界。");
+  const evidenceBySample = new Map(study.samples.map((sample) => [sample.id, m1EvidenceQuotes(sample.materialAnalysis.understanding)]));
+  const groundedEvidence = method.evidence.filter((item) => evidenceBySample.get(item.sampleId)?.has(item.quote.trim()));
+  if (!groundedEvidence.length) throw new MethodError("METHOD_INVALID", "这次研究没有足够的原文依据。");
+  const asset = await db.$transaction(async (tx) => {
+    const created = await tx.methodAsset.create({ data: { workspaceId: input.workspaceId, ownerUserId: input.ownerUserId, status: "SAVED", statusUpdatedAt: new Date() } });
+    await tx.methodVersion.create({
+      data: {
+        assetId: created.id,
+        version: 1,
+        title: content.data.title,
+        steps: json(content.data.steps),
+        applicableScenarios: json(content.data.applicableScenarios),
+        boundaries: json(content.data.boundaries),
+        sourceBenchmarkStudyId: study.id,
+        sourceItemId: null,
+        sourceMaterialAnalysisId: null,
+        sourceTranscriptId: null,
+        sourceTranscriptUpdatedAt: null,
+        evidence: json(groundedEvidence),
+        editedById: input.ownerUserId,
+      },
+    });
+    await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.ownerUserId, action: "method.created_from_benchmark_study", resourceType: "method_asset", resourceId: created.id, metadata: json({ benchmarkStudyId: study.id, methodIndex: input.methodIndex, sampleCount: study.sampleCount }) } });
+    return created;
+  });
+  const result = await getMethod({ workspaceId: input.workspaceId, ownerUserId: input.ownerUserId, methodId: asset.id });
+  if (!result) throw new MethodError("METHOD_NOT_FOUND", "方法不存在。");
+  return result;
+}
+
 function versionConflict(error: unknown) {
   return Boolean(error && typeof error === "object" && "code" in error && (error.code === "P2002" || error.code === "P2034"));
 }
@@ -249,7 +343,7 @@ export async function updateMethodContent(input: {
       const current = asset?.versions[0];
       if (!asset || !current) throw new MethodError("METHOD_NOT_FOUND", "方法不存在。");
       if (current.version !== input.expectedVersion) throw new MethodError("METHOD_VERSION_CONFLICT", "这个方法刚刚有新的修改，请刷新后再保存。");
-      await tx.methodVersion.create({ data: { assetId: asset.id, version: current.version + 1, title: content.data.title, steps: json(content.data.steps), applicableScenarios: json(content.data.applicableScenarios), boundaries: json(content.data.boundaries), sourceItemId: current.sourceItemId, sourceMaterialAnalysisId: current.sourceMaterialAnalysisId, sourceTranscriptId: current.sourceTranscriptId, sourceTranscriptUpdatedAt: current.sourceTranscriptUpdatedAt, evidence: json(current.evidence ?? []), editedById: input.ownerUserId } });
+      await tx.methodVersion.create({ data: { assetId: asset.id, version: current.version + 1, title: content.data.title, steps: json(content.data.steps), applicableScenarios: json(content.data.applicableScenarios), boundaries: json(content.data.boundaries), sourceItemId: current.sourceItemId, sourceMaterialAnalysisId: current.sourceMaterialAnalysisId, sourceTranscriptId: current.sourceTranscriptId, sourceTranscriptUpdatedAt: current.sourceTranscriptUpdatedAt, sourceBenchmarkStudyId: current.sourceBenchmarkStudyId, evidence: json(current.evidence ?? []), editedById: input.ownerUserId } });
       await tx.methodAsset.update({ where: { id: asset.id }, data: { updatedAt: new Date() } });
       await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.ownerUserId, action: "method.version_created", resourceType: "method_asset", resourceId: asset.id, metadata: { version: current.version + 1 } } });
     }, { isolationLevel: "Serializable" });

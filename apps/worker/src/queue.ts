@@ -1,6 +1,7 @@
-import { Queue, UnrecoverableError, Worker } from "bullmq";
+import { Queue, UnrecoverableError, Worker, type Job } from "bullmq";
 import { processContentIngestJob } from "./ingest";
 import { processMaterialAnalysisJob } from "./material-analysis";
+import { processBenchmarkStudyJob } from "./benchmark-analysis";
 import { createRedisConnection } from "./redis-connection";
 import { processTranscribeSourceJob } from "./transcription";
 import {
@@ -23,6 +24,7 @@ export const SYSTEM_HEALTH_CHECK = "SYSTEM_HEALTH_CHECK";
 export const CONTENT_INGEST_QUEUE = "content-ingest";
 export const CONTENT_INGEST = "CONTENT_INGEST";
 export const ANALYZE_MATERIAL = "ANALYZE_MATERIAL";
+export const ANALYZE_BENCHMARK = "ANALYZE_BENCHMARK";
 
 export type ContentIngestPayload = {
   jobId: string;
@@ -30,6 +32,14 @@ export type ContentIngestPayload = {
   sourceItemId: string;
   requestedById: string;
 };
+
+export type BenchmarkStudyPayload = {
+  studyId: string;
+  workspaceId: string;
+  requestedById: string;
+};
+
+export type ContentIngestJobPayload = ContentIngestPayload | BenchmarkStudyPayload;
 export function createHealthQueue() {
   return new Queue(SYSTEM_QUEUE, { connection: createRedisConnection() });
 }
@@ -51,14 +61,15 @@ export function createHealthWorker() {
 }
 
 export function createContentIngestQueue() {
-  return new Queue<ContentIngestPayload>(CONTENT_INGEST_QUEUE, { connection: createRedisConnection() });
+  return new Queue<ContentIngestJobPayload>(CONTENT_INGEST_QUEUE, { connection: createRedisConnection() });
 }
 
-async function enqueueOnContentQueue(name: typeof CONTENT_INGEST | typeof ANALYZE_MATERIAL, payload: ContentIngestPayload, maxAttempts: number) {
+async function enqueueOnContentQueue(name: typeof CONTENT_INGEST | typeof ANALYZE_MATERIAL | typeof ANALYZE_BENCHMARK, payload: ContentIngestJobPayload, maxAttempts: number) {
   const queue = createContentIngestQueue();
   try {
+    const payloadId = "jobId" in payload ? payload.jobId : payload.studyId;
     return await queue.add(name, payload, {
-      jobId: `${payload.jobId}-${Date.now()}`,
+      jobId: `${payloadId}-${Date.now()}`,
       attempts: maxAttempts,
       backoff: { type: "exponential", delay: 500 },
       removeOnComplete: true,
@@ -73,16 +84,21 @@ export async function enqueueMaterialAnalysis(payload: ContentIngestPayload, max
   return enqueueOnContentQueue(ANALYZE_MATERIAL, payload, maxAttempts);
 }
 
+export async function enqueueBenchmarkStudy(payload: BenchmarkStudyPayload, maxAttempts = 3) {
+  return enqueueOnContentQueue(ANALYZE_BENCHMARK, payload, maxAttempts);
+}
+
 export async function enqueueContentIngest(payload: ContentIngestPayload, maxAttempts = 3) {
   return enqueueOnContentQueue(CONTENT_INGEST, payload, maxAttempts);
 }
 
 export function createContentIngestWorker() {
-  return new Worker<ContentIngestPayload>(
+  return new Worker<ContentIngestJobPayload>(
     CONTENT_INGEST_QUEUE,
     async (job) => {
-      if (job.name === CONTENT_INGEST) return processContentIngestJob(job);
-      if (job.name === ANALYZE_MATERIAL) return processMaterialAnalysisJob(job);
+      if (job.name === CONTENT_INGEST) return processContentIngestJob(job as Job<ContentIngestPayload>);
+      if (job.name === ANALYZE_MATERIAL) return processMaterialAnalysisJob(job as Job<ContentIngestPayload>);
+      if (job.name === ANALYZE_BENCHMARK) return processBenchmarkStudyJob(job as Job<BenchmarkStudyPayload>);
       throw new UnrecoverableError(`Unsupported job: ${job.name}`);
     },
     { connection: createRedisConnection(), concurrency: 2 },

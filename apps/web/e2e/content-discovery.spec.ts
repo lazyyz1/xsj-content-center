@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { db } from "@content-center/db";
+import { db, ensurePersonalWorkspaceForUser } from "@content-center/db";
 import { minioStorageFromEnv } from "@content-center/providers";
 import { createContentIngestWorker } from "@content-center/worker/queue";
 import { expect, test } from "@playwright/test";
+import { auth } from "../lib/auth";
 
 const runId = randomUUID();
 const email = `discovery-e2e-${runId}@example.test`;
@@ -23,6 +24,13 @@ async function requestBody(request: import("node:http").IncomingMessage) {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as Record<string, unknown>;
+}
+
+function sessionCookies(response: Response) {
+  return response.headers.getSetCookie().map((header) => {
+    const [pair] = header.split(";", 1); const separator = pair!.indexOf("=");
+    return { name: pair!.slice(0, separator), value: pair!.slice(separator + 1), domain: "localhost", path: "/", httpOnly: true, sameSite: "Lax" as const };
+  });
 }
 
 test.beforeAll(async () => {
@@ -100,13 +108,12 @@ test.afterAll(async () => {
 
 test("discovery search → idea/library/project/benchmark stays explicit and isolated", async ({ page }) => {
   test.setTimeout(120_000);
-  await page.goto("/register");
-  await page.getByLabel("姓名").fill("Discovery E2E Owner");
-  await page.getByLabel("邮箱").fill(email);
-  await page.getByLabel("密码").fill(password);
-  await page.getByRole("button", { name: "创建账号" }).click();
-  await page.getByLabel("Workspace 名称").fill("Discovery E2E Workspace");
-  await page.getByRole("button", { name: "创建 Workspace" }).click();
+  const registration = await auth.api.signUpEmail({ body: { name: "Discovery E2E Owner", email, password }, asResponse: true });
+  expect(registration.ok).toBe(true);
+  const registered = await registration.clone().json() as { user: { id: string } };
+  await ensurePersonalWorkspaceForUser(db, { userId: registered.user.id });
+  await page.context().addCookies(sessionCookies(registration));
+  await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/dashboard$/);
 
   const user = await db.user.findUniqueOrThrow({ where: { email }, include: { workspaceMemberships: true } });

@@ -12,6 +12,7 @@ export * from "./safe-url";
 export * from "./source-providers";
 export * from "./source-external-metadata";
 export * from "./material-analysis";
+export * from "./benchmark-analysis";
 export * from "./types";
 export * from "./redfox/index";
 export * from "./doubao/index";

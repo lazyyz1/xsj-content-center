@@ -148,6 +148,7 @@ enum EvidenceType {
 
 enum PromptType {
   ANALYZE_MATERIAL
+  ANALYZE_BENCHMARK
   UNIFIED_CREATIVE_ANALYSIS
   ANALYZE_SOURCES
   EXTRACT_EVIDENCE
@@ -167,6 +168,12 @@ enum PromptType {
 }
 
 enum MaterialAnalysisStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum BenchmarkStudyStatus {
   PROCESSING
   COMPLETED
   FAILED
@@ -298,6 +305,7 @@ model User {
   createdContentIdeas     ContentIdea[]          @relation("ContentIdeaCreatedBy")
   createdRecommendationBatches RecommendationBatch[] @relation("RecommendationBatchCreatedBy")
   createdMaterialAnalyses MaterialAnalysis[]           @relation("MaterialAnalysisCreatedBy")
+  createdBenchmarkStudies BenchmarkStudy[]             @relation("BenchmarkStudyCreatedBy")
   createdUnifiedCreativeAnalyses UnifiedCreativeAnalysis[] @relation("UnifiedCreativeAnalysisCreatedBy")
   ownedMethodAssets       MethodAsset[]                @relation("MethodAssetOwner")
   editedMethodVersions    MethodVersion[]              @relation("MethodVersionEditedBy")
@@ -386,6 +394,7 @@ model Workspace {
   contentIdeas        ContentIdea[]
   trendSnapshots      TrendSnapshot[]
   benchmarkContentSnapshots BenchmarkContentSnapshot[]
+  benchmarkStudies    BenchmarkStudy[]
   recommendationBatches RecommendationBatch[]
   recommendationItems RecommendationItem[]
   recommendationEvidence RecommendationEvidence[]
@@ -472,6 +481,7 @@ model SourceItem {
   ideaReferences ContentIdeaReference[]
   materialAnalyses MaterialAnalysis[]
   methodVersionsFromSource MethodVersion[] @relation("MethodVersionSourceItem")
+  benchmarkStudySamples BenchmarkStudySample[]
 
   @@unique([workspaceId, canonicalUrl])
   @@unique([workspaceId, sourcePlatform, externalId])
@@ -681,6 +691,7 @@ model BenchmarkAccount {
   creatorProfile    CreatorProfile? @relation(fields: [creatorProfileId], references: [id], onDelete: SetNull)
   createdBy         User           @relation("BenchmarkAccountCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   contentSnapshots  BenchmarkContentSnapshot[]
+  studies           BenchmarkStudy[]
 
   @@unique([workspaceId, platform, externalAccountId])
   @@index([workspaceId, enabled, updatedAt])
@@ -702,10 +713,57 @@ model BenchmarkContentSnapshot {
   observedAt         DateTime         @default(now())
   workspace          Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   benchmarkAccount   BenchmarkAccount @relation(fields: [benchmarkAccountId], references: [id], onDelete: Cascade)
+  studySamples       BenchmarkStudySample[] @relation("BenchmarkStudySampleSnapshot")
 
   @@unique([workspaceId, platform, externalId])
   @@index([workspaceId, observedAt])
   @@index([benchmarkAccountId, observedAt])
+}
+
+model BenchmarkStudy {
+  id                String                @id @default(cuid())
+  workspaceId       String
+  benchmarkAccountId String
+  createdById       String
+  version           Int
+  status            BenchmarkStudyStatus  @default(PROCESSING)
+  sampleCount       Int
+  insufficientSamples Boolean
+  output            Json?
+  aiRunId           String?               @unique
+  errorCode         String?
+  errorMessage      String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  workspace         Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  benchmarkAccount  BenchmarkAccount     @relation(fields: [benchmarkAccountId], references: [id], onDelete: Cascade)
+  createdBy         User                  @relation("BenchmarkStudyCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  aiRun             AIRun?                @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
+  samples           BenchmarkStudySample[]
+  methodVersions    MethodVersion[]
+
+  @@unique([benchmarkAccountId, version])
+  @@index([workspaceId, benchmarkAccountId, createdAt])
+  @@index([workspaceId, status])
+  @@index([createdById])
+}
+
+model BenchmarkStudySample {
+  id                 String             @id @default(cuid())
+  studyId            String
+  sourceItemId       String
+  materialAnalysisId String
+  snapshotId         String?
+  createdAt          DateTime           @default(now())
+  study              BenchmarkStudy    @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  sourceItem         SourceItem        @relation(fields: [sourceItemId], references: [id], onDelete: Restrict)
+  materialAnalysis   MaterialAnalysis  @relation(fields: [materialAnalysisId], references: [id], onDelete: Restrict)
+  snapshot           BenchmarkContentSnapshot? @relation("BenchmarkStudySampleSnapshot", fields: [snapshotId], references: [id], onDelete: SetNull)
+
+  @@unique([studyId, sourceItemId])
+  @@index([sourceItemId])
+  @@index([materialAnalysisId])
+  @@index([snapshotId])
 }
 
 model ContentIdea {
@@ -888,6 +946,7 @@ model MaterialAnalysis {
   aiRun                         AIRun?                  @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
   createdBy                     User                   @relation("MaterialAnalysisCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   methodVersions                MethodVersion[]         @relation("MethodVersionSourceAnalysis")
+  benchmarkStudySamples         BenchmarkStudySample[]
 
   @@unique([sourceItemId, version])
   @@index([workspaceId, sourceItemId, createdAt])
@@ -920,17 +979,19 @@ model MethodVersion {
   steps                   Json
   applicableScenarios     Json
   boundaries             Json
-  sourceItemId           String
-  sourceMaterialAnalysisId String
-  sourceTranscriptId     String
-  sourceTranscriptUpdatedAt DateTime
+  sourceItemId           String?
+  sourceMaterialAnalysisId String?
+  sourceTranscriptId     String?
+  sourceTranscriptUpdatedAt DateTime?
+  sourceBenchmarkStudyId String?
   evidence               Json
   editedById             String
   createdAt              DateTime        @default(now())
   asset                  MethodAsset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
-  sourceItem             SourceItem      @relation("MethodVersionSourceItem", fields: [sourceItemId], references: [id], onDelete: Restrict)
-  sourceMaterialAnalysis MaterialAnalysis @relation("MethodVersionSourceAnalysis", fields: [sourceMaterialAnalysisId], references: [id], onDelete: Restrict)
-  sourceTranscript       Transcript      @relation("MethodVersionSourceTranscript", fields: [sourceTranscriptId], references: [id], onDelete: Restrict)
+  sourceItem             SourceItem?      @relation("MethodVersionSourceItem", fields: [sourceItemId], references: [id], onDelete: Restrict)
+  sourceMaterialAnalysis MaterialAnalysis? @relation("MethodVersionSourceAnalysis", fields: [sourceMaterialAnalysisId], references: [id], onDelete: Restrict)
+  sourceTranscript       Transcript?      @relation("MethodVersionSourceTranscript", fields: [sourceTranscriptId], references: [id], onDelete: Restrict)
+  sourceBenchmarkStudy   BenchmarkStudy? @relation(fields: [sourceBenchmarkStudyId], references: [id], onDelete: Restrict)
   editedBy               User            @relation("MethodVersionEditedBy", fields: [editedById], references: [id], onDelete: Restrict)
   projectSelections      ProjectMethodSelection[]
   methodUsages           MethodUsage[]
@@ -939,6 +1000,7 @@ model MethodVersion {
   @@index([sourceItemId])
   @@index([sourceMaterialAnalysisId])
   @@index([sourceTranscriptId])
+  @@index([sourceBenchmarkStudyId])
 }
 
 model ProjectMethodSelection {
@@ -1277,6 +1339,7 @@ model AIRun {
   reviewRecords      ReviewRecord[]
   recommendationBatch RecommendationBatch?
   materialAnalysis    MaterialAnalysis?
+  benchmarkStudy      BenchmarkStudy?
   unifiedCreativeAnalysis UnifiedCreativeAnalysis?
   methodUsages        MethodUsage[]
 
