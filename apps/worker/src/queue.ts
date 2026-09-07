@@ -1,5 +1,6 @@
 import { Queue, UnrecoverableError, Worker } from "bullmq";
 import { processContentIngestJob } from "./ingest";
+import { processMaterialAnalysisJob } from "./material-analysis";
 import { createRedisConnection } from "./redis-connection";
 import { processTranscribeSourceJob } from "./transcription";
 import {
@@ -21,6 +22,7 @@ export const SYSTEM_QUEUE = "system-health";
 export const SYSTEM_HEALTH_CHECK = "SYSTEM_HEALTH_CHECK";
 export const CONTENT_INGEST_QUEUE = "content-ingest";
 export const CONTENT_INGEST = "CONTENT_INGEST";
+export const ANALYZE_MATERIAL = "ANALYZE_MATERIAL";
 
 export type ContentIngestPayload = {
   jobId: string;
@@ -52,10 +54,10 @@ export function createContentIngestQueue() {
   return new Queue<ContentIngestPayload>(CONTENT_INGEST_QUEUE, { connection: createRedisConnection() });
 }
 
-export async function enqueueContentIngest(payload: ContentIngestPayload, maxAttempts = 3) {
+async function enqueueOnContentQueue(name: typeof CONTENT_INGEST | typeof ANALYZE_MATERIAL, payload: ContentIngestPayload, maxAttempts: number) {
   const queue = createContentIngestQueue();
   try {
-    return await queue.add(CONTENT_INGEST, payload, {
+    return await queue.add(name, payload, {
       jobId: `${payload.jobId}-${Date.now()}`,
       attempts: maxAttempts,
       backoff: { type: "exponential", delay: 500 },
@@ -67,12 +69,21 @@ export async function enqueueContentIngest(payload: ContentIngestPayload, maxAtt
   }
 }
 
+export async function enqueueMaterialAnalysis(payload: ContentIngestPayload, maxAttempts = 3) {
+  return enqueueOnContentQueue(ANALYZE_MATERIAL, payload, maxAttempts);
+}
+
+export async function enqueueContentIngest(payload: ContentIngestPayload, maxAttempts = 3) {
+  return enqueueOnContentQueue(CONTENT_INGEST, payload, maxAttempts);
+}
+
 export function createContentIngestWorker() {
   return new Worker<ContentIngestPayload>(
     CONTENT_INGEST_QUEUE,
     async (job) => {
-      if (job.name !== CONTENT_INGEST) throw new UnrecoverableError(`Unsupported job: ${job.name}`);
-      return processContentIngestJob(job);
+      if (job.name === CONTENT_INGEST) return processContentIngestJob(job);
+      if (job.name === ANALYZE_MATERIAL) return processMaterialAnalysisJob(job);
+      throw new UnrecoverableError(`Unsupported job: ${job.name}`);
     },
     { connection: createRedisConnection(), concurrency: 2 },
   );

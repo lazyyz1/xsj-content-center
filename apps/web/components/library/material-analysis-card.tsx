@@ -2,9 +2,9 @@
 
 import { Badge, Button, Card } from "@content-center/ui";
 import { useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
-import type { MaterialAnalysisDTO } from "@/server/material-analysis/service";
-import type { MaterialAnalysisOutput } from "@/server/material-analysis/schemas";
+import { useEffect, useState } from "react";
+import type { MaterialAnalysisDTO, MaterialAnalysisJobDTO } from "@/server/material-analysis/service";
+import type { CurrentMaterialAnalysisOutput, MaterialAnalysisOutput } from "@/server/material-analysis/schemas";
 
 async function request(url: string, method: string, body?: unknown) {
   const response = await fetch(url, { method, headers: body ? { "content-type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
@@ -13,26 +13,49 @@ async function request(url: string, method: string, body?: unknown) {
   return result;
 }
 
-export function MaterialAnalysisCard({ sourceId, current: initial, canEdit, llmStatus, hasTranscript, embedded = false, showCreateAction = true }: {
-  sourceId: string; current: MaterialAnalysisDTO | null; canEdit: boolean; llmStatus: string; hasTranscript: boolean; embedded?: boolean; showCreateAction?: boolean;
+export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt: latestInitial, job: jobInitial, history, canEdit, llmStatus, hasTranscript, embedded = false, showCreateAction = true }: {
+  sourceId: string;
+  current: MaterialAnalysisDTO | null;
+  latestAttempt: MaterialAnalysisDTO | null;
+  job: MaterialAnalysisJobDTO | null;
+  history: MaterialAnalysisDTO[];
+  canEdit: boolean;
+  llmStatus: string;
+  hasTranscript: boolean;
+  embedded?: boolean;
+  showCreateAction?: boolean;
 }) {
   const router = useRouter();
-  const [current, setCurrent] = useState(initial);
+  const [currentResult, setCurrentResult] = useState(initial);
+  const [latestAttempt, setLatestAttempt] = useState(latestInitial);
+  const [job, setJob] = useState(jobInitial);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const configured = llmStatus === "CONFIGURED";
-  const statusLabel = current?.status === "PROCESSING" ? "整理中" : current?.status === "FAILED" ? "整理失败" : current?.status === "COMPLETED" ? "已整理" : "尚未整理";
+  const processing = latestAttempt?.status === "PROCESSING" || job?.status === "QUEUED" || job?.status === "RUNNING";
+  const failed = !processing && latestAttempt?.status === "FAILED";
   const Container = embedded ? "section" : Card;
 
+  useEffect(() => {
+    setCurrentResult(initial);
+    setLatestAttempt(latestInitial);
+    setJob(jobInitial);
+  }, [initial, latestInitial, jobInitial]);
+
   async function analyze() {
-    if (current && !confirming) { setConfirming(true); return; }
+    const needsConfirmation = Boolean(currentResult && latestAttempt?.id === currentResult.id && !processing);
+    if (needsConfirmation && !confirming) { setConfirming(true); return; }
     setBusy(true); setError(""); setNotice("");
     try {
-      const result = await request(`/api/source-items/${sourceId}/material-analysis`, "POST") as MaterialAnalysisDTO;
-      setCurrent(result); setConfirming(false); setNotice("素材整理已完成。"); router.refresh();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "整理失败，请重试。"); }
+      const result = await request(`/api/source-items/${sourceId}/material-analysis`, "POST") as MaterialAnalysisRequestDTO;
+      setLatestAttempt({ ...result, status: "PROCESSING", errorCode: null, errorMessage: null });
+      setJob({ id: result.jobId, status: "QUEUED", progress: 0, attempt: 0, maxAttempts: 3, errorCode: null, errorMessage: null, updatedAt: new Date().toISOString() });
+      setConfirming(false);
+      setNotice("已提交内容拆解，你可以先离开页面，回来后继续查看。");
+      router.refresh();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "内容拆解失败，请重试。"); }
     finally { setBusy(false); }
   }
 
@@ -42,29 +65,60 @@ export function MaterialAnalysisCard({ sourceId, current: initial, canEdit, llmS
     catch (cause) { setError(cause instanceof Error ? cause.message : "无法进入创作页面。"); setBusy(false); }
   }
 
+  const statusLabel = processing ? (job?.status === "QUEUED" ? "等待分析" : "正在分析") : failed ? "需要重试" : currentResult ? "已完成" : "尚未拆解";
+  const actionLabel = failed ? "重新分析" : currentResult ? "重新分析" : "拆解这条内容";
+
   return <Container className={embedded ? "" : "p-5"} data-testid="material-analysis-card">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">素材整理</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">看清素材讲了什么、哪些可借、哪些不能照搬。</p></div><div className="flex gap-2"><Badge>{statusLabel}</Badge>{current?.stale ? <Badge className="border-[var(--warning)] text-[var(--warning)]">转写已更新</Badge> : null}</div></div>
-    {!hasTranscript && !current ? <p className="mt-4 text-sm text-[var(--text-secondary)]">请先完成语音转写，再整理素材。</p> : null}
-    {hasTranscript && !configured && !current ? <div className="mt-4 rounded-xl border border-dashed p-4 text-sm text-[var(--text-secondary)]">内容整理服务暂时不可用，请联系管理员。</div> : null}
-    {current?.stale ? <div className="mt-4 rounded-xl border border-[var(--warning)] p-4 text-sm"><p className="font-medium text-[var(--warning)]">转写内容已更新，当前素材整理基于旧版本。</p><p className="mt-1 text-[var(--text-secondary)]">旧整理结果仍可查看，重新整理后才会采用最新转写。</p></div> : null}
-    {current?.status === "FAILED" ? <p role="alert" className="mt-4 text-sm text-[var(--danger)]">{current.errorMessage || "整理失败，请重试。"}</p> : null}
-    {current?.status === "COMPLETED" && current.understanding ? <UnderstandingView value={current.understanding} /> : null}
-    {current?.status === "COMPLETED" && current.legacy ? <section className="mt-5 rounded-xl border p-4"><div className="flex items-center gap-2"><h3 className="font-medium">旧版整理结果</h3><Badge>旧版</Badge></div><p className="mt-3 whitespace-pre-wrap text-sm leading-6">{current.summary || "暂无摘要"}</p>{current.keyPoints.length ? <ul className="mt-3 list-disc space-y-1 pl-5 text-sm">{current.keyPoints.map((point) => <li key={point}>{point}</li>)}</ul> : null}<p className="mt-3 text-xs text-[var(--text-secondary)]">旧结果会保留，不会自动调用 AI。</p></section> : null}
-    {confirming ? <div className="mt-4 rounded-xl border border-[var(--warning)] p-4 text-sm"><p>会生成一份新的整理结果，旧版本仍会保留。</p><div className="mt-3 flex gap-2"><Button disabled={busy} onClick={analyze}>确认重新整理</Button><Button variant="secondary" onClick={() => setConfirming(false)}>取消</Button></div></div> : null}
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">内容拆解</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">看看这条内容是怎么讲的，以及有哪些方法值得借鉴。</p></div><Badge>{statusLabel}</Badge></div>
+    {!hasTranscript && !currentResult ? <p className="mt-4 text-sm text-[var(--text-secondary)]">请先完成视频文字稿，再进行内容拆解。</p> : null}
+    {hasTranscript && !configured && !currentResult ? <div className="mt-4 rounded-xl border border-dashed p-4 text-sm text-[var(--text-secondary)]">内容拆解服务暂时不可用，请联系管理员。</div> : null}
+    {processing ? <div className="mt-4 rounded-xl border border-[var(--accent)] p-4 text-sm"><p className="font-medium">正在拆解，你可以先离开这个页面，回来后继续查看。</p><p className="mt-1 text-[var(--text-secondary)]">已有的历史拆解仍然保留。</p></div> : null}
+    {failed ? <div className="mt-4 rounded-xl border border-[var(--danger)] p-4 text-sm"><p className="font-medium text-[var(--danger)]">这次没有分析完成</p><p className="mt-1 text-[var(--text-secondary)]">已有的历史结果不会受到影响。</p></div> : null}
+    {currentResult?.stale ? <div className="mt-4 rounded-xl border border-[var(--warning)] p-4 text-sm"><p className="font-medium text-[var(--warning)]">视频文字稿已更新，当前拆解基于旧版本。</p><p className="mt-1 text-[var(--text-secondary)]">旧拆解仍可查看，重新分析后才会采用最新文字稿。</p></div> : null}
+    {currentResult?.status === "COMPLETED" && currentResult.understanding ? <UnderstandingView value={currentResult.understanding} /> : null}
+    {history.filter((item) => item.status === "COMPLETED" && item.id !== currentResult?.id).length ? <details className="mt-5 rounded-xl border p-4"><summary className="cursor-pointer text-sm font-medium">历史拆解</summary><div className="mt-3 grid gap-3">{history.filter((item) => item.status === "COMPLETED" && item.id !== currentResult?.id).map((item) => <details key={item.id} className="rounded-lg bg-[var(--surface-elevated)] p-3 text-sm"><summary className="cursor-pointer font-medium">第 {item.version} 版 · {item.summary || "暂无摘要"}</summary>{item.understanding ? <div className="mt-3"><UnderstandingView value={item.understanding} /></div> : <p className="mt-2 text-[var(--text-secondary)]">暂无可展开的完整结果。</p>}</details>)}</div></details> : null}
+    {confirming ? <div className="mt-4 rounded-xl border border-[var(--warning)] p-4 text-sm"><p>会生成一份新的拆解，旧版本仍会保留。</p><div className="mt-3 flex gap-2"><Button disabled={busy} onClick={analyze}>确认重新分析</Button><Button variant="secondary" onClick={() => setConfirming(false)}>取消</Button></div></div> : null}
     {error ? <p role="alert" className="mt-4 text-sm text-[var(--danger)]">{error}</p> : null}{notice ? <p role="status" className="mt-4 text-sm text-[var(--success)]">{notice}</p> : null}
-    {canEdit ? <div className="mt-5 flex flex-wrap gap-2">{hasTranscript && configured && current?.status !== "PROCESSING" ? <Button variant="secondary" disabled={busy || confirming} onClick={analyze}>{busy ? "处理中…" : current?.legacy ? "按新的方式重新整理" : current?.stale ? "重新整理素材" : current ? "重新整理" : "开始整理"}</Button> : null}{showCreateAction && current?.status === "COMPLETED" ? <Button disabled={busy} onClick={createContent}>基于这条素材创作</Button> : null}</div> : null}
+    {canEdit ? <div className="mt-5 flex flex-wrap gap-2">{hasTranscript && configured && !processing ? <Button variant="secondary" disabled={busy || confirming} onClick={analyze}>{busy ? "提交中…" : actionLabel}</Button> : null}{showCreateAction && currentResult?.status === "COMPLETED" ? <Button disabled={busy} onClick={createContent}>基于这条素材创作</Button> : null}</div> : null}
   </Container>;
 }
 
+function isCurrent(value: MaterialAnalysisOutput): value is CurrentMaterialAnalysisOutput {
+  return "expression" in value && "methods" in value;
+}
+
+type Evidence = { quote: string; startMs?: number; endMs?: number };
+type MaterialAnalysisRequestDTO = Omit<MaterialAnalysisDTO, "status"> & { jobId: string; status: "QUEUED" };
+
 function UnderstandingView({ value }: { value: MaterialAnalysisOutput }) {
-  return <div className="mt-4 divide-y" data-testid="compact-material-analysis">
-    <Block title="它讲了什么"><CompactSummary value={value.whatItSays.summary} /></Block>
-    <Block title={`值得借 · ${value.reusable.length}`}><ItemList items={value.reusable.map((item) => ({ main: item.content, detail: item.whyUseful }))} /></Block>
-    <Block title={`不要照搬 · ${value.doNotCopy.length}`}><ItemList items={value.doNotCopy.map((item) => ({ main: item.content, detail: item.reason }))} empty="没有明显需要避开的内容" /></Block>
-    <Block title={`需要确认 · ${value.uncertain.length}`}><ItemList items={value.uncertain.map((item) => ({ main: item.content, detail: item.reason }))} empty="没有待确认信息" /></Block>
+  if (!isCurrent(value)) return <LegacyUnderstandingView value={value} />;
+  return <div className="mt-5 grid gap-5" data-testid="material-analysis-result">
+    <section aria-labelledby="expression-result-title"><h3 id="expression-result-title" className="text-base font-semibold">这条内容是怎么讲的</h3><p className="mt-2 text-sm leading-6">{value.whatItSays.summary}</p>{value.whatItSays.keyPoints.length ? <ul className="mt-3 list-disc space-y-1 pl-5 text-sm leading-6">{value.whatItSays.keyPoints.map((point) => <li key={point}>{point}</li>)}</ul> : null}<EvidenceDetails items={value.whatItSays.evidence} /></section>
+    <section className="rounded-xl border bg-[var(--surface-elevated)] p-4"><h4 className="font-medium">表达拆解</h4><div className="mt-3 grid gap-4"><AnalysisSection title="主要说给谁听" value={value.expression.audience.summary} evidence={value.expression.audience.evidence} /><AnalysisSection title="开头怎么抓住人" value={value.expression.opening.summary} evidence={value.expression.opening.evidence} /><AnalysisSection title="内容怎么往下推进" value={value.expression.progression.summary} evidence={value.expression.progression.evidence} steps={value.expression.progression.steps} /><AnalysisSection title="用什么方式让人相信" value={value.expression.support.summary} evidence={value.expression.support.evidence} /><AnalysisSection title="情绪和表达节奏" value={value.expression.emotionalOrRhetoricalShift.summary} evidence={value.expression.emotionalOrRhetoricalShift.evidence} /><AnalysisSection title="怎么收尾" value={value.expression.ending.summary} evidence={value.expression.ending.evidence} /></div></section>
+    <section aria-labelledby="method-result-title"><h3 id="method-result-title" className="text-base font-semibold">可以借鉴的方法</h3>{value.methods.evidenceStatus === "INSUFFICIENT" || !value.methods.items.length ? <div className="mt-3 rounded-xl border border-dashed p-4 text-sm"><p className="font-medium">这部分暂时不总结成方法</p><p className="mt-1 leading-6 text-[var(--text-secondary)]">目前相关内容太少，还不足以形成一个可靠的方法。你可以先参考上面的表达拆解。</p></div> : <><p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{value.methods.reason}</p><div className="mt-3 grid gap-3">{value.methods.items.map((item, index) => <MethodCard key={`${item.title}-${index}`} value={item} />)}</div></>}</section>
+    {(value.doNotCopy.length || value.uncertain.length) ? <details className="rounded-xl border p-4"><summary className="cursor-pointer text-sm font-medium">需要留意的地方</summary><div className="mt-3 grid gap-3"><CautionList title="不建议照搬" items={value.doNotCopy} /><CautionList title="还需要确认" items={value.uncertain} /></div></details> : null}
   </div>;
 }
 
-function Block({ title, children }: { title: string; children: ReactNode }) { return <section className="py-4 first:pt-0"><h3 className="text-sm font-medium">{title}</h3><div className="mt-2">{children}</div></section>; }
-function CompactSummary({ value }: { value: string }) { const [open, setOpen] = useState(false); const long = value.length > 72; return <><p className={`text-sm leading-6 ${!open && long ? "max-h-[4.5rem] overflow-hidden" : ""}`}>{value}</p>{long ? <button className="mt-1 text-xs font-medium text-[var(--accent)]" onClick={() => setOpen((current) => !current)}>{open ? "收起" : "展开"}</button> : null}</>; }
-function ItemList({ items, empty = "暂无" }: { items: Array<{ main: string; detail: string }>; empty?: string }) { const [open, setOpen] = useState(false); const visible = open ? items : items.slice(0, 4); return items.length ? <><div className="grid gap-2.5">{visible.map((item, index) => <article key={`${item.main}-${index}`}><p className="text-sm leading-5">{item.main}</p><p className="mt-0.5 line-clamp-1 text-xs leading-5 text-[var(--text-secondary)]">{item.detail}</p></article>)}</div>{items.length > 4 ? <button className="mt-2 text-xs font-medium text-[var(--accent)]" onClick={() => setOpen((current) => !current)}>{open ? "收起" : `查看全部 ${items.length} 条`}</button> : null}</> : <p className="text-sm text-[var(--text-secondary)]">{empty}</p>; }
+function AnalysisSection({ title, value, evidence, steps }: { title: string; value: string; evidence: Evidence[]; steps?: string[] }) {
+  return <article><h5 className="text-sm font-medium">{title}</h5><p className="mt-1 text-sm leading-6">{value}</p>{steps?.length ? <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-6">{steps.map((step) => <li key={step}>{step}</li>)}</ol> : null}<EvidenceDetails items={evidence} /></article>;
+}
+
+function MethodCard({ value }: { value: CurrentMaterialAnalysisOutput["methods"]["items"][number] }) {
+  return <article className="mt-3 rounded-xl border p-4"><h4 className="font-medium">{value.title || "可尝试的方法"}</h4><MethodList title="怎么用" items={value.howTo} /><MethodList title="适合什么时候用" items={value.applicable} /><MethodList title="什么时候不太适合" items={value.boundaries} /><p className="mt-4 rounded-lg bg-[var(--surface-elevated)] p-3 text-xs leading-5 text-[var(--text-secondary)]">仅根据这一条内容总结，建议先试用。</p><EvidenceDetails items={value.evidence} /></article>;
+}
+
+function MethodList({ title, items }: { title: string; items: string[] }) { return items.length ? <div className="mt-4"><h5 className="text-xs font-medium text-[var(--text-secondary)]">{title}</h5><ul className="mt-1 list-disc space-y-1 pl-5 text-sm leading-6">{items.map((item) => <li key={item}>{item}</li>)}</ul></div> : null; }
+
+function EvidenceDetails({ items }: { items: Evidence[] }) {
+  if (!items.length) return null;
+  return <details className="mt-2 text-xs"><summary className="cursor-pointer font-medium text-[var(--accent)]">查看原文依据（{items.length} 处）</summary><div className="mt-2 grid gap-2">{items.map((item, index) => <blockquote key={`${item.quote}-${index}`} className="rounded-lg bg-[var(--surface-elevated)] p-3 leading-5"><p>{item.quote}</p>{item.startMs !== undefined && item.endMs !== undefined ? <cite className="mt-1 block not-italic text-[var(--text-secondary)]">{formatTime(item.startMs)}–{formatTime(item.endMs)}</cite> : <cite className="mt-1 block not-italic text-[var(--text-secondary)]">对应文字</cite>}</blockquote>)}</div></details>;
+}
+
+function formatTime(milliseconds: number) { const seconds = Math.floor(milliseconds / 1000); return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`; }
+
+function CautionList({ title, items }: { title: string; items: Array<{ content: string; reason: string }> }) { return items.length ? <section><h5 className="text-xs font-medium text-[var(--text-secondary)]">{title}</h5><div className="mt-2 grid gap-2">{items.map((item) => <article key={item.content} className="rounded-lg bg-[var(--surface-elevated)] p-3 text-sm"><p>{item.content}</p><p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">{item.reason}</p></article>)}</div></section> : null; }
+
+function LegacyUnderstandingView({ value }: { value: Exclude<MaterialAnalysisOutput, CurrentMaterialAnalysisOutput> }) {
+  return <div className="mt-5 grid gap-5" data-testid="compact-material-analysis"><section><h3 className="text-base font-semibold">这条内容是怎么讲的</h3><p className="mt-2 text-sm leading-6">{value.whatItSays.summary}</p>{value.whatItSays.keyPoints.length ? <ul className="mt-3 list-disc space-y-1 pl-5 text-sm leading-6">{value.whatItSays.keyPoints.map((point) => <li key={point}>{point}</li>)}</ul> : null}</section><section><h3 className="text-base font-semibold">可以借鉴的方法</h3><div className="mt-3 grid gap-3">{value.reusable.length ? value.reusable.map((item) => <article key={item.content} className="rounded-xl border p-4"><p className="text-sm leading-6">{item.content}</p><p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">{item.whyUseful}</p></article>) : <p className="text-sm text-[var(--text-secondary)]">这部分暂时不总结成方法。</p>}</div></section>{(value.doNotCopy.length || value.uncertain.length) ? <details className="rounded-xl border p-4"><summary className="cursor-pointer text-sm font-medium">需要留意的地方</summary><div className="mt-3 grid gap-3"><CautionList title="不建议照搬" items={value.doNotCopy} /><CautionList title="还需要确认" items={value.uncertain} /></div></details> : null}</div>;
+}

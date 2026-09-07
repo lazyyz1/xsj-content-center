@@ -89,6 +89,7 @@ enum IngestJobType {
   FETCH_URL
   TRANSCRIBE
   PROCESS_MEDIA
+  ANALYZE_MATERIAL
 }
 
 enum JobStatus {

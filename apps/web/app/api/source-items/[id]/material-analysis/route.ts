@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
 import { materialAnalysisApiError } from "@/server/material-analysis/api";
-import { analyzeMaterial, getMaterialAnalysis } from "@/server/material-analysis/service";
+import { getMaterialAnalysis, requestMaterialAnalysis } from "@/server/material-analysis/service";
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const context = await getApiWorkspaceContext();
@@ -20,7 +20,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
   if (context.role === "VIEWER") return apiError("FORBIDDEN", 403);
   const { id } = await params;
   try {
-    return NextResponse.json(await analyzeMaterial({ workspaceId: context.workspace.id, sourceItemId: id, userId: context.session.user.id }), { status: 201 });
+    return NextResponse.json(await requestMaterialAnalysis({ workspaceId: context.workspace.id, sourceItemId: id, userId: context.session.user.id }), { status: 202 });
   } catch (error) {
     return materialAnalysisApiError(error) ?? apiError("MATERIAL_ANALYSIS_FAILED", 500, "智能整理失败，请重试。");
   }

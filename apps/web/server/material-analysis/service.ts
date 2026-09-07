@@ -1,17 +1,15 @@
 import "server-only";
 
 import { db, type MaterialAnalysis, type Prisma } from "@content-center/db";
-import { LLMError } from "@content-center/providers";
-import { executeStructuredAIRun } from "../ai/ai-run-service";
+import { enqueueMaterialAnalysis } from "@content-center/worker/queue";
 import { loadLLMRuntime, type LLMRuntime } from "../ai/llm-runtime";
-import { renderPrompt, selectPromptTemplate } from "../ai/prompt-service";
 import { createProject } from "../project-service";
 import { MaterialAnalysisToBriefMapper, type MaterialAnalysisBriefDraft } from "./brief-mapper";
 import { buildMaterialAnalysisContext, MaterialAnalysisContextError } from "./context-builder";
-import { materialAnalysisEditSchema, materialAnalysisOutputInstruction, materialAnalysisOutputSchema, type MaterialAnalysisOutput } from "./schemas";
+import { materialAnalysisEditSchema, materialAnalysisOutputSchema, type MaterialAnalysisOutput } from "./schemas";
 
 export class MaterialAnalysisError extends Error {
-  constructor(readonly code: "SOURCE_NOT_FOUND" | "TRANSCRIPT_REQUIRED" | "ANALYSIS_NOT_FOUND" | "ANALYSIS_ALREADY_PROCESSING" | "INVALID_INPUT" | "MOCK_NOT_ALLOWED", message: string) {
+  constructor(readonly code: "SOURCE_NOT_FOUND" | "TRANSCRIPT_REQUIRED" | "ANALYSIS_NOT_FOUND" | "ANALYSIS_ALREADY_PROCESSING" | "INVALID_INPUT" | "MOCK_NOT_ALLOWED" | "QUEUE_UNAVAILABLE", message: string) {
     super(message);
     this.name = "MaterialAnalysisError";
   }
@@ -46,6 +44,17 @@ export type MaterialAnalysisDTO = {
   updatedAt: string;
 };
 
+export type MaterialAnalysisJobDTO = {
+  id: string;
+  status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+  progress: number;
+  attempt: number;
+  maxAttempts: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+  updatedAt: string;
+};
+
 export function toMaterialAnalysisDTO(row: MaterialAnalysis, transcriptUpdatedAt?: Date | null): MaterialAnalysisDTO {
   const parsedUnderstanding = materialAnalysisOutputSchema.safeParse(row.understanding);
   return {
@@ -65,7 +74,7 @@ export function toMaterialAnalysisDTO(row: MaterialAnalysis, transcriptUpdatedAt
     keyPoints: strings(row.keyPoints),
     coreQuestion: row.coreQuestion,
     understanding: parsedUnderstanding.success ? parsedUnderstanding.data : null,
-    legacy: !parsedUnderstanding.success,
+    legacy: !parsedUnderstanding.success || !("expression" in parsedUnderstanding.data),
     errorCode: row.errorCode,
     errorMessage: row.errorMessage,
     stale: Boolean(transcriptUpdatedAt && transcriptUpdatedAt > row.transcriptUpdatedAtAtAnalysis),
@@ -87,8 +96,23 @@ async function scopedSource(workspaceId: string, sourceItemId: string) {
 export async function getMaterialAnalysis(input: { workspaceId: string; sourceItemId: string }) {
   const source = await scopedSource(input.workspaceId, input.sourceItemId);
   const analyses = await db.materialAnalysis.findMany({ where: { workspaceId: input.workspaceId, sourceItemId: source.id }, orderBy: { version: "desc" }, take: 20 });
+  const jobs = await db.ingestJob.findMany({ where: { workspaceId: input.workspaceId, sourceItemId: source.id, jobType: "ANALYZE_MATERIAL" }, orderBy: { createdAt: "desc" }, take: 20 });
+  const latestAttempt = analyses[0] ? toMaterialAnalysisDTO(analyses[0], source.transcript?.updatedAt) : null;
+  const currentRow = analyses.find((row) => row.status === "COMPLETED");
+  const latestJob = jobs[0];
   return {
-    current: analyses[0] ? toMaterialAnalysisDTO(analyses[0], source.transcript?.updatedAt) : null,
+    current: currentRow ? toMaterialAnalysisDTO(currentRow, source.transcript?.updatedAt) : null,
+    latestAttempt,
+    job: latestJob ? {
+      id: latestJob.id,
+      status: latestJob.status,
+      progress: latestJob.progress,
+      attempt: latestJob.attempt,
+      maxAttempts: latestJob.maxAttempts,
+      errorCode: latestJob.errorCode,
+      errorMessage: latestJob.errorMessage,
+      updatedAt: latestJob.updatedAt.toISOString(),
+    } satisfies MaterialAnalysisJobDTO : null,
     history: analyses.map((row) => toMaterialAnalysisDTO(row, source.transcript?.updatedAt)),
   };
 }
@@ -99,7 +123,9 @@ async function reserveAnalysis(input: { workspaceId: string; sourceItemId: strin
       const processing = await tx.materialAnalysis.findFirst({ where: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, status: "PROCESSING" } });
       if (processing) throw new MaterialAnalysisError("ANALYSIS_ALREADY_PROCESSING", "这条素材正在整理，请稍候。");
       const latest = await tx.materialAnalysis.findFirst({ where: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId }, orderBy: { version: "desc" }, select: { version: true } });
-      return tx.materialAnalysis.create({ data: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, version: (latest?.version ?? 0) + 1, status: "PROCESSING", tags: [], keywords: [], keyPoints: [], transcriptUpdatedAtAtAnalysis: input.transcriptUpdatedAt, createdById: input.userId } });
+      const analysis = await tx.materialAnalysis.create({ data: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, version: (latest?.version ?? 0) + 1, status: "PROCESSING", tags: [], keywords: [], keyPoints: [], transcriptUpdatedAtAtAnalysis: input.transcriptUpdatedAt, createdById: input.userId } });
+      const job = await tx.ingestJob.create({ data: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, requestedById: input.userId, jobType: "ANALYZE_MATERIAL", provider: "LLM", providerMode: "REAL", status: "QUEUED", maxAttempts: 3, metadata: json({ materialAnalysisId: analysis.id, transcriptUpdatedAtAtAnalysis: input.transcriptUpdatedAt.toISOString() }) } });
+      return { analysis, job };
     }, { isolationLevel: "Serializable" });
   } catch (error) {
     if (error instanceof MaterialAnalysisError) throw error;
@@ -109,7 +135,7 @@ async function reserveAnalysis(input: { workspaceId: string; sourceItemId: strin
   }
 }
 
-export async function analyzeMaterial(input: { workspaceId: string; sourceItemId: string; userId: string }, dependencies: { runtime?: LLMRuntime } = {}) {
+export async function requestMaterialAnalysis(input: { workspaceId: string; sourceItemId: string; userId: string }, dependencies: { runtime?: LLMRuntime } = {}) {
   let built;
   try {
     built = await buildMaterialAnalysisContext(input);
@@ -119,31 +145,16 @@ export async function analyzeMaterial(input: { workspaceId: string; sourceItemId
   }
   const runtime = dependencies.runtime ?? await loadLLMRuntime(input.workspaceId);
   if (runtime.mode === "MOCK") throw new MaterialAnalysisError("MOCK_NOT_ALLOWED", "智能整理不使用模拟结果，请先配置 Kimi 2.6。");
-  const template = await selectPromptTemplate(input.workspaceId, "ANALYZE_MATERIAL");
   const reserved = await reserveAnalysis({ workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, userId: input.userId, transcriptUpdatedAt: built.source.transcript!.updatedAt });
   try {
-    const prompt = `${renderPrompt(template.template, built.context)}${materialAnalysisOutputInstruction}`;
-    const systemPrompt = `${template.systemPrompt}\n\nProduct language requirements:\n- You are a 同行内容二创整理助手, not a critic, researcher, or marketing analyst.\n- Every natural-language value in the JSON must be written in concise, plain Simplified Chinese.\n- Use words an internal content creator can understand immediately. Avoid academic or research language such as 零和博弈、话语移植、修辞装置、反讽间距、隐性矛盾.\n- Describe source-author claims as claims, not verified objective facts.\n- Keep uncertain names exactly as transcribed; never silently correct them.`;
-    const run = await executeStructuredAIRun<MaterialAnalysisOutput>({
-      workspaceId: input.workspaceId,
-      userId: input.userId,
-      action: "ANALYZE_MATERIAL",
-      operation: "ANALYZE_MATERIAL",
-      promptVersion: template.version,
-      promptTemplateId: template.id,
-      inputSummary: built.inputSummary,
-      auditMetadata: { sourceItemId: input.sourceItemId, materialAnalysisId: reserved.id, materialAnalysisVersion: reserved.version },
-      contextTruncated: built.contextTruncated,
-      generate: (provider) => provider.generateStructured({ systemPrompt, prompt }, materialAnalysisOutputSchema),
-    }, { runtime });
-    const output = materialAnalysisOutputSchema.parse(run.output);
-    const completed = await db.materialAnalysis.update({ where: { id: reserved.id }, data: { understanding: json(output), summary: output.whatItSays.summary, keyPoints: json(output.whatItSays.keyPoints), tags: [], keywords: [], status: "COMPLETED", aiRunId: run.id } });
-    return toMaterialAnalysisDTO(completed, built.source.transcript!.updatedAt);
-  } catch (error) {
-    const code = error instanceof LLMError ? error.code : "MATERIAL_ANALYSIS_FAILED";
-    const message = error instanceof Error ? error.message : "智能整理失败，请重试。";
-    await db.materialAnalysis.update({ where: { id: reserved.id }, data: { status: "FAILED", errorCode: code, errorMessage: message } });
-    throw error;
+    await enqueueMaterialAnalysis({ jobId: reserved.job.id, workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, requestedById: input.userId }, reserved.job.maxAttempts);
+    return { ...toMaterialAnalysisDTO(reserved.analysis, built.source.transcript!.updatedAt), jobId: reserved.job.id, status: "QUEUED" as const };
+  } catch {
+    await db.$transaction([
+      db.materialAnalysis.update({ where: { id: reserved.analysis.id }, data: { status: "FAILED", errorCode: "QUEUE_UNAVAILABLE", errorMessage: "内容拆解暂时无法开始。" } }),
+      db.ingestJob.update({ where: { id: reserved.job.id }, data: { status: "FAILED", errorCode: "QUEUE_UNAVAILABLE", errorMessage: "内容拆解暂时无法开始。", finishedAt: new Date() } }),
+    ]);
+    throw new MaterialAnalysisError("QUEUE_UNAVAILABLE", "内容拆解暂时无法开始。");
   }
 }
 

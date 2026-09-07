@@ -16,7 +16,7 @@ export async function GET(_request: Request, route: { params: Promise<{ id: stri
         where: { status: { in: ["QUEUED", "RUNNING", "FAILED", "SUCCEEDED"] } },
         select: { id: true, jobType: true, status: true, updatedAt: true },
         orderBy: { createdAt: "desc" },
-        take: 4,
+        take: 20,
       },
     },
   });

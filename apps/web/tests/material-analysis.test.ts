@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+const { enqueueMaterialAnalysis } = vi.hoisted(() => ({ enqueueMaterialAnalysis: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@content-center/worker/queue", () => ({ enqueueMaterialAnalysis }));
 
 import { db } from "@content-center/db";
 import { IntegrationService } from "@content-center/integrations";
 import { MockLLMProvider } from "@content-center/providers";
-import { analyzeMaterial, createProjectFromMaterial, getMaterialAnalysis, updateMaterialAnalysis } from "../server/material-analysis/service";
+import { createProjectFromMaterial, getMaterialAnalysis, requestMaterialAnalysis, updateMaterialAnalysis } from "../server/material-analysis/service";
 import { readMaterialAnalysisBriefMetadata } from "../server/material-analysis/brief-mapper";
 import { materialAnalysisOutputSchema } from "../server/material-analysis/schemas";
 
@@ -54,30 +56,25 @@ describe("V1.2B-1 smart material analysis", () => {
     expect(() => materialAnalysisOutputSchema.parse("not-json")).toThrow();
   });
 
-  it("runs one fixture LLM call through AIRun and stores a versioned DTO", async () => {
-    let capturedPrompt = "";
-    let capturedSystemPrompt = "";
-    const runtime = { provider: new MockLLMProvider(({ prompt, systemPrompt }) => { capturedPrompt = prompt; capturedSystemPrompt = systemPrompt || ""; return output; }), providerName: "FIXTURE", model: "fixture-kimi-2.6", productModel: "FIXTURE" as const, mode: "FIXTURE" as const };
-    const result = await analyzeMaterial({ workspaceId: workspaceAId, userId: userAId, sourceItemId: sourceAId }, { runtime });
-    expect(result).toMatchObject({ version: 1, status: "COMPLETED", understanding: output, legacy: false, origin: "AI", stale: false });
-    expect(capturedPrompt).toContain("ANALYZE_MATERIAL");
-    expect(capturedPrompt).toContain("four small blocks");
-    expect(capturedPrompt).toContain("Do not return legacy classification fields");
-    expect(capturedSystemPrompt).toContain("Simplified Chinese");
-    expect(capturedSystemPrompt).toContain("零和博弈、话语移植、修辞装置、反讽间距、隐性矛盾");
-    expect(await db.aIRun.count({ where: { workspaceId: workspaceAId, action: "ANALYZE_MATERIAL" } })).toBe(1);
-    const usage = await db.apiUsage.findFirstOrThrow({ where: { workspaceId: workspaceAId, operation: "ANALYZE_MATERIAL", success: true } });
-    expect(usage.metadata).toMatchObject({ productModel: "FIXTURE", latencyMs: expect.any(Number), sourceItemId: sourceAId });
+  it("queues one persisted analysis attempt and returns immediately", async () => {
+    const runtime = { provider: new MockLLMProvider(() => output), providerName: "FIXTURE", model: "fixture-kimi-2.6", productModel: "FIXTURE" as const, mode: "FIXTURE" as const };
+    const result = await requestMaterialAnalysis({ workspaceId: workspaceAId, userId: userAId, sourceItemId: sourceAId }, { runtime });
+    expect(result).toMatchObject({ version: 1, status: "QUEUED", origin: "AI", stale: false });
+    expect(result.jobId).toBeTruthy();
+    expect(enqueueMaterialAnalysis).toHaveBeenCalledWith(expect.objectContaining({ jobId: result.jobId, workspaceId: workspaceAId, sourceItemId: sourceAId, requestedById: userAId }), 3);
+    await expect(db.ingestJob.findUnique({ where: { id: result.jobId } })).resolves.toMatchObject({ jobType: "ANALYZE_MATERIAL", status: "QUEUED", metadata: { materialAnalysisId: result.id } });
+    await db.materialAnalysis.update({ where: { id: result.id }, data: { status: "COMPLETED", understanding: output, summary: output.whatItSays.summary, keyPoints: output.whatItSays.keyPoints } });
   });
 
   it("prevents duplicate processing and keeps the older version", async () => {
     const transcript = await db.transcript.findUniqueOrThrow({ where: { sourceItemId: sourceAId } });
     const processing = await db.materialAnalysis.create({ data: { workspaceId: workspaceAId, sourceItemId: sourceAId, createdById: userAId, version: 2, status: "PROCESSING", tags: [], keywords: [], keyPoints: [], transcriptUpdatedAtAtAnalysis: transcript.updatedAt } });
     const runtime = { provider: new MockLLMProvider(() => output), providerName: "FIXTURE", model: "fixture-kimi-2.6", mode: "FIXTURE" as const };
-    await expect(analyzeMaterial({ workspaceId: workspaceAId, userId: userAId, sourceItemId: sourceAId }, { runtime })).rejects.toMatchObject({ code: "ANALYSIS_ALREADY_PROCESSING" });
+    await expect(requestMaterialAnalysis({ workspaceId: workspaceAId, userId: userAId, sourceItemId: sourceAId }, { runtime })).rejects.toMatchObject({ code: "ANALYSIS_ALREADY_PROCESSING" });
     await db.materialAnalysis.update({ where: { id: processing.id }, data: { status: "FAILED", errorCode: "TEST_INTERRUPTED", errorMessage: "测试中的中断任务" } });
-    await expect(analyzeMaterial({ workspaceId: workspaceAId, userId: userAId, sourceItemId: sourceAId }, { runtime })).resolves.toMatchObject({ version: 3, status: "COMPLETED" });
-    expect(await db.materialAnalysis.count({ where: { sourceItemId: sourceAId, status: "COMPLETED" } })).toBe(2);
+    await expect(requestMaterialAnalysis({ workspaceId: workspaceAId, userId: userAId, sourceItemId: sourceAId }, { runtime })).resolves.toMatchObject({ version: 3, status: "QUEUED" });
+    expect(await db.materialAnalysis.count({ where: { sourceItemId: sourceAId, status: "COMPLETED" } })).toBe(1);
+    await expect(getMaterialAnalysis({ workspaceId: workspaceAId, sourceItemId: sourceAId })).resolves.toMatchObject({ current: { version: 1, status: "COMPLETED" }, latestAttempt: { version: 3, status: "PROCESSING" }, job: { status: "QUEUED" } });
   });
 
   it("saves human edits to the four-block result and marks stale after transcript changes", async () => {
@@ -128,7 +125,9 @@ describe("V1.2B-1 smart material analysis", () => {
 
   it("enforces workspace scope and never enables product MOCK results", async () => {
     await expect(getMaterialAnalysis({ workspaceId: workspaceAId, sourceItemId: sourceBId })).rejects.toMatchObject({ code: "SOURCE_NOT_FOUND" });
+    const fixtureRuntime = { provider: new MockLLMProvider(() => output), providerName: "FIXTURE", model: "fixture", mode: "FIXTURE" as const };
+    await expect(requestMaterialAnalysis({ workspaceId: workspaceAId, userId: userAId, sourceItemId: sourceBId }, { runtime: fixtureRuntime })).rejects.toMatchObject({ code: "SOURCE_NOT_FOUND" });
     const runtime = { provider: new MockLLMProvider(() => output), providerName: "MOCK", model: "mock", mode: "MOCK" as const };
-    await expect(analyzeMaterial({ workspaceId: workspaceBId, userId: userBId, sourceItemId: sourceBId }, { runtime })).rejects.toMatchObject({ code: "MOCK_NOT_ALLOWED" });
+    await expect(requestMaterialAnalysis({ workspaceId: workspaceBId, userId: userBId, sourceItemId: sourceBId }, { runtime })).rejects.toMatchObject({ code: "MOCK_NOT_ALLOWED" });
   });
 });
