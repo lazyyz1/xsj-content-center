@@ -4,6 +4,7 @@ import Link from "next/link";
 import { IngestDialog } from "@/components/library/ingest-dialog";
 import { LibraryPoller } from "@/components/library/library-poller";
 import { RetryIngestButton } from "@/components/library/retry-ingest-button";
+import { LibrarySubnav } from "@/components/library/library-subnav";
 import { getSourceProcessingState } from "@/lib/source-processing-state";
 import { sourcePlatformLabels, sourceStatusLabels, sourceTypeLabels } from "@/lib/content-labels";
 import { requireWorkspace } from "@/server/access";
@@ -34,6 +35,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
   return (
     <>
       <LibraryPoller active={hasProcessing} />
+      <LibrarySubnav current="sources" />
       <header className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">素材库</h1>

@@ -47,6 +47,8 @@ export async function DELETE(_request: Request, route: RouteContext) {
   const { id } = await route.params;
   const source = await findSourceForUser(db, { userId: context.session.user.id, workspaceId: context.workspace.id, sourceItemId: id });
   if (!source) return apiError("NOT_FOUND", 404);
+  const referencedMethod = await db.methodVersion.findFirst({ where: { sourceItemId: source.id }, select: { id: true } });
+  if (referencedMethod) return apiError("SOURCE_IN_USE", 409, "这条素材仍被需要保留来源的内容引用，不能永久删除；你可以改为归档。");
   const storedAssets = source.assets.filter((asset) => asset.storageKey);
   const storage = storedAssets.length > 0 ? getStorageProvider() : null;
   for (const asset of storedAssets) {

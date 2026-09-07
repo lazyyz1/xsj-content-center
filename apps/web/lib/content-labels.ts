@@ -63,6 +63,13 @@ export const publishStatusLabels: Record<string, string> = {
   CANCELLED: "已取消",
 };
 
+export const methodStatusLabels: Record<string, string> = {
+  SAVED: "已收藏",
+  TRIAL: "试用中",
+  CORE: "常用",
+  DISABLED: "已停用",
+};
+
 export const evidenceTypeLabels: Record<string, string> = {
   FACT: "事实",
   VIEWPOINT: "观点",

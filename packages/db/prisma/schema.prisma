@@ -258,6 +258,13 @@ enum MotherContentOrigin {
   GPT_WEB
 }
 
+enum MethodStatus {
+  SAVED
+  TRIAL
+  CORE
+  DISABLED
+}
+
 model User {
   id                      String               @id @default(cuid())
   name                    String
@@ -292,6 +299,8 @@ model User {
   createdRecommendationBatches RecommendationBatch[] @relation("RecommendationBatchCreatedBy")
   createdMaterialAnalyses MaterialAnalysis[]           @relation("MaterialAnalysisCreatedBy")
   createdUnifiedCreativeAnalyses UnifiedCreativeAnalysis[] @relation("UnifiedCreativeAnalysisCreatedBy")
+  ownedMethodAssets       MethodAsset[]                @relation("MethodAssetOwner")
+  editedMethodVersions    MethodVersion[]              @relation("MethodVersionEditedBy")
 
   @@index([systemRole])
   @@index([disabledAt])
@@ -380,6 +389,7 @@ model Workspace {
   recommendationEvidence RecommendationEvidence[]
   materialAnalyses       MaterialAnalysis[]
   unifiedCreativeAnalyses UnifiedCreativeAnalysis[]
+  methodAssets           MethodAsset[]
 }
 
 model WorkspaceMember {
@@ -459,6 +469,7 @@ model SourceItem {
   evidenceItems  EvidenceItem[]
   ideaReferences ContentIdeaReference[]
   materialAnalyses MaterialAnalysis[]
+  methodVersionsFromSource MethodVersion[] @relation("MethodVersionSourceItem")
 
   @@unique([workspaceId, canonicalUrl])
   @@unique([workspaceId, sourcePlatform, externalId])
@@ -556,6 +567,7 @@ model Transcript {
   updatedAt    DateTime     @updatedAt
   workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   sourceItem   SourceItem   @relation(fields: [sourceItemId], references: [id], onDelete: Cascade)
+  methodVersions MethodVersion[] @relation("MethodVersionSourceTranscript")
 
   @@index([workspaceId, createdAt])
 }
@@ -871,11 +883,54 @@ model MaterialAnalysis {
   sourceItem                    SourceItem             @relation(fields: [sourceItemId], references: [id], onDelete: Cascade)
   aiRun                         AIRun?                  @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
   createdBy                     User                   @relation("MaterialAnalysisCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  methodVersions                MethodVersion[]         @relation("MethodVersionSourceAnalysis")
 
   @@unique([sourceItemId, version])
   @@index([workspaceId, sourceItemId, createdAt])
   @@index([workspaceId, status])
   @@index([createdById])
+}
+
+model MethodAsset {
+  id             String       @id @default(cuid())
+  workspaceId    String
+  ownerUserId    String
+  status         MethodStatus @default(SAVED)
+  statusUpdatedAt DateTime    @default(now())
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  owner          User         @relation("MethodAssetOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  versions       MethodVersion[]
+
+  @@index([workspaceId, ownerUserId, status, updatedAt])
+}
+
+model MethodVersion {
+  id                       String          @id @default(cuid())
+  assetId                 String
+  version                 Int
+  title                   String
+  steps                   Json
+  applicableScenarios     Json
+  boundaries             Json
+  sourceItemId           String
+  sourceMaterialAnalysisId String
+  sourceTranscriptId     String
+  sourceTranscriptUpdatedAt DateTime
+  evidence               Json
+  editedById             String
+  createdAt              DateTime        @default(now())
+  asset                  MethodAsset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  sourceItem             SourceItem      @relation("MethodVersionSourceItem", fields: [sourceItemId], references: [id], onDelete: Restrict)
+  sourceMaterialAnalysis MaterialAnalysis @relation("MethodVersionSourceAnalysis", fields: [sourceMaterialAnalysisId], references: [id], onDelete: Restrict)
+  sourceTranscript       Transcript      @relation("MethodVersionSourceTranscript", fields: [sourceTranscriptId], references: [id], onDelete: Restrict)
+  editedBy               User            @relation("MethodVersionEditedBy", fields: [editedById], references: [id], onDelete: Restrict)
+
+  @@unique([assetId, version])
+  @@index([sourceItemId])
+  @@index([sourceMaterialAnalysisId])
+  @@index([sourceTranscriptId])
 }
 
 model EvidenceItem {
