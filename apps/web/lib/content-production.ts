@@ -26,7 +26,7 @@ export function groundUngroundedPersonalClaims(text: string, hasOwnBackground: b
     .replace(/我(?:们)?见过一种做法[，,]?(?:挺有意思)?[。.]?/g, "有一种可以先小范围验证的做法：")
     .replace(/我(?:们)?(?:自己)?做下来(?:以后)?发现/g, "实际执行时常见的情况是")
     .replace(/我们在持续调/g, "方法需要持续调整")
-    .replace(/(?:我的|我们的)(客户|学员|校长|用户)/g, "$1");
+    .replace(/(?:我的|我们的)(客户|学员|校长|用户|收入|成绩|项目|经历|案例|数据)/g, "$1");
 }
 
 export function resolveOwnContribution(input: { coreMessage?: string | null; background?: string | null; audience?: string | null }) : OwnContribution {

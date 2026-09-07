@@ -14,6 +14,8 @@ export * from "./source-external-metadata";
 export * from "./material-analysis";
 export * from "./benchmark-analysis";
 export * from "./material-distillation";
+export * from "./generation-quality";
+export * from "./source-index";
 export * from "./types";
 export * from "./redfox/index";
 export * from "./doubao/index";

@@ -2,6 +2,8 @@ import { db, type Prisma } from "@content-center/db";
 import { IntegrationService } from "@content-center/integrations";
 import {
   LLMError,
+  generationQualityContract,
+  buildTranscriptSourceIndex,
   MATERIAL_ANALYSIS_SCHEMA_VERSION,
   OpenAICompatibleLLMProvider,
   materialAnalysisOutputSchema,
@@ -13,6 +15,8 @@ import {
   type LLMProvider,
   type MaterialDistillationGeneration,
   type MaterialDistillationMode,
+  type SourceRef,
+  type TranscriptSourceIndex,
 } from "@content-center/providers";
 import { UnrecoverableError, type Job } from "bullmq";
 import type { ContentIngestPayload } from "./queue";
@@ -28,6 +32,7 @@ type DistillationRuntime = {
 };
 
 type TranscriptSegment = { text: string; startMs?: number; endMs?: number };
+type SourceRefInput = TranscriptSourceIndex | SourceRef[];
 function json(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
@@ -48,40 +53,59 @@ function transcriptSegments(value: Prisma.JsonValue): TranscriptSegment[] {
   });
 }
 
-function segmentsForContext(segments: TranscriptSegment[], maximum: number) {
-  let characters = 0;
-  return segments.flatMap((segment, index) => {
-    if (!segment.text || characters >= maximum) return [];
-    const text = segment.text.slice(0, maximum - characters);
-    characters += text.length;
-    return text ? [{ ref: `S${String(index + 1).padStart(3, "0")}`, text }] : [];
-  });
+function sourceRefsFromInput(input: SourceRefInput): SourceRef[] {
+  if (Array.isArray(input)) return input;
+  return input.refs;
 }
 
-function evidence(reference: string, segments: TranscriptSegment[]) {
-  const match = /^S(\d{3,})$/.exec(reference);
-  const segmentIndex = match ? Number(match[1]) - 1 : -1;
-  const segment = segments[segmentIndex];
-  return segment?.text ? { quote: segment.text.slice(0, 500), segmentIndex } : null;
+function evidenceForRef(sourceRef: SourceRef | undefined) {
+  if (!sourceRef?.text) return null;
+  const base = { quote: sourceRef.text.slice(0, 500) };
+  const provenance = {
+    sourceRef: sourceRef.ref,
+    kind: sourceRef.kind,
+    index: sourceRef.index,
+    transcriptId: sourceRef.transcriptId,
+    transcriptVersion: sourceRef.transcriptVersion,
+    sourceIndexVersion: sourceRef.sourceIndexVersion,
+    ...(sourceRef.startOffset !== undefined ? { startOffset: sourceRef.startOffset } : {}),
+    ...(sourceRef.endOffset !== undefined ? { endOffset: sourceRef.endOffset } : {}),
+  };
+  if (sourceRef.kind === "REAL_SEGMENT") {
+    return {
+      ...base,
+      ...provenance,
+      segmentIndex: sourceRef.index,
+      ...(sourceRef.startMs !== undefined ? { startMs: sourceRef.startMs } : {}),
+      ...(sourceRef.endMs !== undefined ? { endMs: sourceRef.endMs } : {}),
+    };
+  }
+  return {
+    ...base,
+    ...provenance,
+  };
 }
 
-function evidenceList(items: string[], segments: TranscriptSegment[]) {
+function evidenceList(items: string[], input: SourceRefInput) {
+  const refs = sourceRefsFromInput(input);
   return [...new Set(items)].flatMap((item) => {
-    const match = evidence(item, segments);
+    // Resolve against exactly the entries supplied for this invocation. No
+    // fuzzy matching or nearest-segment fallback is allowed.
+    const match = evidenceForRef(refs.find((sourceRef) => sourceRef.ref === item));
     return match ? [match] : [];
   });
 }
 
 /** Re-ground every retained item in the current transcript before persistence. */
-export function normalizeMaterialDistillationOutput(input: MaterialDistillationGeneration, mode: MaterialDistillationMode, segments: TranscriptSegment[]) {
+export function normalizeMaterialDistillationOutput(input: MaterialDistillationGeneration, mode: MaterialDistillationMode, sourceIndex: SourceRefInput) {
   const highlights = mode === "COMPREHENSIVE" && input.mode === "COMPREHENSIVE" ? input.highlights.flatMap((item) => {
-    const grounded = evidenceList(item.sourceRefs, segments);
+    const grounded = evidenceList(item.sourceRefs, sourceIndex);
     return grounded.length ? [{ type: item.type, quality: item.quality, title: item.title, essence: item.shortExplanation, whyWorthAttention: "", howTo: [], applicable: [], boundaries: [], evidence: grounded }] : [];
   }) : [];
   const copywriting = mode === "COPYWRITING" && input.mode === "COPYWRITING" && input.copywriting
     ? (() => {
       const { sourceRefs, ...content } = input.copywriting;
-      const grounded = evidenceList(sourceRefs, segments);
+      const grounded = evidenceList(sourceRefs, sourceIndex);
       return grounded.length ? { ...content, evidence: grounded } : null;
     })()
     : null;
@@ -181,15 +205,29 @@ export async function processMaterialDistillationJob(job: Job<ContentIngestPaylo
     db.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "material_distillation.started", resourceType: "material_distillation", resourceId: distillation.id, metadata: json({ sourceItemId: record.sourceItemId, version: distillation.version, mode: distillation.mode, attempt }) } }),
   ]);
 
-  const fullText = transcript.fullText.trim();
+  const fullText = transcript.fullText;
   const segments = transcriptSegments(transcript.segments);
+  const sourceIndex = buildTranscriptSourceIndex({ id: transcript.id, updatedAt: transcript.updatedAt, fullText, segments });
+  const sourceTextBlocks = sourceIndex.refs.map(({ ref, kind, index, text, startOffset, endOffset, startMs, endMs }) => ({
+    ref,
+    kind,
+    index,
+    text,
+    ...(startOffset !== undefined ? { startOffset } : {}),
+    ...(endOffset !== undefined ? { endOffset } : {}),
+    ...(startMs !== undefined ? { startMs } : {}),
+    ...(endMs !== undefined ? { endMs } : {}),
+  }));
   const contextTruncated = fullText.length > 40_000;
   const m1 = record.sourceItem.materialAnalyses[0];
   const parsedM1 = m1 ? materialAnalysisOutputSchema.safeParse(m1.understanding) : null;
   const structuredM1 = parsedM1?.success && "expression" in parsedM1.data ? parsedM1.data : null;
   const context = {
+    task: "DISTILL_MATERIAL",
     source: { title: record.sourceItem.title, description: record.sourceItem.description, platform: record.sourceItem.sourcePlatform, author: record.sourceItem.author },
-    transcript: { fullText: fullText.slice(0, 40_000), segments: segmentsForContext(segments, 40_000) },
+    transcript: { id: sourceIndex.transcriptId, version: sourceIndex.transcriptVersion, sourceIndexVersion: sourceIndex.sourceIndexVersion },
+    availableSourceRefs: sourceIndex.availableSourceRefs,
+    sourceTextBlocks,
     ...(structuredM1 ? { materialUnderstanding: structuredM1 } : {}),
     cautions: [
       materialDistillationSystemBoundary,
@@ -208,7 +246,7 @@ export async function processMaterialDistillationJob(job: Job<ContentIngestPaylo
     requestedModel = runtime.requestedModel ?? runtime.model;
     const runtimeAudit = { provider: runtime.providerName, requestedModel, providerMode: runtime.mode ?? "REAL" };
     const mode = distillation.mode as MaterialDistillationMode;
-    const systemPrompt = materialDistillationSystemBoundary + "\n\nReturn plain Simplified Chinese and exactly the requested JSON schema. Requested mode: " + mode + ". Preserve uncertainty; do not invent a durable lesson.";
+    const systemPrompt = materialDistillationSystemBoundary + "\n\n" + generationQualityContract + "\n\nReturn plain Simplified Chinese and exactly the requested JSON schema. Requested mode: " + mode + ". Preserve uncertainty; do not invent a durable lesson.";
     const prompt = buildMaterialDistillationPrompt(mode, context);
     const run = await db.$transaction(async (tx) => {
       const created = await tx.aIRun.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "DISTILL_MATERIAL", provider: runtime.providerName, model: runtime.model, promptVersion: 2, status: "RUNNING", inputSummary: json(summary), metadata: json({ materialDistillationId: distillation.id, materialDistillationVersion: distillation.version, sourceItemId: record.sourceItemId, schemaVersion: MATERIAL_DISTILLATION_SCHEMA_VERSION, structuredOutput: "JSON_SCHEMA_WHEN_SUPPORTED", ...runtimeAudit }), contextTruncated } });
@@ -220,7 +258,7 @@ export async function processMaterialDistillationJob(job: Job<ContentIngestPaylo
     const result = mode === "COPYWRITING"
       ? await runtime.provider.generateStructured({ systemPrompt, prompt, maxCompletionTokens: 3_000, structuredOutput: { preferJsonSchema: true, schemaName: "material_copywriting_v2" } }, materialDistillationGenerationSchemaForMode("COPYWRITING"))
       : await runtime.provider.generateStructured({ systemPrompt, prompt, maxCompletionTokens: 2_000, structuredOutput: { preferJsonSchema: true, schemaName: "material_discovery_v2" } }, materialDistillationGenerationSchemaForMode("COMPREHENSIVE"));
-    const output = normalizeMaterialDistillationOutput(result.data.value, mode, segments);
+    const output = normalizeMaterialDistillationOutput(result.data.value, mode, sourceIndex);
     const latencyMs = Date.now() - startedAt.getTime();
     await db.$transaction([
       db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(output), metadata: json({ materialDistillationId: distillation.id, materialDistillationVersion: distillation.version, sourceItemId: record.sourceItemId, schemaVersion: MATERIAL_DISTILLATION_SCHEMA_VERSION, structuredOutput: "JSON_SCHEMA_WHEN_SUPPORTED", ...runtimeAudit, actualModel: result.data.model }), providerRequestId: result.data.providerRequestId, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, finishedAt: new Date() } }),

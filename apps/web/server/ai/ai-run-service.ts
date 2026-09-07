@@ -1,7 +1,7 @@
 import "server-only";
 
 import { db, type Prisma } from "@content-center/db";
-import { LLMError, type LLMProvider, type LLMStructuredResult, type ProviderResult } from "@content-center/providers";
+import { generationQualityContract, LLMError, type LLMProvider, type LLMStructuredResult, type ProviderResult } from "@content-center/providers";
 import { saveBrief } from "../brief-service";
 import { createEvidence } from "../evidence-service";
 import { saveMotherContent } from "../mother-content-service";
@@ -130,7 +130,7 @@ export async function runAIAction(input: { workspaceId: string; userId: string; 
     await recordSelectedMethodUsages({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, aiRunId: runId, methodVersionIds: built.selectedMethods.map(({ methodVersionId }) => methodVersionId) });
   }, generate: async (provider) => {
     if (input.action !== "GENERATE_MOTHER_CONTENT") return provider.generateStructured({ systemPrompt: `${template.systemPrompt}${motherContentSystemBoundary}`, prompt }, schemaForAction(input.action));
-    const generated = await provider.generateStructured({ systemPrompt: `${template.systemPrompt}${motherContentSystemBoundary}`, prompt }, motherContentProviderSchema);
+    const generated = await provider.generateStructured({ systemPrompt: `${template.systemPrompt}${motherContentSystemBoundary}\n${generationQualityContract}`, prompt }, motherContentProviderSchema);
     const body = groundUngroundedPersonalClaims(generated.data.value.body, built.hasOwnBackground);
     const openingHook = groundUngroundedPersonalClaims(generated.data.value.openingHook, built.hasOwnBackground);
     return { ...generated, data: { ...generated.data, value: { ...generated.data.value, body, openingHook, estimatedCharacterCount: countSpokenCharacters(body), estimatedDurationSeconds: estimateSpokenDuration(body), ownContribution: built.ownContribution } } };

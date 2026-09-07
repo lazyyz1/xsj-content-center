@@ -39,9 +39,10 @@ describe("video content production", () => {
   });
 
   it("grounds unsupported first-person social proof when no personal background was supplied", () => {
-    const generated = "很多校长跟我聊，说短视频有流量却没转化。我见过一种做法，挺有意思。我们自己做下来以后发现要先建立信任。我们在持续调，不是拿一套模板套所有人。";
+    const generated = "很多校长跟我聊，说短视频有流量却没转化。我见过一种做法，挺有意思。我们自己做下来以后发现要先建立信任。我们在持续调，不是拿一套模板套所有人。我们的客户、收入、成绩、项目和经历都不能由外部素材授权。";
     const grounded = groundUngroundedPersonalClaims(generated, false);
     expect(grounded).not.toMatch(/跟我聊|我见过|我们自己做下来|我们在持续调/);
+    expect(grounded).not.toMatch(/我们的(?:客户|收入|成绩|项目|经历)/);
     expect(grounded).toContain("很多校长都会遇到这样的情况");
     expect(groundUngroundedPersonalClaims(generated, true)).toBe(generated);
   });
