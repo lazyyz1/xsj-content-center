@@ -20,8 +20,7 @@ type BenchmarkRuntime = {
   provider: LLMProvider;
   providerName: string;
   model: string;
-  apiModelId?: string;
-  productModel?: string;
+  requestedModel?: string;
   mode?: string;
 };
 
@@ -170,17 +169,16 @@ async function loadRuntime(workspaceId: string): Promise<BenchmarkRuntime> {
   const integrations = new IntegrationService();
   const status = await integrations.getIntegrationStatus(workspaceId, "LLM");
   if (status.status === "DISABLED") throw new LLMError("LLM_DISABLED", "AI 模型已禁用。", false);
-  if (status.status !== "CONFIGURED") throw new LLMError("LLM_NOT_CONFIGURED", "Kimi 2.6 尚未配置，请联系管理员完成设置。", false);
+  if (status.status !== "CONFIGURED") throw new LLMError("LLM_NOT_CONFIGURED", "AI 模型尚未配置，请联系管理员完成设置。", false);
   const config = await integrations.getDecryptedIntegrationConfig(workspaceId, "LLM");
   const parsed = openAICompatibleConfigSchema.safeParse(config);
-  if (!parsed.success) throw new LLMError("LLM_NOT_CONFIGURED", "Kimi 2.6 尚未配置，请联系管理员完成设置。", false);
+  if (!parsed.success) throw new LLMError("LLM_NOT_CONFIGURED", "AI 模型尚未配置，请联系管理员完成设置。", false);
   const metadata = object(config);
   return {
     provider: new OpenAICompatibleLLMProvider(parsed.data),
-    providerName: metadata.mode === "REAL" ? "KIMI" : parsed.data.provider,
+    providerName: metadata.mode === "FIXTURE" ? parsed.data.provider : parsed.data.provider.toUpperCase(),
     model: parsed.data.model,
-    apiModelId: typeof metadata.apiModelId === "string" ? metadata.apiModelId : parsed.data.model,
-    productModel: typeof metadata.productModel === "string" ? metadata.productModel : undefined,
+    requestedModel: typeof metadata.requestedModel === "string" ? metadata.requestedModel : parsed.data.model,
     mode: typeof metadata.mode === "string" ? metadata.mode : "REAL",
   };
 }
@@ -236,14 +234,19 @@ export async function processBenchmarkStudyJob(job: Job<BenchmarkStudyPayload>, 
   const summary = { benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: samples.length, insufficientSamples: record.insufficientSamples };
   let runId: string | undefined;
   let templateVersion = 0;
+  let runProvider: string | undefined;
+  let requestedModel: string | undefined;
   try {
     const template = await promptTemplate(record.workspaceId);
     templateVersion = template.version;
     const runtime = dependencies.runtime ?? await loadRuntime(record.workspaceId);
+    runProvider = runtime.providerName;
+    requestedModel = runtime.requestedModel ?? runtime.model;
+    const runtimeAudit = { provider: runtime.providerName, requestedModel, providerMode: runtime.mode ?? "REAL" };
     const systemPrompt = `${template.systemPrompt}\n\n${benchmarkAnalysisSystemBoundary}\nReturn only comparative findings grounded in supplied sample ids and exact M1 evidence quotes. Do not return scores, independent fact counts, or a single-source method disguised as a common method.`;
     const prompt = buildBenchmarkAnalysisPrompt(template.template, context);
     const run = await db.$transaction(async (tx) => {
-      const created = await tx.aIRun.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, action: "ANALYZE_BENCHMARK", provider: runtime.providerName, model: runtime.model, promptTemplateId: template.id, promptVersion: template.version, status: "RUNNING", inputSummary: json(summary), metadata: json({ benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: samples.length, schemaVersion: "benchmark-study-v1", providerMode: runtime.mode ?? "REAL", productModel: runtime.productModel ?? null, apiModelId: runtime.apiModelId ?? runtime.model }), contextTruncated } });
+      const created = await tx.aIRun.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, action: "ANALYZE_BENCHMARK", provider: runtime.providerName, model: runtime.model, promptTemplateId: template.id, promptVersion: template.version, status: "RUNNING", inputSummary: json(summary), metadata: json({ benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: samples.length, schemaVersion: "benchmark-study-v1", ...runtimeAudit }), contextTruncated } });
       await tx.benchmarkStudy.update({ where: { id: record.id }, data: { status: "PROCESSING", aiRunId: created.id, errorCode: null, errorMessage: null } });
       await tx.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, action: "benchmark_study.started", resourceType: "benchmark_study", resourceId: record.id, metadata: json({ aiRunId: created.id, sampleCount: samples.length, promptVersion: template.version }) } });
       return created;
@@ -254,9 +257,9 @@ export async function processBenchmarkStudyJob(job: Job<BenchmarkStudyPayload>, 
     const output = applyBenchmarkSampleBoundary(normalized, samples.length);
     const latencyMs = Date.now() - startedAt.getTime();
     await db.$transaction([
-      db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(output), providerRequestId: result.data.providerRequestId, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, finishedAt: new Date() } }),
+      db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(output), metadata: json({ benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: samples.length, schemaVersion: "benchmark-study-v1", ...runtimeAudit, actualModel: result.data.model }), providerRequestId: result.data.providerRequestId, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, finishedAt: new Date() } }),
       db.benchmarkStudy.update({ where: { id: record.id }, data: { status: "COMPLETED", output: json(output), errorCode: null, errorMessage: null } }),
-      db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, provider: "LLM", operation: "ANALYZE_BENCHMARK", requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, metadata: json({ airRunId: run.id, benchmarkStudyId: record.id, sampleCount: samples.length, promptVersion: template.version, contextTruncated, latencyMs, providerMode: runtime.mode ?? "REAL", productModel: runtime.productModel ?? null, apiModelId: runtime.apiModelId ?? runtime.model }) } }),
+      db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, provider: runtime.providerName, operation: "ANALYZE_BENCHMARK", requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, metadata: json({ airRunId: run.id, benchmarkStudyId: record.id, sampleCount: samples.length, promptVersion: template.version, contextTruncated, latencyMs, ...runtimeAudit, actualModel: result.data.model }) } }),
       db.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, action: "benchmark_study.succeeded", resourceType: "benchmark_study", resourceId: record.id, metadata: json({ aiRunId: run.id, sampleCount: samples.length, commonMethodCount: output.commonMethods.length }) } }),
     ]);
     return { status: "ok" as const, studyId: record.id, sampleCount: samples.length };
@@ -264,7 +267,7 @@ export async function processBenchmarkStudyJob(job: Job<BenchmarkStudyPayload>, 
     const failed = failure(error);
     if (runId) {
       await db.aIRun.update({ where: { id: runId }, data: { status: "FAILED", errorCode: failed.code, errorMessage: "账号研究未完成。", finishedAt: new Date() } }).catch(() => undefined);
-      await db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, provider: "LLM", operation: "ANALYZE_BENCHMARK", requestId: runId, success: false, units: 1, cost: null, metadata: json({ airRunId: runId, benchmarkStudyId: record.id, sampleCount: samples.length, promptVersion: templateVersion, contextTruncated, errorCode: failed.code }) } }).catch(() => undefined);
+      await db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, provider: runProvider ?? "LLM", operation: "ANALYZE_BENCHMARK", requestId: runId, success: false, units: 1, cost: null, metadata: json({ airRunId: runId, benchmarkStudyId: record.id, sampleCount: samples.length, promptVersion: templateVersion, contextTruncated, errorCode: failed.code, requestedModel: requestedModel ?? null }) } }).catch(() => undefined);
     }
     const attempt = job.attemptsMade + 1;
     const willRetry = failed.retryable && attempt < 3;

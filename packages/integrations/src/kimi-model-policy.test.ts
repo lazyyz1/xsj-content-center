@@ -1,25 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { classifyLLMConfig, CURRENT_KIMI_PRODUCT_MODEL, kimiRuntimeConfig, KIMI_PRODUCT_MODEL_ALLOWLIST } from "./kimi-model-policy";
+import { classifyLLMConfig, llmRuntimeConfig, normalizeLLMPublicConfig } from "./kimi-model-policy";
 
-describe("KimiModelPolicy", () => {
-  it("has a single frozen product model", () => {
-    expect(CURRENT_KIMI_PRODUCT_MODEL).toBe("KIMI_2_6");
-    expect(KIMI_PRODUCT_MODEL_ALLOWLIST).toEqual(["KIMI_2_6"]);
+describe("LLM model policy", () => {
+  it("accepts catalog-backed Kimi and DeepSeek models", () => {
+    expect(classifyLLMConfig({ provider: "KIMI", modelId: "kimi-k2.6", baseUrl: "https://api.moonshot.cn/v1" })).toBe("CURRENT");
+    expect(classifyLLMConfig({ provider: "DEEPSEEK", modelId: "deepseek-v4-pro", baseUrl: "https://api.deepseek.com" })).toBe("CURRENT");
   });
 
-  it("requires an admin-provided API model ID before becoming current", () => {
-    expect(classifyLLMConfig({ integrationType: "KIMI", productModel: "KIMI_2_6", baseUrl: "https://example.invalid/v1" })).toBe("UNCONFIGURED");
-    expect(classifyLLMConfig({ integrationType: "KIMI", productModel: "KIMI_2_6", baseUrl: "https://example.invalid/v1", apiModelId: "console-confirmed-id" })).toBe("CURRENT");
+  it("keeps the old KIMI_2_6 config readable without a data migration", () => {
+    const legacy = { integrationType: "KIMI", productModel: "KIMI_2_6", baseUrl: "https://example.invalid/v1", apiModelId: "workspace-confirmed-model-id" };
+    expect(normalizeLLMPublicConfig(legacy)).toMatchObject({ provider: "KIMI", modelId: "workspace-confirmed-model-id", legacyProductModel: "KIMI_2_6" });
+    expect(classifyLLMConfig(legacy)).toBe("CURRENT");
+    expect(llmRuntimeConfig(legacy, { apiKey: "test-secret" })).toMatchObject({ provider: "KIMI", model: "workspace-confirmed-model-id", requestedModel: "workspace-confirmed-model-id", chatStructuredOutput: "JSON_SCHEMA" });
   });
 
-  it("never silently upgrades legacy or alternate product configs", () => {
-    expect(classifyLLMConfig({ provider: "kimi", label: "legacy-alternate", modelId: "legacy-id" })).toBe("NEEDS_RECONFIGURATION");
-    expect(classifyLLMConfig({ provider: "compatible", label: "legacy-custom", modelId: "legacy-id" })).toBe("NEEDS_RECONFIGURATION");
-  });
-
-  it("keeps K3 reserved and out of the normal analysis runtime", () => {
-    const k3Config = { integrationType: "KIMI", productModel: "KIMI_K3", apiModelId: "kimi-k3" };
-    expect(classifyLLMConfig(k3Config)).toBe("NEEDS_RECONFIGURATION");
-    expect(kimiRuntimeConfig(k3Config, { apiKey: "test-secret" })).toBeNull();
+  it("fails closed for missing and unknown models", () => {
+    expect(classifyLLMConfig({ provider: "DEEPSEEK", baseUrl: "https://api.deepseek.com" })).toBe("UNCONFIGURED");
+    expect(classifyLLMConfig({ provider: "DEEPSEEK", modelId: "deepseek-v5", baseUrl: "https://api.deepseek.com" })).toBe("NEEDS_RECONFIGURATION");
+    expect(llmRuntimeConfig({ provider: "DEEPSEEK", modelId: "deepseek-v5", baseUrl: "https://api.deepseek.com" }, { apiKey: "test-secret" })).toBeNull();
   });
 });

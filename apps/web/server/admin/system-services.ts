@@ -19,7 +19,7 @@ async function localFunAsrStatus() {
 export async function getSystemServiceStatuses() {
   return {
     policy: systemManagedProvidersEnabled() ? "ENV_MANAGED" as const : "WORKSPACE_MANAGED" as const,
-    kimi: getSystemProviderConfig("LLM") ? "CONFIGURED" as const : "UNCONFIGURED" as const,
+    ai: getSystemProviderConfig("LLM") ? "CONFIGURED" as const : "UNCONFIGURED" as const,
     redfox: getSystemProviderConfig("REDFOX") ? "CONFIGURED" as const : "UNCONFIGURED" as const,
     doubao: (await resolveSystemProviderConfig("DOUBAO_ASR")) ? "CONFIGURED" as const : "UNCONFIGURED" as const,
     localFunAsr: await localFunAsrStatus(),

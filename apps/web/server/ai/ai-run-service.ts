@@ -22,7 +22,7 @@ export class AIServiceError extends Error {
 
 function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
 function publicError(error: unknown, runtime: LLMRuntime) {
-  if (error instanceof LLMError && runtime.productModel === "KIMI_2_6") {
+  if (error instanceof LLMError && runtime.providerName === "KIMI") {
     if (error.code === "LLM_AUTH_FAILED") return new LLMError("KIMI_AUTH_FAILED", "Kimi 2.6 认证失败，请检查 API 配置。", false, error.details);
     if (error.code === "LLM_GENERATION_FAILED" && error.details.httpStatus === 404) {
       return new LLMError("KIMI_MODEL_UNAVAILABLE", "当前 Kimi 2.6 模型配置不可用，请检查 Model ID。", false, error.details);
@@ -34,8 +34,8 @@ function publicError(error: unknown, runtime: LLMRuntime) {
 function modelAudit(runtime: LLMRuntime) {
   const mode = runtime.mode ?? "FIXTURE";
   return {
-    productModel: runtime.productModel ?? (mode === "MOCK" ? "MOCK" : "FIXTURE"),
-    apiModelId: runtime.apiModelId ?? runtime.model,
+    provider: runtime.providerName,
+    requestedModel: runtime.requestedModel ?? runtime.model,
     providerMode: mode,
   };
 }
@@ -78,8 +78,8 @@ export async function executeStructuredAIRun<T>(input: {
     const usage = result.data.usage;
     const latencyMs = Date.now() - requestStartedAt;
     await db.$transaction([
-      db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(result.data.value), providerRequestId: result.data.providerRequestId, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, finishedAt: new Date() } }),
-      db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: "LLM", operation: input.operation, requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, metadata: json({ airRunId: run.id, promptVersion: input.promptVersion, contextTruncated: input.contextTruncated, latencyMs, ...auditModel, ...input.auditMetadata }) } }),
+      db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(result.data.value), metadata: json({ ...runMetadata(input.metadata, runtime), actualModel: result.data.model }), providerRequestId: result.data.providerRequestId, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, finishedAt: new Date() } }),
+      db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: runtime.providerName, operation: input.operation, requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, metadata: json({ airRunId: run.id, promptVersion: input.promptVersion, contextTruncated: input.contextTruncated, latencyMs, actualModel: result.data.model, ...auditModel, ...input.auditMetadata }) } }),
       db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_succeeded", resourceType: "ai_run", resourceId: run.id, metadata: json({ ...(input.projectId ? { projectId: input.projectId } : {}), ...safeAuditMetadata }) } }),
     ]);
     return { id: run.id, action: input.action, status: "SUCCEEDED" as const, output: result.data.value, contextTruncated: input.contextTruncated, provider: runtime.providerName, model: result.data.model, usage };
@@ -88,7 +88,7 @@ export async function executeStructuredAIRun<T>(input: {
     const latencyMs = Date.now() - requestStartedAt;
     await db.$transaction([
       db.aIRun.update({ where: { id: run.id }, data: { status: "FAILED", errorCode: failure.code, errorMessage: failure.message, finishedAt: new Date() } }),
-      db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: "LLM", operation: input.operation, requestId: run.id, success: false, units: 1, cost: null, metadata: json({ airRunId: run.id, errorCode: failure.code, promptVersion: input.promptVersion, latencyMs, ...auditModel, ...input.auditMetadata }) } }),
+      db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: runtime.providerName, operation: input.operation, requestId: run.id, success: false, units: 1, cost: null, metadata: json({ airRunId: run.id, errorCode: failure.code, promptVersion: input.promptVersion, latencyMs, ...auditModel, ...input.auditMetadata }) } }),
       db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_failed", resourceType: "ai_run", resourceId: run.id, metadata: json({ ...(input.projectId ? { projectId: input.projectId } : {}), errorCode: failure.code, ...safeAuditMetadata }) } }),
     ]);
     throw failure;

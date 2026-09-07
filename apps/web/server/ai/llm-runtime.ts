@@ -1,14 +1,14 @@
 import "server-only";
 
-import { classifyLLMConfig, IntegrationService } from "@content-center/integrations";
+import { classifyLLMConfig, IntegrationService, type AIModelCapabilities } from "@content-center/integrations";
 import { LLMError, MockLLMProvider, OpenAICompatibleLLMProvider, openAICompatibleConfigSchema, type LLMProvider } from "@content-center/providers";
 
 export type LLMRuntime = {
   provider: LLMProvider;
   providerName: string;
   model: string;
-  productModel?: "KIMI_2_6" | "FIXTURE" | "MOCK";
-  apiModelId?: string;
+  requestedModel?: string;
+  capabilities?: AIModelCapabilities;
   mode?: "REAL" | "FIXTURE" | "MOCK";
 };
 
@@ -44,23 +44,23 @@ export async function loadLLMRuntime(workspaceId: string, service = new Integrat
   const status = await service.getIntegrationStatus(workspaceId, "LLM");
   if (status.status === "DISABLED") throw new LLMError("LLM_DISABLED", "AI 模型已禁用。", false);
   if (status.status !== "CONFIGURED" && status.status !== "MOCK") {
-    if (process.env.MOCK_MODE === "true") return { provider: new MockLLMProvider(({ prompt }) => mockFixture(prompt)), providerName: "MOCK", model: "mock-llm", productModel: "MOCK", apiModelId: "mock-llm", mode: "MOCK" };
+    if (process.env.MOCK_MODE === "true") return { provider: new MockLLMProvider(({ prompt }) => mockFixture(prompt)), providerName: "MOCK", model: "mock-llm", requestedModel: "mock-llm", mode: "MOCK" };
     const policyState = classifyLLMConfig(status.publicConfig);
     if (policyState === "UNCONFIGURED" && status.publicConfig.integrationType === "KIMI") {
-      throw new LLMError("KIMI_MODEL_ID_MISSING", "请填写 Kimi 2.6 对应的 API Model ID。", false);
+      throw new LLMError("KIMI_MODEL_ID_MISSING", "请为 AI 服务选择一个可用模型。", false);
     }
-    throw new LLMError("KIMI_NOT_CONFIGURED", "Kimi 2.6 尚未配置，请联系管理员完成设置。", false);
+    throw new LLMError("KIMI_NOT_CONFIGURED", "AI 模型尚未配置，请联系管理员完成设置。", false);
   }
   const config = await service.getDecryptedIntegrationConfig(workspaceId, "LLM");
   const parsed = openAICompatibleConfigSchema.safeParse(config);
-  if (!parsed.success) throw new LLMError("KIMI_NOT_CONFIGURED", "Kimi 2.6 尚未配置，请联系管理员完成设置。", false);
-  const metadata = config as { productModel?: "KIMI_2_6" | "FIXTURE"; apiModelId?: string; mode?: "REAL" | "FIXTURE" };
+  if (!parsed.success) throw new LLMError("KIMI_NOT_CONFIGURED", "AI 模型尚未配置，请联系管理员完成设置。", false);
+  const metadata = config as { requestedModel?: string; capabilities?: AIModelCapabilities; mode?: "REAL" | "FIXTURE" };
   return {
     provider: new OpenAICompatibleLLMProvider(parsed.data),
-    providerName: metadata.mode === "REAL" ? "KIMI" : parsed.data.provider,
+    providerName: metadata.mode === "FIXTURE" ? parsed.data.provider : parsed.data.provider.toUpperCase(),
     model: parsed.data.model,
-    productModel: metadata.productModel,
-    apiModelId: metadata.apiModelId ?? parsed.data.model,
+    requestedModel: metadata.requestedModel ?? parsed.data.model,
+    capabilities: metadata.capabilities,
     mode: metadata.mode,
   };
 }

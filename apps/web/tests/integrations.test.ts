@@ -9,7 +9,7 @@ describe("integration status", () => {
     const statuses = await getIntegrationStatuses("missing-workspace");
     expect(statuses.find((item) => item.name === "RedFox")).toMatchObject({ status: "UNCONFIGURED", managedBy: "WORKSPACE", lastFour: null, defaults: { baseUrl: "https://redfox.hk" } });
     expect(statuses.find((item) => item.name === "豆包语音识别")).toMatchObject({ status: "UNCONFIGURED", defaults: { resourceId: "volc.bigasr.auc_turbo" } });
-    expect(statuses.find((item) => item.name === "Kimi AI")).toMatchObject({ status: "UNCONFIGURED" });
+    expect(statuses.find((item) => item.name === "AI 模型")).toMatchObject({ status: "UNCONFIGURED", models: expect.arrayContaining([expect.objectContaining({ provider: "KIMI", modelId: "kimi-k2.6" }), expect.objectContaining({ provider: "DEEPSEEK", modelId: "deepseek-v4-pro" })]) });
     expect(statuses.find((item) => item.name === "Storage")).toMatchObject({ status: "CONFIGURED", managedBy: "ENVIRONMENT" });
   });
 

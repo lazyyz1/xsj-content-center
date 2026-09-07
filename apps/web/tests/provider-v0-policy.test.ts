@@ -33,6 +33,7 @@ describe("V0 provider policy", () => {
       retryable: false,
     });
     expect(llmApiStatus(new LLMError("KIMI_NOT_CONFIGURED", "Kimi 2.6 尚未配置。", false))).toBe(409);
+    expect(llmApiStatus(new LLMError("LLM_UNSUPPORTED_INPUT", "当前模型不支持图片输入。", false))).toBe(400);
   });
 
   it("keeps the Studio brief plan available without any Provider configuration", () => {

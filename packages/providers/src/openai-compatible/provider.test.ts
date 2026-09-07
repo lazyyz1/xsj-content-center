@@ -17,9 +17,10 @@ beforeAll(async () => {
     let body = "";
     request.on("data", (chunk) => { body += String(chunk); });
     request.on("end", () => {
-      const parsed = JSON.parse(body) as { messages: Array<{ content: string }> };
+      const parsed = JSON.parse(body) as { messages: Array<{ content: string | unknown[] }> };
       lastRequestBody = parsed;
-      const prompt = parsed.messages.at(-1)?.content ?? "";
+      const content = parsed.messages.at(-1)?.content ?? "";
+      const prompt = typeof content === "string" ? content : JSON.stringify(content);
       const send = (status: number, value: string) => { response.writeHead(status, { "content-type": "application/json", "x-request-id": "fixture-header-id" }); response.end(value); };
       if (request.headers.authorization !== "Bearer fixture-secret") return send(401, "{}");
       if (prompt.includes("STATUS_401")) return send(401, "{}");
@@ -48,6 +49,17 @@ function provider(options: { timeoutMs?: number; maxRetries?: 0 | 1 } = {}) {
 
 function kimiProvider(options: { timeoutMs?: number; maxRetries?: 0 | 1 } = {}) {
   return new OpenAICompatibleLLMProvider({ provider: "KIMI", baseUrl: origin, apiKey: "fixture-secret", model: "kimi-k2.6" }, options);
+}
+
+function deepSeekProvider(model: "deepseek-v4-flash" | "deepseek-v4-pro" | "deepseek-v4-flash-vision-exp") {
+  return new OpenAICompatibleLLMProvider({
+    provider: "DEEPSEEK",
+    baseUrl: origin,
+    apiKey: "fixture-secret",
+    model,
+    capabilities: { text: true, image: model.endsWith("vision-exp"), reasoning: true, structuredOutput: true, jsonObject: true, tools: true, responsesApi: true },
+    chatStructuredOutput: "JSON_OBJECT",
+  });
 }
 
 describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
@@ -85,6 +97,22 @@ describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
     await provider().generateText({ prompt: "GENERIC_SUCCESS" });
     expect(lastRequestBody).toMatchObject({ model: "fixture-model", temperature: 0.4, response_format: { type: "json_object" } });
     expect(lastRequestBody).not.toHaveProperty("thinking");
+  });
+
+  it.each(["deepseek-v4-flash", "deepseek-v4-pro"] as const)("uses the DeepSeek Chat adapter for %s", async (model) => {
+    await deepSeekProvider(model).generateStructured({ prompt: `DEEPSEEK_${model}`, structuredOutput: { preferJsonSchema: true } }, z.object({ ok: z.boolean(), title: z.string() }));
+    expect(lastRequestBody).toMatchObject({ model, thinking: { type: "enabled" }, reasoning_effort: "high", response_format: { type: "json_object" } });
+    expect(lastRequestBody).not.toHaveProperty("temperature");
+  });
+
+  it("sends normalized base64 image content only to an image-capable model", async () => {
+    const schema = z.object({ ok: z.boolean(), title: z.string() });
+    await deepSeekProvider("deepseek-v4-flash-vision-exp").generateStructured({
+      prompt: "VISION",
+      content: [{ type: "text", text: "VISION" }, { type: "image", source: { type: "base64", mediaType: "image/png", data: "aW1hZ2U=" } }],
+    }, schema);
+    expect(lastRequestBody).toMatchObject({ messages: [expect.objectContaining({ role: "user", content: [{ type: "text", text: "VISION" }, { type: "image_url", image_url: { url: "data:image/png;base64,aW1hZ2U=" } }] })] });
+    await expect(deepSeekProvider("deepseek-v4-flash").generateStructured({ prompt: "NO_VISION", content: [{ type: "image", source: { type: "base64", mediaType: "image/png", data: "aW1hZ2U=" } }] }, schema)).rejects.toMatchObject({ code: "LLM_UNSUPPORTED_INPUT", message: "当前模型不支持图片输入。" });
   });
 
   it("validates structured JSON with Zod", async () => {

@@ -68,7 +68,7 @@ describe("Content Discovery D4 today recommendations", () => {
     expect(batch.mode).toBe("AI_ASSISTED"); expect(calls).toBe(1); expect(batch.items).toHaveLength(3);
     expect(batch.items.flatMap((item) => item.evidence).every((evidence) => evidence.referenceId !== "forged-evidence")).toBe(true);
     expect(await db.aIRun.count({ where: { workspaceId, action: "GENERATE_TODAY_RECOMMENDATIONS" } })).toBe(1);
-    expect(await db.apiUsage.count({ where: { workspaceId, provider: "LLM", operation: "GENERATE_TODAY_RECOMMENDATIONS" } })).toBe(1);
+    expect(await db.apiUsage.count({ where: { workspaceId, provider: "FIXTURE", operation: "GENERATE_TODAY_RECOMMENDATIONS" } })).toBe(1);
   });
 
   it("dismisses only one item and supports save, research and project creation", async () => {

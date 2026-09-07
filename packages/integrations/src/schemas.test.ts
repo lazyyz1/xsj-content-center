@@ -33,26 +33,26 @@ describe("provider config schemas", () => {
     expect(splitProviderConfig("DOUBAO_ASR", parsed).secretConfig).toEqual({ accessToken: "legacy-token" });
   });
 
-  it("accepts only the frozen Kimi 2.6 product policy and a separately configured API model ID", () => {
+  it("accepts catalog models and normalizes the legacy Kimi 2.6 shape", () => {
     expect(parseProviderConfig("LLM", {
-      integrationType: "KIMI",
-      productModel: "KIMI_2_6",
-      baseUrl: "https://example.invalid/v1",
+      provider: "KIMI",
       apiKey: "fake-key",
-      apiModelId: "confirmed-model-id",
-    })).toMatchObject({ integrationType: "KIMI", productModel: "KIMI_2_6", apiModelId: "confirmed-model-id" });
+      modelId: "kimi-k2.6",
+    })).toMatchObject({ provider: "KIMI", modelId: "kimi-k2.6", baseUrl: "https://api.moonshot.cn/v1" });
+    expect(parseProviderConfig("LLM", {
+      provider: "DEEPSEEK",
+      apiKey: "fake-key",
+      modelId: "deepseek-v4-pro",
+    })).toMatchObject({ provider: "DEEPSEEK", modelId: "deepseek-v4-pro", baseUrl: "https://api.deepseek.com" });
+    expect(parseProviderConfig("LLM", { integrationType: "KIMI", productModel: "KIMI_2_6", baseUrl: "https://example.invalid/v1", apiModelId: "legacy-model-id" })).toMatchObject({ provider: "KIMI", modelId: "legacy-model-id", legacyProductModel: "KIMI_2_6" });
     expect(() => parseProviderConfig("LLM", {
-      integrationType: "KIMI",
-      productModel: "KIMI_2_6",
-      baseUrl: "https://example.invalid/v1",
-      apiModelId: "attempted-override",
+      provider: "KIMI",
+      modelId: "kimi-k2.6",
       model: "browser-override",
     })).toThrow();
     expect(() => parseProviderConfig("LLM", {
-      integrationType: "KIMI",
-      productModel: "KIMI_2_7",
-      baseUrl: "https://example.invalid/v1",
-      apiModelId: "unapproved-model",
+      provider: "DEEPSEEK",
+      modelId: "deepseek-v5",
     })).toThrow();
   });
 

@@ -101,18 +101,19 @@ describe("content quality review workflow", () => {
       expect(prompt).toContain("Action: REVIEW_PLATFORM_CONTENT");
       expect(prompt).not.toContain("SECRET_TRANSCRIPT_MUST_NOT_BE_SENT");
       return { summary: "整体可读，建议减少模板感。", issues: [{ code: "TONE_TOO_GENERIC", severity: "WARNING", message: "表达偏模板化。", field: "body", suggestion: "增加个人判断。" }], suggestions: ["强化第二段观点"] };
-    }), providerName: "KIMI", model: "workspace-configured-model", productModel: "KIMI_2_6" as const, apiModelId: "workspace-configured-model", mode: "REAL" as const };
+    }), providerName: "DEEPSEEK", model: "deepseek-v4-pro", requestedModel: "deepseek-v4-pro", mode: "REAL" as const };
     const reviewed = await runPlatformAIReview({ workspaceId, userId: adminId, projectId, platform: "DOUYIN" }, { runtime });
     expect(reviewed.issues).toEqual(expect.arrayContaining([expect.objectContaining({ code: "TONE_TOO_GENERIC", source: "AI" })]));
     await expect(db.platformVariant.findUniqueOrThrow({ where: { id: variantId } })).resolves.toMatchObject({ status: "IN_REVIEW" });
     await expect(db.aIRun.findUniqueOrThrow({ where: { id: reviewed.runId } })).resolves.toMatchObject({
-      provider: "KIMI",
-      model: "workspace-configured-model",
-      metadata: expect.objectContaining({ productModel: "KIMI_2_6", apiModelId: "workspace-configured-model", providerMode: "REAL" }),
+      provider: "DEEPSEEK",
+      model: "deepseek-v4-pro",
+      metadata: expect.objectContaining({ provider: "DEEPSEEK", requestedModel: "deepseek-v4-pro", actualModel: "mock-llm", providerMode: "REAL" }),
     });
     await expect(db.apiUsage.findFirst({ where: { workspaceId, operation: "REVIEW_PLATFORM_CONTENT" } })).resolves.toMatchObject({
-      provider: "LLM",
-      metadata: expect.objectContaining({ productModel: "KIMI_2_6", apiModelId: "workspace-configured-model", providerMode: "REAL" }),
+      provider: "DEEPSEEK",
+      cost: null,
+      metadata: expect.objectContaining({ provider: "DEEPSEEK", requestedModel: "deepseek-v4-pro", actualModel: "mock-llm", providerMode: "REAL" }),
     });
     const review = await getPlatformReview({ workspaceId, userId: ownerId, projectId, platform: "DOUYIN" });
     expect(review.records[0]).toMatchObject({ result: "PENDING", aiReviewed: true, aiRunId: reviewed.runId });

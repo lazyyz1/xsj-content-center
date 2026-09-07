@@ -49,8 +49,15 @@ export type TranscriptionInput = {
 
 export type ProviderInput = { prompt: string };
 
+export type LLMContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; source: { type: "url"; url: string } }
+  | { type: "image"; source: { type: "base64"; mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp"; data: string } }
+  | { type: "image"; source: { type: "file"; fileId: string } };
+
 export type LLMGenerateInput = ProviderInput & {
   systemPrompt?: string;
+  content?: LLMContentBlock[];
   temperature?: number;
   maxCompletionTokens?: number;
   structuredOutput?: { preferJsonSchema?: boolean; schemaName?: string };

@@ -29,8 +29,7 @@ type MaterialAnalysisRuntime = {
   provider: LLMProvider;
   providerName: string;
   model: string;
-  apiModelId?: string;
-  productModel?: string;
+  requestedModel?: string;
   mode?: string;
 };
 
@@ -145,17 +144,16 @@ async function loadRuntime(workspaceId: string): Promise<MaterialAnalysisRuntime
   const integrations = new IntegrationService();
   const status = await integrations.getIntegrationStatus(workspaceId, "LLM");
   if (status.status === "DISABLED") throw new LLMError("LLM_DISABLED", "AI 模型已禁用。", false);
-  if (status.status !== "CONFIGURED") throw new LLMError("LLM_NOT_CONFIGURED", "Kimi 2.6 尚未配置，请联系管理员完成设置。", false);
+  if (status.status !== "CONFIGURED") throw new LLMError("LLM_NOT_CONFIGURED", "AI 模型尚未配置，请联系管理员完成设置。", false);
   const config = await integrations.getDecryptedIntegrationConfig(workspaceId, "LLM");
   const parsed = openAICompatibleConfigSchema.safeParse(config);
-  if (!parsed.success) throw new LLMError("LLM_NOT_CONFIGURED", "Kimi 2.6 尚未配置，请联系管理员完成设置。", false);
+  if (!parsed.success) throw new LLMError("LLM_NOT_CONFIGURED", "AI 模型尚未配置，请联系管理员完成设置。", false);
   const metadata = object(config);
   return {
     provider: new OpenAICompatibleLLMProvider(parsed.data),
-    providerName: metadata.mode === "REAL" ? "KIMI" : parsed.data.provider,
+    providerName: metadata.mode === "FIXTURE" ? parsed.data.provider : parsed.data.provider.toUpperCase(),
     model: parsed.data.model,
-    apiModelId: typeof metadata.apiModelId === "string" ? metadata.apiModelId : parsed.data.model,
-    productModel: typeof metadata.productModel === "string" ? metadata.productModel : undefined,
+    requestedModel: typeof metadata.requestedModel === "string" ? metadata.requestedModel : parsed.data.model,
     mode: typeof metadata.mode === "string" ? metadata.mode : "REAL",
   };
 }
@@ -170,10 +168,10 @@ function failure(error: unknown) {
   return { code: "MATERIAL_ANALYSIS_FAILED", message: "这次没有分析完成，请重试。", retryable: false };
 }
 
-async function recordRunFailure(input: { runId?: string; workspaceId: string; userId: string; operation: string; promptVersion: number; contextTruncated: boolean; materialAnalysisId: string; errorCode: string; }) {
+async function recordRunFailure(input: { runId?: string; workspaceId: string; userId: string; operation: string; promptVersion: number; contextTruncated: boolean; materialAnalysisId: string; errorCode: string; provider?: string; requestedModel?: string }) {
   if (input.runId) {
     await db.aIRun.update({ where: { id: input.runId }, data: { status: "FAILED", errorCode: input.errorCode, errorMessage: "AI 拆解未完成。", finishedAt: new Date() } });
-    await db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: "LLM", operation: input.operation, requestId: input.runId, success: false, units: 1, cost: null, metadata: json({ airRunId: input.runId, promptVersion: input.promptVersion, contextTruncated: input.contextTruncated, materialAnalysisId: input.materialAnalysisId, errorCode: input.errorCode }) } });
+    await db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: input.provider ?? "LLM", operation: input.operation, requestId: input.runId, success: false, units: 1, cost: null, metadata: json({ airRunId: input.runId, promptVersion: input.promptVersion, contextTruncated: input.contextTruncated, materialAnalysisId: input.materialAnalysisId, errorCode: input.errorCode, requestedModel: input.requestedModel ?? null }) } });
     await db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_failed", resourceType: "ai_run", resourceId: input.runId, metadata: json({ errorCode: input.errorCode, materialAnalysisId: input.materialAnalysisId }) } });
   }
 }
@@ -247,14 +245,19 @@ export async function processMaterialAnalysisJob(job: Job<ContentIngestPayload>,
   const summary = { sourceItemId: record.sourceItem.id, transcriptId: record.sourceItem.transcript.id, transcriptUpdatedAt: record.sourceItem.transcript.updatedAt.toISOString(), transcriptCharacters: fullText.length, hasExternalMetadata: Boolean(external), materialAnalysisId: analysis.id, materialAnalysisVersion: analysis.version, schemaVersion: MATERIAL_ANALYSIS_SCHEMA_VERSION };
   let runId: string | undefined;
   let promptVersion = 0;
+  let runProvider: string | undefined;
+  let requestedModel: string | undefined;
   try {
     const template = await promptTemplate(record.workspaceId);
     promptVersion = template.version;
     const runtime = dependencies.runtime ?? await loadRuntime(record.workspaceId);
+    runProvider = runtime.providerName;
+    requestedModel = runtime.requestedModel ?? runtime.model;
+    const runtimeAudit = { provider: runtime.providerName, requestedModel, providerMode: runtime.mode ?? "REAL" };
     const systemPrompt = `${template.systemPrompt}\n\nM1 output contract (this contract supersedes obsolete generic four-block wording above):\n- Return the required expression-analysis fields and methods array; describing progression is analysis, not a script or writing plan.\n- Return plain Simplified Chinese for natural-language values.\n- Separate expression analysis from tentative method drafts.\n- ${materialAnalysisSystemBoundary}\n- Never invent timestamps: cite segment indexes or exact transcript quotes only.\n- Do not claim visuals, music, editing, speed, or delivery when only transcript text is supplied.\n- A single source can only be marked SINGLE_SOURCE_DRAFT; sparse evidence must be INSUFFICIENT with an empty items array.`;
     const prompt = buildMaterialAnalysisPrompt(template.template, context);
     const run = await db.$transaction(async (tx) => {
-      const created = await tx.aIRun.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "ANALYZE_MATERIAL", provider: runtime.providerName, model: runtime.model, promptTemplateId: template.id, promptVersion: template.version, status: "RUNNING", inputSummary: json(summary), metadata: json({ materialAnalysisId: analysis.id, materialAnalysisVersion: analysis.version, schemaVersion: MATERIAL_ANALYSIS_SCHEMA_VERSION, providerMode: runtime.mode ?? "REAL", productModel: runtime.productModel ?? null, apiModelId: runtime.apiModelId ?? runtime.model }), contextTruncated } });
+      const created = await tx.aIRun.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "ANALYZE_MATERIAL", provider: runtime.providerName, model: runtime.model, promptTemplateId: template.id, promptVersion: template.version, status: "RUNNING", inputSummary: json(summary), metadata: json({ materialAnalysisId: analysis.id, materialAnalysisVersion: analysis.version, schemaVersion: MATERIAL_ANALYSIS_SCHEMA_VERSION, ...runtimeAudit }), contextTruncated } });
       await tx.materialAnalysis.update({ where: { id: analysis.id }, data: { aiRunId: created.id } });
       await tx.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "ai.run_started", resourceType: "ai_run", resourceId: created.id, metadata: json({ action: "ANALYZE_MATERIAL", promptVersion: template.version, contextTruncated, materialAnalysisId: analysis.id }) } });
       return created;
@@ -265,10 +268,10 @@ export async function processMaterialAnalysisJob(job: Job<ContentIngestPayload>,
     const output = normalizeMaterialAnalysisOutput(result.data.value, fullText, segments);
     await db.ingestJob.update({ where: { id: record.id }, data: { progress: 90, metadata: json({ ...object(record.metadata), progressStage: "PERSISTING", aiRunId: run.id }) } });
     const latencyMs = Date.now() - startedAt.getTime();
-    const auditModel = { productModel: runtime.productModel ?? "KIMI_2_6", apiModelId: runtime.apiModelId ?? runtime.model, providerMode: runtime.mode ?? "REAL" };
+    const auditModel = { ...runtimeAudit, actualModel: result.data.model };
     await db.$transaction([
-      db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(output), providerRequestId: result.data.providerRequestId, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, finishedAt: new Date() } }),
-      db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, provider: "LLM", operation: "ANALYZE_MATERIAL", requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, metadata: json({ airRunId: run.id, sourceItemId: record.sourceItemId, materialAnalysisId: analysis.id, promptVersion: template.version, contextTruncated, latencyMs, ...auditModel }) } }),
+      db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(output), metadata: json({ materialAnalysisId: analysis.id, materialAnalysisVersion: analysis.version, schemaVersion: MATERIAL_ANALYSIS_SCHEMA_VERSION, ...auditModel }), providerRequestId: result.data.providerRequestId, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, finishedAt: new Date() } }),
+      db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, provider: runtime.providerName, operation: "ANALYZE_MATERIAL", requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, metadata: json({ airRunId: run.id, sourceItemId: record.sourceItemId, materialAnalysisId: analysis.id, promptVersion: template.version, contextTruncated, latencyMs, ...auditModel }) } }),
       db.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "ai.run_succeeded", resourceType: "ai_run", resourceId: run.id, metadata: json({ action: "ANALYZE_MATERIAL", materialAnalysisId: analysis.id, promptVersion: template.version, contextTruncated }) } }),
       db.materialAnalysis.update({ where: { id: analysis.id }, data: { status: "COMPLETED", understanding: json(output), summary: output.whatItSays.summary, keyPoints: json(output.whatItSays.keyPoints), tags: [], keywords: [], aiRunId: run.id, errorCode: null, errorMessage: null } }),
       db.ingestJob.update({ where: { id: record.id }, data: { status: "SUCCEEDED", progress: 100, finishedAt: new Date(), errorCode: null, errorMessage: null, metadata: json({ ...object(record.metadata), progressStage: "SUCCEEDED", materialAnalysisId: analysis.id }) } }),
@@ -277,7 +280,7 @@ export async function processMaterialAnalysisJob(job: Job<ContentIngestPayload>,
     return { status: "ok" as const, sourceItemId: record.sourceItemId, materialAnalysisId: analysis.id };
   } catch (error) {
     const failed = failure(error);
-    await recordRunFailure({ runId, workspaceId: record.workspaceId, userId: record.requestedById, operation: "ANALYZE_MATERIAL", promptVersion, contextTruncated, materialAnalysisId: analysis.id, errorCode: failed.code });
+    await recordRunFailure({ runId, workspaceId: record.workspaceId, userId: record.requestedById, operation: "ANALYZE_MATERIAL", promptVersion, contextTruncated, materialAnalysisId: analysis.id, errorCode: failed.code, provider: runProvider, requestedModel });
     const willRetry = failed.retryable && attempt < record.maxAttempts;
     await db.$transaction([
       db.ingestJob.update({ where: { id: record.id }, data: { status: willRetry ? "QUEUED" : "FAILED", progress: 0, errorCode: failed.code, errorMessage: failed.message, finishedAt: willRetry ? null : new Date() } }),

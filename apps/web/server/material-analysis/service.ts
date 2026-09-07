@@ -144,7 +144,7 @@ export async function requestMaterialAnalysis(input: { workspaceId: string; sour
     throw error;
   }
   const runtime = dependencies.runtime ?? await loadLLMRuntime(input.workspaceId);
-  if (runtime.mode === "MOCK") throw new MaterialAnalysisError("MOCK_NOT_ALLOWED", "智能整理不使用模拟结果，请先配置 Kimi 2.6。");
+  if (runtime.mode === "MOCK") throw new MaterialAnalysisError("MOCK_NOT_ALLOWED", "智能整理不使用模拟结果，请先配置 AI 模型。");
   const reserved = await reserveAnalysis({ workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, userId: input.userId, transcriptUpdatedAt: built.source.transcript!.updatedAt });
   try {
     await enqueueMaterialAnalysis({ jobId: reserved.job.id, workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, requestedById: input.userId }, reserved.job.maxAttempts);

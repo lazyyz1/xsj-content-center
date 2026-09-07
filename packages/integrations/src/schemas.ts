@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { AI_PROVIDERS, getAIModel } from "./model-catalog";
 import { CURRENT_KIMI_PRODUCT_MODEL, KIMI_INTEGRATION_TYPE } from "./kimi-model-policy";
+import { normalizeLLMPublicConfig } from "./kimi-model-policy";
 
 export const CONFIGURABLE_INTEGRATION_PROVIDERS = ["REDFOX", "DOUBAO_ASR", "TRANSCRIPTION", "LLM"] as const;
 export type ConfigurableIntegrationProvider = (typeof CONFIGURABLE_INTEGRATION_PROVIDERS)[number];
@@ -75,7 +77,7 @@ export const transcriptionConfigSchema = z
     }
   });
 
-export const llmConfigSchema = z
+const legacyKimiConfigSchema = z
   .object({
     integrationType: z.literal(KIMI_INTEGRATION_TYPE),
     productModel: z.literal(CURRENT_KIMI_PRODUCT_MODEL),
@@ -83,7 +85,25 @@ export const llmConfigSchema = z
     apiKey: optionalText(10_000),
     apiModelId: optionalText(200),
   })
-  .strict();
+  .strict()
+  .transform((config) => ({
+    provider: "KIMI" as const,
+    modelId: config.apiModelId,
+    baseUrl: config.baseUrl,
+    ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+    legacyProductModel: CURRENT_KIMI_PRODUCT_MODEL,
+  }));
+
+const catalogLLMConfigSchema = z.object({
+  provider: z.enum(AI_PROVIDERS),
+  modelId: z.string().trim().min(1).max(200),
+  baseUrl: optionalUrl,
+  apiKey: optionalText(10_000),
+}).strict().superRefine((config, context) => {
+  if (!getAIModel(config.provider, config.modelId)) context.addIssue({ code: "custom", path: ["modelId"], message: "Model is not in the approved catalog." });
+}).transform((config) => ({ ...config, baseUrl: config.baseUrl ?? getAIModel(config.provider, config.modelId)!.defaultBaseUrl }));
+
+export const llmConfigSchema = z.union([catalogLLMConfigSchema, legacyKimiConfigSchema]);
 
 const fixtureLLMConfigSchema = z
   .object({
@@ -123,7 +143,7 @@ export const providerConfigFields: Record<
     publicFields: ["source", "qualityMode", "selectionMode", "manualModel", "fallbackToDoubao", "endpoint"],
     secretFields: [],
   },
-  LLM: { publicFields: ["integrationType", "productModel", "provider", "baseUrl", "apiModelId"], secretFields: ["apiKey"], primarySecret: "apiKey" },
+  LLM: { publicFields: ["provider", "modelId", "baseUrl", "legacyProductModel", "integrationType", "productModel", "apiModelId"], secretFields: ["apiKey"], primarySecret: "apiKey" },
 };
 
 export function normalizePublicProviderConfig(
@@ -131,7 +151,7 @@ export function normalizePublicProviderConfig(
   config: Record<string, unknown>,
 ) {
   if (provider === "LLM") {
-    return config;
+    return normalizeLLMPublicConfig(config);
   }
   if (provider !== "DOUBAO_ASR") return config;
   const authMode = config.authMode === "LEGACY_APP_TOKEN" || (!config.authMode && config.appId)

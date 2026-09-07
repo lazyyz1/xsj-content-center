@@ -33,7 +33,7 @@ export async function getAdminUsage(range: UsageRange, selectedUserId?: string) 
   ]);
   return users.map((user) => {
     const rows = usage.filter((row) => row.userId === user.id);
-    const kimi = rows.filter((row) => row.provider === "KIMI" || row.provider === "LLM");
+    const ai = rows.filter((row) => ["KIMI", "DEEPSEEK", "LLM", "MOCK", "FIXTURE", "fixture-openai-compatible"].includes(row.provider));
     const redfox = rows.filter((row) => row.provider === "REDFOX");
     const asr = rows.filter((row) => row.provider === "DOUBAO_ASR" || row.provider === "LOCAL_FUNASR");
     const workspace = user.workspaceMemberships[0]?.workspace ?? null;
@@ -42,9 +42,11 @@ export async function getAdminUsage(range: UsageRange, selectedUserId?: string) 
       name: user.name,
       email: user.email,
       workspace,
-      aiCalls: kimi.length,
-      kimiInputTokens: kimi.reduce((sum, row) => sum + (row.inputTokens ?? 0), 0),
-      kimiOutputTokens: kimi.reduce((sum, row) => sum + (row.outputTokens ?? 0), 0),
+      aiCalls: ai.length,
+      aiInputTokens: ai.reduce((sum, row) => sum + (row.inputTokens ?? 0), 0),
+      aiOutputTokens: ai.reduce((sum, row) => sum + (row.outputTokens ?? 0), 0),
+      kimiInputTokens: ai.reduce((sum, row) => sum + (row.inputTokens ?? 0), 0),
+      kimiOutputTokens: ai.reduce((sum, row) => sum + (row.outputTokens ?? 0), 0),
       redfoxCalls: redfox.length,
       redfoxSuccess: redfox.filter((row) => row.success).length,
       redfoxFailed: redfox.filter((row) => !row.success).length,
@@ -54,7 +56,7 @@ export async function getAdminUsage(range: UsageRange, selectedUserId?: string) 
       asrFailed: asr.filter((row) => !row.success).length,
       materialCount: materialCounts.find((item) => item.createdById === user.id)?._count._all ?? 0,
       projectCount: projectCounts.find((item) => item.createdById === user.id)?._count._all ?? 0,
-      operations: Object.fromEntries([...new Set(kimi.map((row) => row.operation))].map((operation) => [operation, kimi.filter((row) => row.operation === operation).length])),
+      operations: Object.fromEntries([...new Set(ai.map((row) => row.operation))].map((operation) => [operation, ai.filter((row) => row.operation === operation).length])),
       recentActivity: rows[0]?.createdAt.toISOString() ?? user.sessions[0]?.updatedAt.toISOString() ?? null,
     };
   });

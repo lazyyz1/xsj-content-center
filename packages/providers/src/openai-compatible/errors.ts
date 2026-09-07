@@ -11,6 +11,7 @@ export type LLMErrorCode =
   | "LLM_SERVER_ERROR"
   | "LLM_INVALID_RESPONSE"
   | "LLM_CONTEXT_TOO_LARGE"
+  | "LLM_UNSUPPORTED_INPUT"
   | "LLM_GENERATION_FAILED";
 
 export class LLMError extends Error {

@@ -23,8 +23,7 @@ type DistillationRuntime = {
   provider: LLMProvider;
   providerName: string;
   model: string;
-  apiModelId?: string;
-  productModel?: string;
+  requestedModel?: string;
   mode?: string;
 };
 
@@ -104,17 +103,16 @@ async function loadRuntime(workspaceId: string): Promise<DistillationRuntime> {
   const integrations = new IntegrationService();
   const status = await integrations.getIntegrationStatus(workspaceId, "LLM");
   if (status.status === "DISABLED") throw new LLMError("LLM_DISABLED", "AI 模型已禁用。", false);
-  if (status.status !== "CONFIGURED") throw new LLMError("LLM_NOT_CONFIGURED", "Kimi 2.6 尚未配置，请联系管理员完成设置。", false);
+  if (status.status !== "CONFIGURED") throw new LLMError("LLM_NOT_CONFIGURED", "AI 模型尚未配置，请联系管理员完成设置。", false);
   const config = await integrations.getDecryptedIntegrationConfig(workspaceId, "LLM");
   const parsed = openAICompatibleConfigSchema.safeParse(config);
-  if (!parsed.success) throw new LLMError("LLM_NOT_CONFIGURED", "Kimi 2.6 尚未配置，请联系管理员完成设置。", false);
+  if (!parsed.success) throw new LLMError("LLM_NOT_CONFIGURED", "AI 模型尚未配置，请联系管理员完成设置。", false);
   const metadata = object(config);
   return {
     provider: new OpenAICompatibleLLMProvider(parsed.data),
-    providerName: metadata.mode === "REAL" ? "KIMI" : parsed.data.provider,
+    providerName: metadata.mode === "FIXTURE" ? parsed.data.provider : parsed.data.provider.toUpperCase(),
     model: parsed.data.model,
-    apiModelId: typeof metadata.apiModelId === "string" ? metadata.apiModelId : parsed.data.model,
-    productModel: typeof metadata.productModel === "string" ? metadata.productModel : undefined,
+    requestedModel: typeof metadata.requestedModel === "string" ? metadata.requestedModel : parsed.data.model,
     mode: typeof metadata.mode === "string" ? metadata.mode : "REAL",
   };
 }
@@ -202,13 +200,18 @@ export async function processMaterialDistillationJob(job: Job<ContentIngestPaylo
   };
   const summary = { sourceItemId: record.sourceItem.id, transcriptId: transcript.id, transcriptUpdatedAt: transcript.updatedAt.toISOString(), transcriptCharacters: fullText.length, materialDistillationId: distillation.id, materialDistillationVersion: distillation.version, mode: distillation.mode, m1Version: m1?.version ?? null, m1SchemaVersion: structuredM1 ? MATERIAL_ANALYSIS_SCHEMA_VERSION : null, schemaVersion: MATERIAL_DISTILLATION_SCHEMA_VERSION };
   let runId: string | undefined;
+  let runProvider: string | undefined;
+  let requestedModel: string | undefined;
   try {
     const runtime = dependencies.runtime ?? await loadRuntime(record.workspaceId);
+    runProvider = runtime.providerName;
+    requestedModel = runtime.requestedModel ?? runtime.model;
+    const runtimeAudit = { provider: runtime.providerName, requestedModel, providerMode: runtime.mode ?? "REAL" };
     const mode = distillation.mode as MaterialDistillationMode;
     const systemPrompt = materialDistillationSystemBoundary + "\n\nReturn plain Simplified Chinese and exactly the requested JSON schema. Requested mode: " + mode + ". Preserve uncertainty; do not invent a durable lesson.";
     const prompt = buildMaterialDistillationPrompt(mode, context);
     const run = await db.$transaction(async (tx) => {
-      const created = await tx.aIRun.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "DISTILL_MATERIAL", provider: runtime.providerName, model: runtime.model, promptVersion: 2, status: "RUNNING", inputSummary: json(summary), metadata: json({ materialDistillationId: distillation.id, materialDistillationVersion: distillation.version, sourceItemId: record.sourceItemId, schemaVersion: MATERIAL_DISTILLATION_SCHEMA_VERSION, structuredOutput: "JSON_SCHEMA_WHEN_SUPPORTED", providerMode: runtime.mode ?? "REAL", productModel: runtime.productModel ?? null, apiModelId: runtime.apiModelId ?? runtime.model }), contextTruncated } });
+      const created = await tx.aIRun.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "DISTILL_MATERIAL", provider: runtime.providerName, model: runtime.model, promptVersion: 2, status: "RUNNING", inputSummary: json(summary), metadata: json({ materialDistillationId: distillation.id, materialDistillationVersion: distillation.version, sourceItemId: record.sourceItemId, schemaVersion: MATERIAL_DISTILLATION_SCHEMA_VERSION, structuredOutput: "JSON_SCHEMA_WHEN_SUPPORTED", ...runtimeAudit }), contextTruncated } });
       await tx.materialDistillation.update({ where: { id: distillation.id }, data: { aiRunId: created.id } });
       await tx.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "ai.run_started", resourceType: "ai_run", resourceId: created.id, metadata: json({ action: "DISTILL_MATERIAL", promptVersion: 2, contextTruncated, materialDistillationId: distillation.id }) } });
       return created;
@@ -220,9 +223,9 @@ export async function processMaterialDistillationJob(job: Job<ContentIngestPaylo
     const output = normalizeMaterialDistillationOutput(result.data.value, mode, segments);
     const latencyMs = Date.now() - startedAt.getTime();
     await db.$transaction([
-      db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(output), providerRequestId: result.data.providerRequestId, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, finishedAt: new Date() } }),
+      db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(output), metadata: json({ materialDistillationId: distillation.id, materialDistillationVersion: distillation.version, sourceItemId: record.sourceItemId, schemaVersion: MATERIAL_DISTILLATION_SCHEMA_VERSION, structuredOutput: "JSON_SCHEMA_WHEN_SUPPORTED", ...runtimeAudit, actualModel: result.data.model }), providerRequestId: result.data.providerRequestId, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, finishedAt: new Date() } }),
       db.materialDistillation.update({ where: { id: distillation.id }, data: { status: "COMPLETED", output: json(output), errorCode: null, errorMessage: null } }),
-      db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, provider: "LLM", operation: "DISTILL_MATERIAL", requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, metadata: json({ airRunId: run.id, sourceItemId: record.sourceItemId, materialDistillationId: distillation.id, promptVersion: 2, contextTruncated, latencyMs, providerMode: runtime.mode ?? "REAL", productModel: runtime.productModel ?? null, apiModelId: runtime.apiModelId ?? runtime.model }) } }),
+      db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, provider: runtime.providerName, operation: "DISTILL_MATERIAL", requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, metadata: json({ airRunId: run.id, sourceItemId: record.sourceItemId, materialDistillationId: distillation.id, promptVersion: 2, contextTruncated, latencyMs, ...runtimeAudit, actualModel: result.data.model }) } }),
       db.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "material_distillation.succeeded", resourceType: "material_distillation", resourceId: distillation.id, metadata: json({ sourceItemId: record.sourceItemId, version: distillation.version, mode: distillation.mode, attempt, highlightCount: output.highlights.length, hasLongTermValue: output.hasLongTermValue }) } }),
       db.ingestJob.update({ where: { id: record.id }, data: { status: "SUCCEEDED", progress: 100, finishedAt: new Date(), errorCode: null, errorMessage: null, metadata: json({ ...metadata, progressStage: "SUCCEEDED", materialDistillationId: distillation.id, aiRunId: run.id }) } }),
     ]);
@@ -232,7 +235,7 @@ export async function processMaterialDistillationJob(job: Job<ContentIngestPaylo
     if (runId) {
       await db.$transaction([
         db.aIRun.update({ where: { id: runId }, data: { status: "FAILED", errorCode: failed.code, errorMessage: "精华提炼未完成。", finishedAt: new Date() } }),
-        db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, provider: "LLM", operation: "DISTILL_MATERIAL", requestId: runId, success: false, units: 1, cost: null, metadata: json({ airRunId: runId, sourceItemId: record.sourceItemId, materialDistillationId: distillation.id, errorCode: failed.code, validationIssues: failed.validationIssues ?? [] }) } }),
+        db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, provider: runProvider ?? "LLM", operation: "DISTILL_MATERIAL", requestId: runId, success: false, units: 1, cost: null, metadata: json({ airRunId: runId, sourceItemId: record.sourceItemId, materialDistillationId: distillation.id, errorCode: failed.code, validationIssues: failed.validationIssues ?? [], requestedModel: requestedModel ?? null }) } }),
       ]).catch(() => undefined);
     }
     const willRetry = failed.retryable && attempt < record.maxAttempts;

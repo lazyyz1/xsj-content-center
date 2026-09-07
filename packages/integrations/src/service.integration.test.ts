@@ -164,7 +164,7 @@ describe("IntegrationService integration", () => {
     expect(JSON.stringify(audits)).not.toContain(replacementSecret);
   });
 
-  it("stores the frozen Kimi product model and adapts the admin-provided model ID for the provider", async () => {
+  it("stores Kimi provider and model separately while keeping the legacy input compatible", async () => {
     const apiKey = `kimi-${randomUUID()}`;
     const result = await service.saveIntegrationConfig({
       workspaceId,
@@ -179,18 +179,17 @@ describe("IntegrationService integration", () => {
       },
     });
     expect(result).toMatchObject({
-      publicConfig: { integrationType: "KIMI", productModel: "KIMI_2_6", apiModelId: "workspace-confirmed-model-id" },
+      publicConfig: { provider: "KIMI", modelId: "workspace-confirmed-model-id", legacyProductModel: "KIMI_2_6" },
       lastFour: apiKey.slice(-4),
     });
     expect(JSON.stringify(result)).not.toContain(apiKey);
-    await expect(service.getDecryptedIntegrationConfig(workspaceId, "LLM")).resolves.toEqual({
+    await expect(service.getDecryptedIntegrationConfig(workspaceId, "LLM")).resolves.toMatchObject({
       provider: "KIMI",
       baseUrl: "https://kimi.example.invalid/v1",
       apiKey,
       model: "workspace-confirmed-model-id",
-      integrationType: "KIMI",
-      productModel: "KIMI_2_6",
-      apiModelId: "workspace-confirmed-model-id",
+      modelId: "workspace-confirmed-model-id",
+      requestedModel: "workspace-confirmed-model-id",
       mode: "REAL",
     });
   });
@@ -232,6 +231,18 @@ describe("IntegrationService integration", () => {
     expect(after.encryptedConfig).toBe(before.encryptedConfig);
   });
 
+  it("stores a Workspace-scoped DeepSeek key and requires a new secret when switching provider", async () => {
+    await expect(service.saveIntegrationConfig({ workspaceId, userId, provider: "LLM", config: { provider: "DEEPSEEK", modelId: "deepseek-v4-pro" } })).rejects.toMatchObject({ code: "INTEGRATION_SECRET_REQUIRED" });
+    const apiKey = `deepseek-${randomUUID()}`;
+    const result = await service.saveIntegrationConfig({ workspaceId, userId, provider: "LLM", config: { provider: "DEEPSEEK", modelId: "deepseek-v4-pro", apiKey } });
+    expect(result).toMatchObject({ status: "CONFIGURED", publicConfig: { provider: "DEEPSEEK", modelId: "deepseek-v4-pro", baseUrl: "https://api.deepseek.com" }, lastFour: apiKey.slice(-4) });
+    expect(JSON.stringify(result)).not.toContain(apiKey);
+    const stored = await db.integrationConfig.findUniqueOrThrow({ where: { workspaceId_provider: { workspaceId, provider: "LLM" } } });
+    expect(stored.encryptedConfig).not.toContain(apiKey);
+    expect(JSON.stringify(stored.publicConfig)).not.toContain(apiKey);
+    await expect(service.getDecryptedIntegrationConfig(workspaceId, "LLM")).resolves.toMatchObject({ provider: "DEEPSEEK", model: "deepseek-v4-pro", requestedModel: "deepseek-v4-pro", apiKey });
+  });
+
   it("keeps an explicit fixture in MOCK state instead of presenting it as real Kimi", async () => {
     const result = await service.saveIntegrationConfig({
       workspaceId,
@@ -249,7 +260,6 @@ describe("IntegrationService integration", () => {
     await expect(service.getDecryptedIntegrationConfig(workspaceId, "LLM")).resolves.toMatchObject({
       provider: "fixture-openai-compatible",
       model: "fixture-model",
-      productModel: "FIXTURE",
       mode: "FIXTURE",
     });
   });

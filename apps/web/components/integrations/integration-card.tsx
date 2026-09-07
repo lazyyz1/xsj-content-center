@@ -18,6 +18,7 @@ type Integration = {
   defaults: Record<string, string>;
   managedBy: "WORKSPACE" | "ENVIRONMENT";
   connectionTest: "UNSUPPORTED_UNTIL_PROVIDER_STAGE" | "LIVE_API_TEST_NOT_AVAILABLE" | "NOT_APPLICABLE";
+  models?: Array<{ provider: "KIMI" | "DEEPSEEK"; modelId: string; label: string; defaultBaseUrl: string; experimental?: boolean; capabilities: Record<string, boolean> }>;
 };
 
 const statusLabel = {
@@ -42,6 +43,8 @@ function value(config: Record<string, unknown>, key: string) {
   return typeof config[key] === "string" ? config[key] : "";
 }
 
+const capabilityLabels: Record<string, string> = { text: "文本", image: "图片理解", reasoning: "深度推理", structuredOutput: "结构化输出", jsonObject: "JSON", tools: "工具调用", responsesApi: "Responses API" };
+
 class IntegrationClientError extends Error {
   constructor(readonly code: string, readonly detail: string) {
     super(detail);
@@ -53,10 +56,10 @@ function friendlyError(error: IntegrationClientError) {
     return "密钥加密服务尚未配置，请联系系统管理员。";
   }
   if (error.code === "INTEGRATION_SECRET_REQUIRED") return "请填写当前认证方式需要的 API 密钥。";
-  if (error.code === "KIMI_NOT_CONFIGURED") return "Kimi 2.6 尚未配置，请联系管理员完成设置。";
-  if (error.code === "KIMI_MODEL_ID_MISSING") return "请填写 Kimi 2.6 对应的 API Model ID。";
-  if (error.code === "KIMI_AUTH_FAILED") return "Kimi 2.6 认证失败，请检查 API 配置。";
-  if (error.code === "KIMI_MODEL_UNAVAILABLE") return "当前 Kimi 2.6 模型配置不可用，请检查 Model ID。";
+  if (error.code === "KIMI_NOT_CONFIGURED") return "AI 模型尚未配置，请联系管理员完成设置。";
+  if (error.code === "KIMI_MODEL_ID_MISSING") return "请选择一个可用的 AI 模型。";
+  if (error.code === "KIMI_AUTH_FAILED") return "AI 模型认证失败，请检查 Provider 配置。";
+  if (error.code === "KIMI_MODEL_UNAVAILABLE") return "当前模型配置不可用，请重新选择模型。";
   if (error.code === "INVALID_INTEGRATION_CONFIG") return "配置内容格式不正确，请检查必填项和地址格式。";
   if (error.code === "FORBIDDEN") return "当前账户没有修改服务配置的权限。";
   return "配置保存失败，请稍后重试。";
@@ -106,6 +109,14 @@ export function IntegrationCard({ integration, canManage, encryptionConfigured }
   const initialAuthMode = value(integration.publicConfig, "authMode") || "API_KEY";
   const [authMode, setAuthMode] = useState(initialAuthMode);
   const doubaoHasSelectedSecret = Boolean(integration.lastFour && authMode === initialAuthMode);
+  const initialAIProvider = (value(integration.publicConfig, "provider") || integration.defaults.provider || "KIMI") as "KIMI" | "DEEPSEEK";
+  const [aiProvider, setAIProvider] = useState(initialAIProvider);
+  const models = integration.models ?? [];
+  const initialModelId = value(integration.publicConfig, "modelId") || integration.defaults.modelId || models.find((model) => model.provider === initialAIProvider)?.modelId || "";
+  const [modelId, setModelId] = useState(initialModelId);
+  const selectedModel = models.find((model) => model.provider === aiProvider && model.modelId === modelId);
+  const [aiBaseUrl, setAIBaseUrl] = useState(value(integration.publicConfig, "baseUrl") || selectedModel?.defaultBaseUrl || integration.defaults.baseUrl || "");
+  const aiProviderChanged = integration.provider === "LLM" && aiProvider !== initialAIProvider;
 
   async function call(path: string, method: string, body?: unknown) {
     const response = await fetch(path, { method, headers: body ? { "content-type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
@@ -146,11 +157,10 @@ export function IntegrationCard({ integration, canManage, encryptionConfigured }
       };
     }
     return {
-      integrationType: "KIMI",
-      productModel: "KIMI_2_6",
-      baseUrl: String(formData.get("baseUrl") || ""),
+      provider: aiProvider,
+      modelId,
+      baseUrl: aiBaseUrl,
       ...(secret ? { apiKey: secret } : {}),
-      apiModelId: String(formData.get("apiModelId") || ""),
     };
   }
 
@@ -214,17 +224,16 @@ export function IntegrationCard({ integration, canManage, encryptionConfigured }
           {integration.provider === "LLM" ? (
             <>
               <div className="grid gap-1 rounded-xl bg-[var(--surface-elevated)] p-4 text-sm">
-                <p className="font-medium">当前模型：Kimi 2.6</p>
-                <p className="text-xs leading-5 text-[var(--text-secondary)]">当前版本统一使用 Kimi 2.6，模型切换暂未开放。</p>
+                <p className="font-medium">当前模型：{selectedModel?.label || modelId || "尚未选择"}</p>
+                <p className="text-xs leading-5 text-[var(--text-secondary)]">模型由管理员统一配置，普通成员继续直接使用内容拆解、提炼和创作。</p>
               </div>
-              {integration.status === "NEEDS_RECONFIGURATION" ? <p className="rounded-xl border border-[color-mix(in_srgb,var(--warning)_35%,transparent)] bg-[color-mix(in_srgb,var(--warning)_8%,transparent)] p-4 text-sm text-[var(--warning)]">当前版本仅支持 Kimi 2.6，请重新确认模型配置。已保存的 API Key 不会被删除。</p> : null}
-              <label className="grid gap-1.5 text-sm">Base URL<Input name="baseUrl" type="url" aria-label="Kimi AI Base URL" required defaultValue={value(integration.publicConfig, "baseUrl")} placeholder="填写 Kimi 控制台提供的 API 地址" /></label>
-              {!editingSecret && integration.lastFour ? <SavedSecret name={integration.name} lastFour={integration.lastFour} onReplace={() => setEditingSecret(true)} /> : null}
-              {editingSecret ? <SecretInput label="API Key" ariaLabel="Kimi AI API Key" value={secret} onChange={setSecret} required={!integration.lastFour} placeholder={integration.lastFour ? "输入新的 API Key" : "输入 API Key"} /> : null}
-              <details className="rounded-xl border border-[color-mix(in_srgb,var(--border)_65%,transparent)] p-4" open>
-                <summary className="cursor-pointer text-sm font-medium">高级配置</summary>
-                <label className="mt-4 grid gap-1.5 text-sm">API Model ID<Input name="apiModelId" aria-label="Kimi AI API Model ID" required defaultValue={value(integration.publicConfig, "apiModelId")} placeholder="填写 Kimi 控制台中的实际 Model ID" /><span className="text-xs leading-5 text-[var(--text-secondary)]">请填写 Kimi 控制台中与 Kimi 2.6 对应的实际 Model ID。系统不会猜测或自动填写。</span></label>
-              </details>
+              {integration.status === "NEEDS_RECONFIGURATION" ? <p className="rounded-xl border border-[color-mix(in_srgb,var(--warning)_35%,transparent)] bg-[color-mix(in_srgb,var(--warning)_8%,transparent)] p-4 text-sm text-[var(--warning)]">当前模型不在已确认目录中，请重新选择。已保存的 API Key 不会被删除。</p> : null}
+              <label className="grid gap-1.5 text-sm">Provider<select aria-label="AI Provider" value={aiProvider} onChange={(event) => { const nextProvider = event.target.value as "KIMI" | "DEEPSEEK"; const nextModel = models.find((model) => model.provider === nextProvider); setAIProvider(nextProvider); setModelId(nextModel?.modelId || ""); setAIBaseUrl(nextModel?.defaultBaseUrl || ""); setEditingSecret(true); }} className="h-10 rounded-[var(--radius)] border bg-transparent px-3"><option value="KIMI">Kimi</option><option value="DEEPSEEK">DeepSeek</option></select></label>
+              <label className="grid gap-1.5 text-sm">默认模型<select aria-label="AI 默认模型" value={modelId} onChange={(event) => setModelId(event.target.value)} className="h-10 rounded-[var(--radius)] border bg-transparent px-3">{!selectedModel && modelId ? <option value={modelId}>{modelId}（现有配置）</option> : null}{models.filter((model) => model.provider === aiProvider).map((model) => <option key={model.modelId} value={model.modelId}>{model.label}{model.experimental ? "（实验）" : ""}</option>)}</select></label>
+              {selectedModel ? <div className="flex flex-wrap gap-2 text-xs text-[var(--text-secondary)]"><span>能力：</span>{Object.entries(selectedModel.capabilities).filter(([, supported]) => supported).map(([capability]) => <span key={capability} className="rounded-full bg-[var(--surface-elevated)] px-2.5 py-1">{capabilityLabels[capability] || capability}</span>)}</div> : null}
+              <label className="grid gap-1.5 text-sm">Base URL<Input name="baseUrl" type="url" aria-label="AI Base URL" required value={aiBaseUrl} onChange={(event) => setAIBaseUrl(event.target.value)} /></label>
+              {!editingSecret && integration.lastFour && !aiProviderChanged ? <SavedSecret name={integration.name} lastFour={integration.lastFour} onReplace={() => setEditingSecret(true)} /> : null}
+              {editingSecret ? <SecretInput label="API Key" ariaLabel="AI API Key" value={secret} onChange={setSecret} required={!integration.lastFour || aiProviderChanged} placeholder={aiProviderChanged ? "切换 Provider 时需要填写对应 API Key" : integration.lastFour ? "输入新的 API Key" : "输入 API Key"} /> : null}
             </>
           ) : null}
 

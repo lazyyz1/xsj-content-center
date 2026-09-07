@@ -9,7 +9,7 @@ export default async function AdminSystemPage() {
   await requireSystemAdmin();
   const [services, doubao] = await Promise.all([getSystemServiceStatuses(), getSystemDoubaoAdminView()]);
   const rows = [
-    ["Kimi 2.6", services.kimi], ["RedFox", services.redfox], ["豆包录音文件识别 2.0", services.doubao], ["本地 FunASR", services.localFunAsr], ["Storage", services.storage],
+    ["AI 模型", services.ai], ["RedFox", services.redfox], ["豆包录音文件识别 2.0", services.doubao], ["本地 FunASR", services.localFunAsr], ["Storage", services.storage],
   ];
   return <>
     <PageHeader title="系统服务" description={`Provider 策略：${services.policy}。密钥仅在服务端加密保存或由环境变量管理。`} />

@@ -1,6 +1,6 @@
 import { db, type Prisma } from "@content-center/db";
 import { decryptConfig, encryptConfig, parseMasterEncryptionKey, secretLastFour } from "./encryption";
-import { classifyLLMConfig, kimiRuntimeConfig } from "./kimi-model-policy";
+import { classifyLLMConfig, llmRuntimeConfig } from "./kimi-model-policy";
 import {
   type ConfigurableIntegrationProvider,
   isConfigurableIntegrationProvider,
@@ -122,7 +122,7 @@ export class IntegrationService {
       : {};
     const publicConfig = normalizePublicProviderConfig(provider, jsonObject(row.publicConfig));
     if (provider === "LLM") {
-      return kimiRuntimeConfig(publicConfig, secretConfig);
+      return llmRuntimeConfig(publicConfig, secretConfig);
     }
     return { ...publicConfig, ...secretConfig };
   }
@@ -142,7 +142,9 @@ export class IntegrationService {
     });
     const { publicConfig, secretConfig: suppliedSecrets } = splitProviderConfig(input.provider, parsed);
     const existingSecrets = existing?.encryptedConfig && key ? decryptConfig(existing.encryptedConfig, key) : {};
-    const secretConfig = { ...existingSecrets, ...suppliedSecrets };
+    const existingPublicConfig = existing ? normalizePublicProviderConfig(input.provider, jsonObject(existing.publicConfig)) : {};
+    const llmProviderChanged = input.provider === "LLM" && existing && existingPublicConfig.provider !== publicConfig.provider;
+    const secretConfig = { ...(llmProviderChanged ? {} : existingSecrets), ...suppliedSecrets };
     const combinedConfig = { ...publicConfig, ...secretConfig };
     const primarySecret = primarySecretField(input.provider, combinedConfig);
     const primaryValue = primarySecret ? secretConfig[primarySecret] : undefined;

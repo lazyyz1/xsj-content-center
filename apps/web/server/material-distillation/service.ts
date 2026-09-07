@@ -97,7 +97,7 @@ export async function requestMaterialDistillation(input: { workspaceId: string; 
   if (source.sourceType !== "VIDEO") throw new MaterialDistillationError("VIDEO_REQUIRED", "当前只支持视频精华提炼。");
   if (!source.transcript?.fullText.trim()) throw new MaterialDistillationError("TRANSCRIPT_REQUIRED", "请先完成视频文字稿，再进行精华提炼。");
   const runtime = dependencies.runtime ?? await loadLLMRuntime(input.workspaceId);
-  if (runtime.mode === "MOCK") throw new MaterialDistillationError("MOCK_NOT_ALLOWED", "精华提炼不使用模拟结果，请先配置 Kimi 2.6。");
+  if (runtime.mode === "MOCK") throw new MaterialDistillationError("MOCK_NOT_ALLOWED", "精华提炼不使用模拟结果，请先配置 AI 模型。");
   const reserved = await reserveDistillation({ workspaceId: input.workspaceId, sourceItemId: source.id, userId: input.userId, mode: input.mode, transcriptUpdatedAt: source.transcript.updatedAt });
   try {
     await enqueueMaterialDistillation({ jobId: reserved.job.id, workspaceId: input.workspaceId, sourceItemId: source.id, requestedById: input.userId }, reserved.job.maxAttempts);

@@ -1,6 +1,6 @@
 import { z, type ZodIssue, type ZodType } from "zod";
 import type { LLMProvider } from "../contracts";
-import type { LLMGenerateInput, LLMTextResult, ProviderResult } from "../types";
+import type { LLMContentBlock, LLMGenerateInput, LLMTextResult, ProviderResult } from "../types";
 import { LLMError } from "./errors";
 import { chatCompletionResponseSchema, openAICompatibleConfigSchema, type OpenAICompatibleConfig } from "./schemas";
 
@@ -9,15 +9,23 @@ export type OpenAICompatibleOptions = { fetch?: typeof fetch; timeoutMs?: number
 type RequestCapabilities = {
   supportsTemperature: boolean;
   supportsJsonSchema: boolean;
-  thinking?: { type: "disabled" };
+  supportsImage: boolean;
+  thinking?: { type: "enabled" | "disabled" };
+  reasoningEffort?: "low" | "high" | "max";
   timeoutMs: number;
 };
 
 function resolveRequestCapabilities(config: OpenAICompatibleConfig): RequestCapabilities {
-  if (config.provider.toUpperCase() === "KIMI" && config.model === "kimi-k2.6") {
-    return { supportsTemperature: false, supportsJsonSchema: true, thinking: { type: "disabled" }, timeoutMs: 120_000 };
+  const provider = config.provider.toUpperCase();
+  const supportsJsonSchema = config.chatStructuredOutput === "JSON_SCHEMA" || (!config.chatStructuredOutput && provider === "KIMI" && config.model === "kimi-k2.6");
+  const supportsImage = config.capabilities?.image ?? false;
+  if (provider === "KIMI") {
+    return { supportsTemperature: false, supportsJsonSchema, supportsImage, thinking: { type: "disabled" }, timeoutMs: 120_000 };
   }
-  return { supportsTemperature: true, supportsJsonSchema: false, timeoutMs: 30_000 };
+  if (provider === "DEEPSEEK") {
+    return { supportsTemperature: false, supportsJsonSchema, supportsImage, thinking: { type: "enabled" }, reasoningEffort: "high", timeoutMs: 120_000 };
+  }
+  return { supportsTemperature: true, supportsJsonSchema, supportsImage, timeoutMs: 30_000 };
 }
 
 type ResponseFormat = { type: "json_object" } | { type: "json_schema"; json_schema: { name: string; strict: true; schema: Record<string, unknown> } };
@@ -56,6 +64,13 @@ function parseStructuredJson(text: string) {
     if (!fenced?.[1]) throw new Error("INVALID_JSON");
     return JSON.parse(fenced[1]) as unknown;
   }
+}
+
+function contentBlock(block: LLMContentBlock) {
+  if (block.type === "text") return { type: "text", text: block.text };
+  if (block.source.type === "url") return { type: "image_url", image_url: { url: block.source.url } };
+  if (block.source.type === "file") return { type: "file", file_id: block.source.fileId };
+  return { type: "image_url", image_url: { url: `data:${block.source.mediaType};base64,${block.source.data}` } };
 }
 
 function endpoint(baseUrl: string) {
@@ -133,6 +148,10 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
   private async request(input: LLMGenerateInput, responseFormat: ResponseFormat): Promise<ProviderResult<LLMTextResult>> {
     let response: Response;
     const capabilities = resolveRequestCapabilities(this.config);
+    if (input.content?.some((block) => block.type === "image") && !capabilities.supportsImage) {
+      throw new LLMError("LLM_UNSUPPORTED_INPUT", "当前模型不支持图片输入。", false);
+    }
+    const userContent = input.content?.length ? input.content.map(contentBlock) : input.prompt;
     try {
       response = await this.fetcher(endpoint(this.config.baseUrl), {
         method: "POST",
@@ -141,10 +160,11 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
           model: this.config.model,
           messages: [
             ...(input.systemPrompt ? [{ role: "system", content: input.systemPrompt }] : []),
-            { role: "user", content: input.prompt },
+            { role: "user", content: userContent },
           ],
           ...(capabilities.supportsTemperature ? { temperature: input.temperature ?? 0.4 } : {}),
           ...(capabilities.thinking ? { thinking: capabilities.thinking } : {}),
+          ...(capabilities.reasoningEffort ? { reasoning_effort: capabilities.reasoningEffort } : {}),
           ...(input.maxCompletionTokens ? { max_completion_tokens: input.maxCompletionTokens } : {}),
           response_format: responseFormat,
         }),

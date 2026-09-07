@@ -5,6 +5,9 @@ import {
   DOUBAO_DEFAULT_BASE_URL,
   DOUBAO_DEFAULT_RESOURCE_ID,
   IntegrationService,
+  getAIModels,
+  type AIModelCapabilities,
+  type AIProvider,
   type ConfigurableIntegrationProvider,
 } from "@content-center/integrations";
 import { REDFOX_DEFAULT_BASE_URL, storageHealthFromEnv } from "@content-center/providers";
@@ -24,6 +27,7 @@ export type IntegrationDisplay = {
   defaults: Record<string, string>;
   managedBy: "WORKSPACE" | "ENVIRONMENT";
   connectionTest: "UNSUPPORTED_UNTIL_PROVIDER_STAGE" | "LIVE_API_TEST_NOT_AVAILABLE" | "NOT_APPLICABLE";
+  models?: Array<{ provider: AIProvider; modelId: string; label: string; defaultBaseUrl: string; experimental?: boolean; capabilities: AIModelCapabilities }>;
 };
 
 const service = new IntegrationService();
@@ -48,10 +52,10 @@ const providerDetails: Record<ConfigurableIntegrationProvider, { name: string; d
     defaults: { source: "LOCAL_FUNASR", qualityMode: "BALANCED" },
   },
   LLM: {
-    name: "Kimi AI",
-    description: "用于素材分析、深度创作包、多平台内容生成和 AI 内容检查。",
+    name: "AI 模型",
+    description: "为内容拆解、视频提炼和创作提供模型能力。普通成员无需选择模型。",
     usage: ["内容拆解", "深度创作包", "多平台生成", "AI 审核"],
-    defaults: { integrationType: "KIMI", productModel: "KIMI_2_6" },
+    defaults: { provider: "KIMI", modelId: "kimi-k2.6", baseUrl: "https://api.moonshot.cn/v1" },
   },
 };
 
@@ -63,6 +67,7 @@ export async function getIntegrationStatuses(workspaceId: string): Promise<Integ
         ...current,
         updatedAt: current.updatedAt?.toISOString() ?? null,
         ...providerDetails[provider],
+        ...(provider === "LLM" ? { models: getAIModels().map((model) => ({ provider: model.provider, modelId: model.modelId, label: model.label, defaultBaseUrl: model.defaultBaseUrl, ...("experimental" in model && model.experimental ? { experimental: true } : {}), capabilities: model.capabilities })) } : {}),
         managedBy: "WORKSPACE" as const,
         connectionTest: provider === "REDFOX" || provider === "DOUBAO_ASR" || provider === "LLM"
           ? "LIVE_API_TEST_NOT_AVAILABLE" as const
@@ -95,7 +100,7 @@ export async function getIntegrationDisplay(workspaceId: string, provider: strin
 }
 
 export function integrationVisibleToRole(integration: IntegrationDisplay, canManage: boolean): IntegrationDisplay {
-  return canManage ? integration : { ...integration, publicConfig: {}, lastFour: null };
+  return canManage ? integration : { ...integration, publicConfig: {}, lastFour: null, models: undefined };
 }
 
 export { service as integrationService };

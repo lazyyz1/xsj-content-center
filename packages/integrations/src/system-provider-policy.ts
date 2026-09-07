@@ -1,5 +1,5 @@
 import type { ConfigurableIntegrationProvider } from "./schemas";
-import { CURRENT_KIMI_PRODUCT_MODEL, KIMI_INTEGRATION_TYPE } from "./kimi-model-policy";
+import { getAIModel, getAIModels, isAIProvider } from "./model-catalog";
 
 const value = (name: string) => process.env[name]?.trim() || undefined;
 
@@ -11,17 +11,22 @@ export function systemManagedProvidersEnabled() {
 export function getSystemProviderConfig(provider: ConfigurableIntegrationProvider): Record<string, unknown> | null {
   if (!systemManagedProvidersEnabled()) return null;
   if (provider === "LLM") {
-    const apiKey = value("KIMI_API_KEY");
-    const baseUrl = value("KIMI_BASE_URL") ?? "https://api.moonshot.ai/v1";
-    const apiModelId = value("KIMI_MODEL_ID") ?? "kimi-k2.6";
+    const requestedProvider = value("AI_PROVIDER") ?? "KIMI";
+    if (!isAIProvider(requestedProvider)) return null;
+    const modelId = value("AI_MODEL_ID") ?? value(requestedProvider === "KIMI" ? "KIMI_MODEL_ID" : "DEEPSEEK_MODEL_ID") ?? getAIModels(requestedProvider)[0]?.modelId;
+    const model = modelId ? getAIModel(requestedProvider, modelId) : null;
+    if (!model) return null;
+    const apiKey = value(requestedProvider === "KIMI" ? "KIMI_API_KEY" : "DEEPSEEK_API_KEY");
+    const baseUrl = value("AI_BASE_URL") ?? value(requestedProvider === "KIMI" ? "KIMI_BASE_URL" : "DEEPSEEK_BASE_URL") ?? model.defaultBaseUrl;
     return apiKey ? {
-      provider: KIMI_INTEGRATION_TYPE,
-      integrationType: KIMI_INTEGRATION_TYPE,
-      productModel: CURRENT_KIMI_PRODUCT_MODEL,
+      provider: requestedProvider,
       baseUrl,
       apiKey,
-      model: apiModelId,
-      apiModelId,
+      model: model.modelId,
+      modelId: model.modelId,
+      requestedModel: model.modelId,
+      capabilities: model.capabilities,
+      chatStructuredOutput: model.chatStructuredOutput,
       mode: "REAL",
     } : null;
   }
