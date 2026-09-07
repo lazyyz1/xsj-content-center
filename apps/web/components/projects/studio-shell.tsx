@@ -41,6 +41,7 @@ export function StudioShell({ project, methods, availableSources, editable, ai, 
   const [supplementMessage, setSupplementMessage] = useState("");
   const [mother, setMother] = useState(project.motherContent);
   const [motherHistory, setMotherHistory] = useState(project.motherHistory);
+  const motherGeneratingRef = useRef(false);
   const [motherGenerating, setMotherGenerating] = useState(false);
   const [motherMessage, setMotherMessage] = useState("");
   const [motherError, setMotherError] = useState("");
@@ -107,7 +108,8 @@ export function StudioShell({ project, methods, availableSources, editable, ai, 
   }
 
   async function generateMotherContent(angle?: string) {
-    if (motherGenerating || !editableProject) return;
+    if (motherGeneratingRef.current || !editableProject) return;
+    motherGeneratingRef.current = true;
     setMotherGenerating(true); setMotherError(""); setMotherMessage(""); setWarnings([]);
     try {
       if (!await saveSupplement(false)) throw new Error("请先保存我的补充");
@@ -121,8 +123,11 @@ export function StudioShell({ project, methods, availableSources, editable, ai, 
       setMother({ ...next, confirmedVersion: null, confirmedWarnings: [] }); setProductionPlan(plan); setSelectedAngle(text(plan.recommendedAngle)); setSelectedTitle(next.title); setWarnings(nextWarnings); setConfirmedWarningKeys([]); setWarningsOpen(false);
       const historyResponse = await fetch(`/api/projects/${project.id}/mother-content`); if (historyResponse.ok) setMotherHistory(await historyResponse.json() as MotherContentVersion[]);
       setMotherMessage(mother.version ? "新版本口播稿已生成" : "第一版口播稿已生成");
-    } catch (cause) { setMotherError(cause instanceof Error ? cause.message : "口播稿生成失败"); }
-    finally { setMotherGenerating(false); }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "口播稿生成失败";
+      setMotherError(mother.version ? `${message} 原有口播稿仍然保留，可以稍后重试。` : `${message} 请稍后重试。`);
+    }
+    finally { motherGeneratingRef.current = false; setMotherGenerating(false); }
   }
 
   async function selectTitle(title: string) {

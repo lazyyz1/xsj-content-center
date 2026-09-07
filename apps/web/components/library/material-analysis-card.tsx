@@ -3,7 +3,7 @@
 import { Badge, Button, Card } from "@content-center/ui";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MaterialAnalysisDTO, MaterialAnalysisJobDTO } from "@/server/material-analysis/service";
 import type { CurrentMaterialAnalysisOutput, MaterialAnalysisOutput } from "@/server/material-analysis/schemas";
 
@@ -27,6 +27,7 @@ export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt
   showCreateAction?: boolean;
 }) {
   const router = useRouter();
+  const analysisStarting = useRef(false);
   const [currentResult, setCurrentResult] = useState(initial);
   const [latestAttempt, setLatestAttempt] = useState(latestInitial);
   const [job, setJob] = useState(jobInitial);
@@ -46,8 +47,10 @@ export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt
   }, [initial, latestInitial, jobInitial]);
 
   async function analyze() {
+    if (analysisStarting.current) return;
     const needsConfirmation = Boolean(currentResult && latestAttempt?.id === currentResult.id && !processing);
     if (needsConfirmation && !confirming) { setConfirming(true); return; }
+    analysisStarting.current = true;
     setBusy(true); setError(""); setNotice("");
     try {
       const result = await request(`/api/source-items/${sourceId}/material-analysis`, "POST") as MaterialAnalysisRequestDTO;
@@ -57,7 +60,7 @@ export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt
       setNotice("已提交内容拆解，你可以先离开页面，回来后继续查看。");
       router.refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "内容拆解失败，请重试。"); }
-    finally { setBusy(false); }
+    finally { analysisStarting.current = false; setBusy(false); }
   }
 
   async function createContent() {
@@ -66,19 +69,19 @@ export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt
     catch (cause) { setError(cause instanceof Error ? cause.message : "无法进入创作页面。"); setBusy(false); }
   }
 
-  const statusLabel = processing ? (job?.status === "QUEUED" ? "等待分析" : "正在分析") : failed ? "需要重试" : currentResult ? "已完成" : "尚未拆解";
-  const actionLabel = failed ? "重新分析" : currentResult ? "重新分析" : "拆解这条内容";
+  const statusLabel = processing ? (job?.status === "QUEUED" ? "等待" : "处理中") : failed ? "需要重试" : currentResult ? "已完成" : "尚未拆解";
+  const actionLabel = failed || currentResult ? "重新拆解" : "拆解这条内容";
 
   return <Container className={embedded ? "" : "p-5"} data-testid="material-analysis-card">
     <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">内容拆解</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">看看这条内容是怎么讲的，以及有哪些方法值得借鉴。</p></div><Badge>{statusLabel}</Badge></div>
     {!hasTranscript && !currentResult ? <p className="mt-4 text-sm text-[var(--text-secondary)]">请先完成视频文字稿，再进行内容拆解。</p> : null}
     {hasTranscript && !configured && !currentResult ? <div className="mt-4 rounded-xl border border-dashed p-4 text-sm text-[var(--text-secondary)]">内容拆解服务暂时不可用，请联系管理员。</div> : null}
     {processing ? <div className="mt-4 rounded-xl border border-[var(--accent)] p-4 text-sm"><p className="font-medium">正在拆解，你可以先离开这个页面，回来后继续查看。</p><p className="mt-1 text-[var(--text-secondary)]">已有的历史拆解仍然保留。</p></div> : null}
-    {failed ? <div className="mt-4 rounded-xl border border-[var(--danger)] p-4 text-sm"><p className="font-medium text-[var(--danger)]">这次没有分析完成</p><p className="mt-1 text-[var(--text-secondary)]">已有的历史结果不会受到影响。</p></div> : null}
-    {currentResult?.stale ? <div className="mt-4 rounded-xl border border-[var(--warning)] p-4 text-sm"><p className="font-medium text-[var(--warning)]">视频文字稿已更新，当前拆解基于旧版本。</p><p className="mt-1 text-[var(--text-secondary)]">旧拆解仍可查看，重新分析后才会采用最新文字稿。</p></div> : null}
+    {failed ? <div className="mt-4 rounded-xl border border-[var(--danger)] p-4 text-sm"><p className="font-medium text-[var(--danger)]">这次没有拆解完成</p><p className="mt-1 text-[var(--text-secondary)]">已有的历史结果不会受到影响。</p></div> : null}
+    {currentResult?.stale ? <div className="mt-4 rounded-xl border border-[var(--warning)] p-4 text-sm"><p className="font-medium text-[var(--warning)]">视频文字稿已更新，当前拆解基于旧版本。</p><p className="mt-1 text-[var(--text-secondary)]">旧拆解仍可查看，重新拆解后才会采用最新文字稿。</p></div> : null}
     {currentResult?.status === "COMPLETED" && currentResult.understanding ? <UnderstandingView value={currentResult.understanding} analysisId={currentResult.id} canSave={canEdit} /> : null}
     {history.filter((item) => item.status === "COMPLETED" && item.id !== currentResult?.id).length ? <details className="mt-5 rounded-xl border p-4"><summary className="cursor-pointer text-sm font-medium">历史拆解</summary><div className="mt-3 grid gap-3">{history.filter((item) => item.status === "COMPLETED" && item.id !== currentResult?.id).map((item) => <details key={item.id} className="rounded-lg bg-[var(--surface-elevated)] p-3 text-sm"><summary className="cursor-pointer font-medium">第 {item.version} 版 · {item.summary || "暂无摘要"}</summary>{item.understanding ? <div className="mt-3"><UnderstandingView value={item.understanding} /></div> : <p className="mt-2 text-[var(--text-secondary)]">暂无可展开的完整结果。</p>}</details>)}</div></details> : null}
-    {confirming ? <div className="mt-4 rounded-xl border border-[var(--warning)] p-4 text-sm"><p>会生成一份新的拆解，旧版本仍会保留。</p><div className="mt-3 flex gap-2"><Button disabled={busy} onClick={analyze}>确认重新分析</Button><Button variant="secondary" onClick={() => setConfirming(false)}>取消</Button></div></div> : null}
+    {confirming ? <div className="mt-4 rounded-xl border border-[var(--warning)] p-4 text-sm"><p>会生成一份新的拆解，旧版本仍会保留。</p><div className="mt-3 flex gap-2"><Button disabled={busy} onClick={analyze}>确认重新拆解</Button><Button variant="secondary" onClick={() => setConfirming(false)}>取消</Button></div></div> : null}
     {error ? <p role="alert" className="mt-4 text-sm text-[var(--danger)]">{error}</p> : null}{notice ? <p role="status" className="mt-4 text-sm text-[var(--success)]">{notice}</p> : null}
     {canEdit ? <div className="mt-5 flex flex-wrap gap-2">{hasTranscript && configured && !processing ? <Button variant="secondary" disabled={busy || confirming} onClick={analyze}>{busy ? "提交中…" : actionLabel}</Button> : null}{showCreateAction && currentResult?.status === "COMPLETED" ? <Button disabled={busy} onClick={createContent}>基于这条素材创作</Button> : null}</div> : null}
   </Container>;
@@ -110,6 +113,7 @@ function MethodCard({ value, analysisId, methodIndex, canSave = false }: { value
 }
 
 function MethodSaveEditor({ analysisId, methodIndex, value }: { analysisId: string; methodIndex: number; value: CurrentMaterialAnalysisOutput["methods"]["items"][number] }) {
+  const saving = useRef(false);
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(value.title);
   const [steps, setSteps] = useState(value.howTo.join("\n"));
@@ -120,13 +124,15 @@ function MethodSaveEditor({ analysisId, methodIndex, value }: { analysisId: stri
   const [error, setError] = useState("");
 
   async function save() {
+    if (saving.current) return;
+    saving.current = true;
     setBusy(true); setError("");
     try {
       const response = await request("/api/methods", "POST", { materialAnalysisId: analysisId, methodIndex, title, steps: lines(steps), applicableScenarios: lines(applicable), boundaries: lines(boundaries) });
       if (!response?.id) throw new Error("无法保存方法。");
       setSaved(true); setEditing(false);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "无法保存方法。"); }
-    finally { setBusy(false); }
+    finally { saving.current = false; setBusy(false); }
   }
 
   if (saved) return <div className="mt-4 flex flex-wrap items-center gap-3 text-sm"><p role="status" className="text-[var(--success)]">已保存到我的方法</p><Link href="/library/methods" className="font-medium text-[var(--accent)]">查看我的方法</Link></div>;

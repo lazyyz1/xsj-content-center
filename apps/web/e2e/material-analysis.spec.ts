@@ -122,16 +122,16 @@ test("material detail supports the persisted asynchronous analysis flow", async 
   const failedAnalysis = await db.materialAnalysis.create({ data: { workspaceId: membership.workspaceId, sourceItemId: source.id, createdById: user.id, version: 2, status: "FAILED", tags: [], keywords: [], keyPoints: [], transcriptUpdatedAtAtAnalysis: transcript.updatedAt, errorCode: "FIXTURE_FAILURE", errorMessage: "模拟任务失败。" } });
   await db.ingestJob.create({ data: { workspaceId: membership.workspaceId, sourceItemId: source.id, requestedById: user.id, jobType: "ANALYZE_MATERIAL", provider: "LLM", providerMode: "REAL", status: "FAILED", errorCode: "FIXTURE_FAILURE", errorMessage: "模拟任务失败。", finishedAt: new Date(), metadata: { materialAnalysisId: failedAnalysis.id } } });
   await page.reload();
-  await expect(card).toContainText("这次没有分析完成");
+  await expect(card).toContainText("这次没有拆解完成");
   await expect(card).toContainText("这条内容是怎么讲的");
-  await page.getByRole("button", { name: "重新分析" }).click();
+  await page.getByRole("button", { name: "重新拆解" }).click();
   await expect(card).toContainText("新版", { timeout: 15_000 });
   await expect(db.materialAnalysis.count({ where: { sourceItemId: source.id, status: "COMPLETED" } })).resolves.toBe(2);
   await expect(card).toContainText("历史拆解");
 
   await db.workspaceMember.update({ where: { id: membership.id }, data: { role: "VIEWER" } });
   await page.reload();
-  await expect(page.getByRole("button", { name: "重新分析" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "重新拆解" })).toHaveCount(0);
   const forbidden = await page.request.post(`/api/source-items/${source.id}/material-analysis`);
   expect(forbidden.status()).toBe(403);
 });

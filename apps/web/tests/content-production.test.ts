@@ -52,14 +52,15 @@ describe("video content production", () => {
     expect(sourceDisplayName({ title: null, summary: null, platformLabel: "抖音", createdAt: new Date("2026-09-03") })).toMatch(/^抖音素材 · /);
   });
 
-  it("keeps the material workbar viewport-limited with one internal scroller and compact lists", () => {
+  it("keeps the material workbar viewport-limited and secondary analysis content collapsible", () => {
     const workspace = readFileSync(new URL("../components/library/material-workspace.tsx", import.meta.url), "utf8");
     const analysis = readFileSync(new URL("../components/library/material-analysis-card.tsx", import.meta.url), "utf8");
     expect(workspace).toContain("h-[calc(100dvh-2.5rem)]");
     expect(workspace).toContain('data-testid="material-workspace-scroll-body"');
     expect(workspace).toContain("overflow-y-auto");
     expect(workspace).toContain('data-testid="material-workspace-footer"');
-    expect(analysis).toContain("items.slice(0, 4)");
-    expect(analysis).toContain("查看全部");
+    expect(analysis).toContain("查看原文依据");
+    expect(analysis).toContain("历史拆解");
+    expect(analysis).toContain("<details");
   });
 });

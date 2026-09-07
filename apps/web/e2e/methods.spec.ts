@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { db, ensurePersonalWorkspaceForUser } from "@content-center/db";
 import { IntegrationService } from "@content-center/integrations";
+import { createContentIngestWorker } from "@content-center/worker/queue";
 import { expect, test } from "@playwright/test";
 import { auth } from "../lib/auth";
 
@@ -9,10 +10,25 @@ const runId = randomUUID();
 const email = `methods-${runId}@example.test`;
 const otherEmail = `methods-other-${runId}@example.test`;
 const studioEmail = `methods-studio-${runId}@example.test`;
+const journeyEmail = `methods-journey-${runId}@example.test`;
 const password = "safe-e2e-password";
 let fixture: Server;
 let fixtureOrigin = "";
+let worker: ReturnType<typeof createContentIngestWorker>;
 const prompts: string[] = [];
+
+function analysisGeneration() {
+  const evidence = [{ segmentIndex: 0 }];
+  const section = { summary: "先说清问题，再进入处理方式。", evidence };
+  return {
+    whatItSays: { summary: "这条内容说明先确认问题，再给出处理方式。", keyPoints: ["先说问题", "再给方法"], evidence },
+    expression: { audience: section, opening: section, progression: { summary: "从问题到方法逐步推进。", steps: ["问题", "解释", "方法"], evidence }, support: section, emotionalOrRhetoricalShift: section, ending: section },
+    methods: { evidenceStatus: "SINGLE_SOURCE_DRAFT", reason: "这条内容只提供一个可试用的方法草稿。", items: [{ title: "先说问题，再进入方案", howTo: ["先说清用户遇到的问题，再进入自己的处理方式。"], applicable: ["需要解释复杂问题时"], boundaries: ["只有一条素材依据，不能当作稳定规律。"], evidence }] },
+    reusable: [{ content: "先拆信息再表达", whyUseful: "便于让复杂内容更容易理解。" }],
+    doNotCopy: [{ content: "来源作者的经历", reason: "不能当成自己的事实。" }],
+    uncertain: [],
+  };
+}
 
 test.beforeAll(async () => {
   fixture = createServer((request, response) => {
@@ -20,27 +36,36 @@ test.beforeAll(async () => {
     request.on("data", (chunk) => { body += String(chunk); });
     request.on("end", () => {
       const parsed = JSON.parse(body) as { messages: Array<{ content: string }> };
-      prompts.push(parsed.messages.at(-1)?.content ?? "");
+      const prompt = parsed.messages.at(-1)?.content ?? "";
+      prompts.push(prompt);
       const index = prompts.length;
       response.writeHead(request.headers.authorization === "Bearer methods-fixture-key" ? 200 : 401, { "content-type": "application/json", "x-request-id": `methods-${index}` });
-      response.end(JSON.stringify({ id: `methods-${index}`, model: "kimi-2.6-fixture", choices: [{ message: { content: JSON.stringify({ recommendedAngle: "先说清问题", alternativeAngles: ["从误区切入"], recommendedTitle: `方法生成稿 ${index}`, alternativeTitles: ["为什么先说问题？", "一个问题的处理方式"], openingHook: "先把问题说清楚。", outline: ["问题", "方法"], body: "我从来没有做过加盟业务。先把问题说清楚，再给出自己的处理方式。", evidenceIds: [], sourceItemIds: [] }) } }], usage: { prompt_tokens: 120, completion_tokens: 55 } }));
+      const output = prompt.includes("Action: ANALYZE_MATERIAL")
+        ? analysisGeneration()
+        : { recommendedAngle: "先说清问题", alternativeAngles: ["从误区切入"], recommendedTitle: `方法生成稿 ${index}`, alternativeTitles: ["为什么先说问题？", "一个问题的处理方式"], openingHook: "先把问题说清楚。", outline: ["问题", "方法"], body: "我从来没有做过加盟业务。先把问题说清楚，再给出自己的处理方式。", evidenceIds: [], sourceItemIds: [] };
+      const send = () => response.end(JSON.stringify({ id: `methods-${index}`, model: "kimi-2.6-fixture", choices: [{ message: { content: JSON.stringify(output) } }], usage: { prompt_tokens: 120, completion_tokens: 55 } }));
+      if (prompt.includes("Action: ANALYZE_MATERIAL")) setTimeout(send, 500);
+      else send();
     });
   });
   await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
   const address = fixture.address();
   if (!address || typeof address === "string") throw new Error("Methods fixture did not bind");
   fixtureOrigin = `http://127.0.0.1:${address.port}/v1`;
+  worker = createContentIngestWorker();
+  await worker.waitUntilReady();
 });
 
 test.afterAll(async () => {
+  await worker?.close();
   await new Promise<void>((resolve) => fixture.close(() => resolve()));
-  const users = await db.user.findMany({ where: { email: { in: [email, otherEmail, studioEmail] } }, select: { id: true } });
+  const users = await db.user.findMany({ where: { email: { in: [email, otherEmail, studioEmail, journeyEmail] } }, select: { id: true } });
   if (users.length) {
     const workspaces = await db.workspace.findMany({ where: { members: { some: { userId: { in: users.map(({ id }) => id) } } } }, select: { id: true } });
     await db.methodAsset.deleteMany({ where: { workspaceId: { in: workspaces.map(({ id }) => id) } } });
     await db.workspace.deleteMany({ where: { id: { in: workspaces.map(({ id }) => id) } } });
   }
-  await db.user.deleteMany({ where: { email: { in: [email, otherEmail, studioEmail] } } });
+  await db.user.deleteMany({ where: { email: { in: [email, otherEmail, studioEmail, journeyEmail] } } });
   await db.$disconnect();
 });
 
@@ -200,4 +225,93 @@ test("uses explicit method versions in Studio and records each real generation a
   await expect(db.methodUsage.count({ where: { aiRunId: disabledRun.id } })).resolves.toBe(0);
   expect(prompts.at(-1)).not.toContain('"selectedMethods":');
   expect(await page.getByTestId("studio-method-selector").innerText()).not.toMatch(/ProjectMethodSelection|MethodUsage|MethodVersion|AIRun|context block|CORE|TRIAL|DISABLED|workspaceId|ownerUserId|version mismatch|stale method/);
+});
+
+test("completes one continuous first-phase journey from transcript to an editable saved draft", async ({ page }) => {
+  test.setTimeout(120_000);
+  const user = await signIn(page, journeyEmail, "First Phase Journey Owner");
+  const workspaceId = user.workspaceMemberships[0]!.workspaceId;
+  await new IntegrationService().saveIntegrationConfig({ workspaceId, userId: user.id, provider: "LLM", config: { integrationType: "KIMI", productModel: "KIMI_2_6", baseUrl: fixtureOrigin, apiKey: "methods-fixture-key", apiModelId: "kimi-2.6-fixture" } });
+  const sourceFact = "来源作者在上海服务了三百家门店。";
+  const source = await db.sourceItem.create({ data: { workspaceId, createdById: user.id, sourceType: "VIDEO", sourcePlatform: "DOUYIN", title: "连续旅程参考视频", status: "READY", transcript: { create: { workspaceId, provider: "LOCAL_FUNASR", providerMode: "REAL", fullText: `${sourceFact}先说清用户遇到的问题，再进入自己的处理方式。`, segments: [{ startMs: 1_000, endMs: 5_000, text: `${sourceFact}先说清用户遇到的问题，再进入自己的处理方式。` }] } } } });
+  const project = await db.contentProject.create({ data: { workspaceId, createdById: user.id, title: "连续旅程创作", sources: { create: { sourceItemId: source.id, role: "REFERENCE" } } } });
+  await db.creativeBrief.create({ data: { workspaceId, projectId: project.id, createdById: user.id, topic: "把复杂问题讲清楚", angle: "", audience: "", coreMessage: "", background: "", keyPoints: [], structure: [], tone: "", risks: [] } });
+
+  await page.goto(`/library/${source.id}`);
+  await expect(page.getByRole("heading", { name: "转写文本" })).toBeVisible();
+  await expect(page.getByText(sourceFact, { exact: false })).toBeVisible();
+  const analysisCard = page.getByTestId("material-analysis-card");
+  await expect(analysisCard).toContainText("尚未拆解");
+  await analysisCard.getByRole("button", { name: "拆解这条内容" }).dblclick();
+  await expect(analysisCard).toContainText(/等待|处理中|正在拆解/);
+  await page.reload();
+  await expect(page.getByTestId("material-analysis-card")).toContainText("这条内容是怎么讲的", { timeout: 20_000 });
+  await expect(db.ingestJob.count({ where: { sourceItemId: source.id, jobType: "ANALYZE_MATERIAL" } })).resolves.toBe(1);
+
+  const completedCard = page.getByTestId("material-analysis-card");
+  await completedCard.getByText(/查看原文依据/).first().click();
+  await expect(completedCard.getByText(sourceFact, { exact: false }).first()).toBeVisible();
+  await completedCard.getByRole("button", { name: "保存到我的方法" }).click();
+  await completedCard.getByRole("button", { name: "保存方法", exact: true }).dblclick();
+  await expect(completedCard).toContainText("已保存到我的方法");
+  await expect(db.methodAsset.count({ where: { workspaceId, ownerUserId: user.id } })).resolves.toBe(1);
+
+  await completedCard.getByRole("link", { name: "查看我的方法" }).click();
+  await page.getByRole("link", { name: /先说问题，再进入方案/ }).click();
+  let detail = page.getByTestId("method-detail");
+  await detail.getByRole("button", { name: "编辑方法" }).click();
+  await detail.getByLabel("方法名称").fill("连续旅程方法");
+  await detail.getByRole("button", { name: "保存方法", exact: true }).click();
+  await expect(detail).toContainText("方法已保存，新版本已经保留");
+  await detail.getByRole("button", { name: "试用中", exact: true }).click();
+  await page.reload();
+  detail = page.getByTestId("method-detail");
+  await expect(detail).toContainText("连续旅程方法");
+  await expect(detail).toContainText("试用中");
+  await expect(detail).toContainText("可以在“我的创作”中按需选择");
+  await detail.getByRole("link", { name: "去创作" }).click();
+
+  await page.getByRole("link", { name: "连续旅程创作", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "连续旅程创作" })).toBeVisible();
+  await page.getByLabel("我的核心观点").fill("我从来没有做过加盟业务。先讲清实际问题。 ");
+  await page.getByLabel("给谁看").fill("普通内容团队成员");
+  await page.getByLabel("有什么只有我们能讲的？").fill("我们只验证过两次内部流程，这是我自己的事实。");
+  await page.getByRole("button", { name: "保存我的补充" }).click();
+  await expect(page.getByText("我的补充已保存", { exact: false })).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const selector = page.getByTestId("studio-method-selector");
+  await selector.getByRole("button", { name: "选择我的方法" }).click();
+  const drawer = page.getByRole("dialog", { name: "选择我的方法" });
+  await expect(drawer).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  const methodOption = drawer.locator("article").filter({ hasText: "连续旅程方法" });
+  await methodOption.getByRole("button", { name: "选择", exact: true }).click();
+  await drawer.getByRole("button", { name: "保存选择" }).click();
+  await expect(selector).toContainText("连续旅程方法");
+  await expect.poll(() => db.projectMethodSelection.count({ where: { projectId: project.id, selectedByUserId: user.id } })).toBe(1);
+  await page.reload();
+  await expect(page.getByTestId("studio-method-selector")).toContainText("连续旅程方法");
+  await expect(page.getByLabel("我的核心观点")).toHaveValue(/我从来没有做过加盟业务/);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  const runCount = await db.aIRun.count({ where: { projectId: project.id, action: "GENERATE_MOTHER_CONTENT" } });
+  await page.getByRole("button", { name: "生成我的口播稿" }).dblclick();
+  await expect(page.getByLabel("口播稿正文")).toHaveValue(/我从来没有做过加盟业务/, { timeout: 20_000 });
+  await expect.poll(() => db.aIRun.count({ where: { projectId: project.id, action: "GENERATE_MOTHER_CONTENT" } })).toBe(runCount + 1);
+  expect(prompts.at(-1)).toContain("连续旅程方法");
+  expect(prompts.at(-1)).toContain("我们只验证过两次内部流程");
+  expect(prompts.at(-1)).not.toContain(sourceFact);
+
+  await page.getByLabel("口播稿正文").fill("人工修改并保存的连续旅程口播稿。");
+  await expect.poll(async () => (await db.motherContent.findUniqueOrThrow({ where: { projectId: project.id } })).body).toBe("人工修改并保存的连续旅程口播稿。");
+  const method = await db.methodAsset.findFirstOrThrow({ where: { workspaceId, ownerUserId: user.id }, include: { versions: { orderBy: { version: "desc" }, take: 1 } } });
+  const generation = await db.aIRun.findFirstOrThrow({ where: { projectId: project.id, action: "GENERATE_MOTHER_CONTENT" }, orderBy: { createdAt: "desc" } });
+  await expect(db.methodUsage.count({ where: { aiRunId: generation.id, methodVersionId: method.versions[0]!.id } })).resolves.toBe(1);
+
+  await page.reload();
+  await expect(page.getByLabel("口播稿正文")).toHaveValue("人工修改并保存的连续旅程口播稿。");
+  await expect(page.getByTestId("studio-method-selector")).toContainText("连续旅程方法");
+  await expect(page.getByLabel("有什么只有我们能讲的？")).toHaveValue("我们只验证过两次内部流程，这是我自己的事实。");
+  expect(await page.locator("main.app-main").innerText()).not.toMatch(/MaterialAnalysis|IngestJob|Queue|Worker|AIRun|ApiUsage|Workspace|Provider|MethodAsset|MethodVersion|MethodUsage|ProjectMethodSelection|Transcript ID|SourceItem ID|enum|JSON|Schema|Prompt|context|token|stale|version mismatch|optimistic lock/i);
 });
