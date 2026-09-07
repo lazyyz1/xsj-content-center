@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
-import { createMethodFromAnalysis, createMethodFromBenchmarkStudy, createMethodSchema, listMethods, methodStatusSchema, MethodError } from "@/server/methods/service";
+import { createMethodFromAnalysis, createMethodFromBenchmarkStudy, createMethodFromDistillation, createMethodSchema, listMethods, methodStatusSchema, MethodError } from "@/server/methods/service";
 
 function methodApiError(error: unknown) {
   if (!(error instanceof MethodError)) return null;
@@ -30,6 +30,9 @@ export async function POST(request: Request) {
     const data = parsed.data;
     if ("benchmarkStudyId" in data) {
       return NextResponse.json(await createMethodFromBenchmarkStudy({ ...data, workspaceId: context.workspace.id, ownerUserId: context.session.user.id }), { status: 201 });
+    }
+    if ("materialDistillationId" in data) {
+      return NextResponse.json(await createMethodFromDistillation({ ...data, workspaceId: context.workspace.id, ownerUserId: context.session.user.id }), { status: 201 });
     }
     return NextResponse.json(await createMethodFromAnalysis({ ...data, workspaceId: context.workspace.id, ownerUserId: context.session.user.id }), { status: 201 });
   } catch (error) {

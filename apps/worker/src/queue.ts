@@ -2,6 +2,7 @@ import { Queue, UnrecoverableError, Worker, type Job } from "bullmq";
 import { processContentIngestJob } from "./ingest";
 import { processMaterialAnalysisJob } from "./material-analysis";
 import { processBenchmarkStudyJob } from "./benchmark-analysis";
+import { processMaterialDistillationJob } from "./material-distillation";
 import { createRedisConnection } from "./redis-connection";
 import { processTranscribeSourceJob } from "./transcription";
 import {
@@ -25,6 +26,7 @@ export const CONTENT_INGEST_QUEUE = "content-ingest";
 export const CONTENT_INGEST = "CONTENT_INGEST";
 export const ANALYZE_MATERIAL = "ANALYZE_MATERIAL";
 export const ANALYZE_BENCHMARK = "ANALYZE_BENCHMARK";
+export const DISTILL_MATERIAL = "DISTILL_MATERIAL";
 
 export type ContentIngestPayload = {
   jobId: string;
@@ -64,7 +66,7 @@ export function createContentIngestQueue() {
   return new Queue<ContentIngestJobPayload>(CONTENT_INGEST_QUEUE, { connection: createRedisConnection() });
 }
 
-async function enqueueOnContentQueue(name: typeof CONTENT_INGEST | typeof ANALYZE_MATERIAL | typeof ANALYZE_BENCHMARK, payload: ContentIngestJobPayload, maxAttempts: number) {
+async function enqueueOnContentQueue(name: typeof CONTENT_INGEST | typeof ANALYZE_MATERIAL | typeof ANALYZE_BENCHMARK | typeof DISTILL_MATERIAL, payload: ContentIngestJobPayload, maxAttempts: number) {
   const queue = createContentIngestQueue();
   try {
     const payloadId = "jobId" in payload ? payload.jobId : payload.studyId;
@@ -88,6 +90,10 @@ export async function enqueueBenchmarkStudy(payload: BenchmarkStudyPayload, maxA
   return enqueueOnContentQueue(ANALYZE_BENCHMARK, payload, maxAttempts);
 }
 
+export async function enqueueMaterialDistillation(payload: ContentIngestPayload, maxAttempts = 3) {
+  return enqueueOnContentQueue(DISTILL_MATERIAL, payload, maxAttempts);
+}
+
 export async function enqueueContentIngest(payload: ContentIngestPayload, maxAttempts = 3) {
   return enqueueOnContentQueue(CONTENT_INGEST, payload, maxAttempts);
 }
@@ -99,6 +105,7 @@ export function createContentIngestWorker() {
       if (job.name === CONTENT_INGEST) return processContentIngestJob(job as Job<ContentIngestPayload>);
       if (job.name === ANALYZE_MATERIAL) return processMaterialAnalysisJob(job as Job<ContentIngestPayload>);
       if (job.name === ANALYZE_BENCHMARK) return processBenchmarkStudyJob(job as Job<BenchmarkStudyPayload>);
+      if (job.name === DISTILL_MATERIAL) return processMaterialDistillationJob(job as Job<ContentIngestPayload>);
       throw new UnrecoverableError(`Unsupported job: ${job.name}`);
     },
     { connection: createRedisConnection(), concurrency: 2 },

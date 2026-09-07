@@ -90,6 +90,7 @@ enum IngestJobType {
   TRANSCRIBE
   PROCESS_MEDIA
   ANALYZE_MATERIAL
+  DISTILL_MATERIAL
 }
 
 enum JobStatus {
@@ -149,6 +150,7 @@ enum EvidenceType {
 enum PromptType {
   ANALYZE_MATERIAL
   ANALYZE_BENCHMARK
+  DISTILL_MATERIAL
   UNIFIED_CREATIVE_ANALYSIS
   ANALYZE_SOURCES
   EXTRACT_EVIDENCE
@@ -182,6 +184,17 @@ enum BenchmarkStudyStatus {
 enum MaterialAnalysisOrigin {
   AI
   HUMAN
+}
+
+enum MaterialDistillationMode {
+  COMPREHENSIVE
+  COPYWRITING
+}
+
+enum MaterialDistillationStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
 }
 
 enum UnifiedCreativeAnalysisStatus {
@@ -317,6 +330,7 @@ model User {
   createdContentIdeas     ContentIdea[]          @relation("ContentIdeaCreatedBy")
   createdRecommendationBatches RecommendationBatch[] @relation("RecommendationBatchCreatedBy")
   createdMaterialAnalyses MaterialAnalysis[]           @relation("MaterialAnalysisCreatedBy")
+  createdMaterialDistillations MaterialDistillation[] @relation("MaterialDistillationCreatedBy")
   createdBenchmarkStudies BenchmarkStudy[]             @relation("BenchmarkStudyCreatedBy")
   createdUnifiedCreativeAnalyses UnifiedCreativeAnalysis[] @relation("UnifiedCreativeAnalysisCreatedBy")
   ownedMethodAssets       MethodAsset[]                @relation("MethodAssetOwner")
@@ -413,6 +427,7 @@ model Workspace {
   recommendationItems RecommendationItem[]
   recommendationEvidence RecommendationEvidence[]
   materialAnalyses       MaterialAnalysis[]
+  materialDistillations  MaterialDistillation[]
   unifiedCreativeAnalyses UnifiedCreativeAnalysis[]
   methodAssets           MethodAsset[]
   creationFeedbacks      CreationFeedback[]
@@ -495,6 +510,7 @@ model SourceItem {
   evidenceItems  EvidenceItem[]
   ideaReferences ContentIdeaReference[]
   materialAnalyses MaterialAnalysis[]
+  materialDistillations MaterialDistillation[]
   methodVersionsFromSource MethodVersion[] @relation("MethodVersionSourceItem")
   benchmarkStudySamples BenchmarkStudySample[]
 
@@ -970,6 +986,34 @@ model MaterialAnalysis {
   @@index([createdById])
 }
 
+model MaterialDistillation {
+  id                          String                    @id @default(cuid())
+  workspaceId                 String
+  sourceItemId                String
+  createdById                 String
+  version                     Int
+  mode                        MaterialDistillationMode
+  status                      MaterialDistillationStatus @default(PROCESSING)
+  schemaVersion               String
+  output                      Json?
+  aiRunId                     String?                   @unique
+  transcriptUpdatedAtAtDistillation DateTime
+  errorCode                   String?
+  errorMessage                String?
+  createdAt                   DateTime                  @default(now())
+  updatedAt                   DateTime                  @updatedAt
+  workspace                   Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceItem                  SourceItem                @relation(fields: [sourceItemId], references: [id], onDelete: Cascade)
+  createdBy                   User                      @relation("MaterialDistillationCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  aiRun                       AIRun?                    @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
+  methodVersions              MethodVersion[]
+
+  @@unique([sourceItemId, version])
+  @@index([workspaceId, sourceItemId, createdAt])
+  @@index([workspaceId, status])
+  @@index([createdById])
+}
+
 model MethodAsset {
   id             String       @id @default(cuid())
   workspaceId    String
@@ -1000,6 +1044,7 @@ model MethodVersion {
   sourceTranscriptId     String?
   sourceTranscriptUpdatedAt DateTime?
   sourceBenchmarkStudyId String?
+  sourceMaterialDistillationId String?
   evidence               Json
   editedById             String
   createdAt              DateTime        @default(now())
@@ -1008,6 +1053,7 @@ model MethodVersion {
   sourceMaterialAnalysis MaterialAnalysis? @relation("MethodVersionSourceAnalysis", fields: [sourceMaterialAnalysisId], references: [id], onDelete: Restrict)
   sourceTranscript       Transcript?      @relation("MethodVersionSourceTranscript", fields: [sourceTranscriptId], references: [id], onDelete: Restrict)
   sourceBenchmarkStudy   BenchmarkStudy? @relation(fields: [sourceBenchmarkStudyId], references: [id], onDelete: Restrict)
+  sourceMaterialDistillation MaterialDistillation? @relation(fields: [sourceMaterialDistillationId], references: [id], onDelete: Restrict)
   editedBy               User            @relation("MethodVersionEditedBy", fields: [editedById], references: [id], onDelete: Restrict)
   projectSelections      ProjectMethodSelection[]
   methodUsages           MethodUsage[]
@@ -1018,6 +1064,7 @@ model MethodVersion {
   @@index([sourceMaterialAnalysisId])
   @@index([sourceTranscriptId])
   @@index([sourceBenchmarkStudyId])
+  @@index([sourceMaterialDistillationId])
 }
 
 model ProjectMethodSelection {
@@ -1402,6 +1449,7 @@ model AIRun {
   reviewRecords      ReviewRecord[]
   recommendationBatch RecommendationBatch?
   materialAnalysis    MaterialAnalysis?
+  materialDistillation MaterialDistillation?
   benchmarkStudy      BenchmarkStudy?
   unifiedCreativeAnalysis UnifiedCreativeAnalysis?
   methodUsages        MethodUsage[]
