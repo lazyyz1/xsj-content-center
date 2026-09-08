@@ -23,6 +23,8 @@ export class LLMError extends Error {
       httpStatus?: number;
       providerRequestId?: string;
       validationIssues?: Array<{ path: string; code: string; expected?: string; receivedType: string }>;
+      returnedRootKeys?: string[];
+      returnedFirstLevelObjectKeys?: Record<string, string[]>;
     } = {},
   ) {
     super(message);

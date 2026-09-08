@@ -142,7 +142,7 @@ async function loadRuntime(workspaceId: string): Promise<DistillationRuntime> {
 }
 
 function failure(error: unknown) {
-  if (error instanceof LLMError) return { code: error.code, message: error.message, retryable: error.retryable, validationIssues: error.details.validationIssues };
+  if (error instanceof LLMError) return { code: error.code, message: error.message, retryable: error.retryable, validationIssues: error.details.validationIssues, returnedRootKeys: error.details.returnedRootKeys, returnedFirstLevelObjectKeys: error.details.returnedFirstLevelObjectKeys };
   return { code: "MATERIAL_DISTILLATION_FAILED", message: "这次精华提炼没有完成，请重试。", retryable: false };
 }
 
@@ -273,14 +273,14 @@ export async function processMaterialDistillationJob(job: Job<ContentIngestPaylo
     if (runId) {
       await db.$transaction([
         db.aIRun.update({ where: { id: runId }, data: { status: "FAILED", errorCode: failed.code, errorMessage: "精华提炼未完成。", finishedAt: new Date() } }),
-        db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, provider: runProvider ?? "LLM", operation: "DISTILL_MATERIAL", requestId: runId, success: false, units: 1, cost: null, metadata: json({ airRunId: runId, sourceItemId: record.sourceItemId, materialDistillationId: distillation.id, errorCode: failed.code, validationIssues: failed.validationIssues ?? [], requestedModel: requestedModel ?? null }) } }),
+        db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, provider: runProvider ?? "LLM", operation: "DISTILL_MATERIAL", requestId: runId, success: false, units: 1, cost: null, metadata: json({ airRunId: runId, sourceItemId: record.sourceItemId, materialDistillationId: distillation.id, errorCode: failed.code, validationIssues: failed.validationIssues ?? [], returnedRootKeys: failed.returnedRootKeys ?? [], returnedFirstLevelObjectKeys: failed.returnedFirstLevelObjectKeys ?? {}, requestedModel: requestedModel ?? null }) } }),
       ]).catch(() => undefined);
     }
     const willRetry = failed.retryable && attempt < record.maxAttempts;
     await db.$transaction([
       db.ingestJob.update({ where: { id: record.id }, data: { status: willRetry ? "QUEUED" : "FAILED", progress: 0, errorCode: failed.code, errorMessage: failed.message, finishedAt: willRetry ? null : new Date() } }),
       db.materialDistillation.update({ where: { id: distillation.id }, data: { status: willRetry ? "PROCESSING" : "FAILED", errorCode: willRetry ? null : failed.code, errorMessage: willRetry ? null : failed.message } }),
-      db.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "material_distillation.failed", resourceType: "material_distillation", resourceId: distillation.id, metadata: json({ sourceItemId: record.sourceItemId, version: distillation.version, attempt, retrying: willRetry, errorCode: failed.code, validationIssues: failed.validationIssues ?? [] }) } }),
+      db.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "material_distillation.failed", resourceType: "material_distillation", resourceId: distillation.id, metadata: json({ sourceItemId: record.sourceItemId, version: distillation.version, attempt, retrying: willRetry, errorCode: failed.code, validationIssues: failed.validationIssues ?? [], returnedRootKeys: failed.returnedRootKeys ?? [], returnedFirstLevelObjectKeys: failed.returnedFirstLevelObjectKeys ?? {} }) } }),
     ]).catch(() => undefined);
     if (!failed.retryable) throw new UnrecoverableError(failed.code + ": " + failed.message);
     throw error;

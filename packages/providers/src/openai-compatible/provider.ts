@@ -50,6 +50,17 @@ function validationIssue(issue: ZodIssue, raw: unknown) {
   };
 }
 
+function returnedStructure(raw: unknown) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const record = raw as Record<string, unknown>;
+  const returnedRootKeys = Object.keys(record).sort().slice(0, 50);
+  const returnedFirstLevelObjectKeys = Object.fromEntries(returnedRootKeys.flatMap((key) => {
+    const value = record[key];
+    return value && typeof value === "object" && !Array.isArray(value) ? [[key, Object.keys(value as Record<string, unknown>).sort().slice(0, 50)]] : [];
+  }));
+  return { returnedRootKeys, ...(Object.keys(returnedFirstLevelObjectKeys).length ? { returnedFirstLevelObjectKeys } : {}) };
+}
+
 function jsonSchemaResponseFormat(schema: ZodType, name: string): ResponseFormat {
   const generated = z.toJSONSchema(schema) as Record<string, unknown>;
   const portableSchema = { ...generated };
@@ -134,6 +145,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
       throw new LLMError("LLM_INVALID_RESPONSE", "AI 模型返回的数据结构不符合要求。", false, {
         providerRequestId: result.data.providerRequestId,
         validationIssues: parsed.error.issues.slice(0, 20).map((issue) => validationIssue(issue, raw)),
+        ...returnedStructure(raw),
       });
     }
     return { ...result, data: { ...result.data, value: parsed.data } };

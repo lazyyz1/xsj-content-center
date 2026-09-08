@@ -1,6 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { materialDistillationCopywritingGenerationSchema, materialDistillationDiscoveryGenerationSchema } from "../material-distillation";
 import { OpenAICompatibleLLMProvider } from "./provider";
 
 let fixture: Server;
@@ -30,6 +31,8 @@ beforeAll(async () => {
       if (prompt.includes("INVALID_ENVELOPE_JSON")) return send(200, "not-json");
       if (prompt.includes("INVALID_ENVELOPE_SCHEMA")) return send(200, JSON.stringify({ choices: [] }));
       if (prompt.includes("INVALID_STRUCTURED")) return send(200, completion(JSON.stringify({ wrong: true })));
+      if (prompt.includes("OLD_M7_ROOT")) return send(200, completion(JSON.stringify({ summary: { text: "old" }, insights: [] })));
+      if (prompt.includes("M7_DISCOVERY_REQUEST")) return send(200, completion(JSON.stringify({ mode: "COMPREHENSIVE", message: "", highlights: [] })));
       if (prompt.includes("FENCED_STRUCTURED")) return send(200, completion("```json\n{\"ok\":true,\"title\":\"Fenced result\"}\n```"));
       if (prompt.includes("TIMEOUT")) return setTimeout(() => send(200, completion(JSON.stringify({ ok: true }))), 100);
       return send(200, completion(JSON.stringify({ ok: true, title: "Fixture result" })));
@@ -86,6 +89,20 @@ describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
 
     await provider().generateStructured({ prompt: "GENERIC_STRUCTURED", structuredOutput: { preferJsonSchema: true } }, schema);
     expect(lastRequestBody).toMatchObject({ response_format: { type: "json_object" } });
+  });
+
+  it("derives the exact M7 Discovery request schema from the validation schema", async () => {
+    await kimiProvider().generateStructured({ prompt: "M7_DISCOVERY_REQUEST", structuredOutput: { preferJsonSchema: true, schemaName: "material_discovery_v2" } }, materialDistillationDiscoveryGenerationSchema);
+    const responseFormat = lastRequestBody.response_format as { type: string; json_schema: { name: string; strict: boolean; schema: { type: string; required: string[]; properties: Record<string, unknown> } } };
+    expect(responseFormat.type).toBe("json_schema");
+    expect(responseFormat.json_schema).toMatchObject({ name: "material_discovery_v2", strict: true, schema: { type: "object" } });
+    expect(responseFormat.json_schema.schema.required.sort()).toEqual(["highlights", "message", "mode"]);
+    expect(Object.keys(responseFormat.json_schema.schema.properties).sort()).toEqual(["highlights", "message", "mode"]);
+  });
+
+  it("keeps the independent copywriting contract separate", () => {
+    expect(materialDistillationCopywritingGenerationSchema.safeParse({ mode: "COPYWRITING", message: "", copywriting: null }).success).toBe(true);
+    expect(materialDistillationDiscoveryGenerationSchema.safeParse({ mode: "COPYWRITING", message: "", copywriting: null }).success).toBe(false);
   });
 
   it("keeps existing Kimi structured calls on JSON mode unless they opt in", async () => {
@@ -147,6 +164,13 @@ describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
     await expect(provider().generateStructured({ prompt: "INVALID_STRUCTURED" }, z.object({ ok: z.boolean(), title: z.string() }))).rejects.toMatchObject({
       code: "LLM_INVALID_RESPONSE",
       details: { validationIssues: expect.arrayContaining([expect.objectContaining({ path: "ok", code: "invalid_type", expected: "boolean", receivedType: "undefined" })]) },
+    });
+  });
+
+  it("rejects an old root shape and records names only", async () => {
+    await expect(kimiProvider().generateStructured({ prompt: "OLD_M7_ROOT", structuredOutput: { preferJsonSchema: true, schemaName: "material_discovery_v2" } }, materialDistillationDiscoveryGenerationSchema)).rejects.toMatchObject({
+      code: "LLM_INVALID_RESPONSE",
+      details: { returnedRootKeys: ["insights", "summary"], returnedFirstLevelObjectKeys: { summary: ["text"] } },
     });
   });
 });

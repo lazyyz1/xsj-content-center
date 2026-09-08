@@ -103,6 +103,14 @@ describe("material distillation contract", () => {
     expect(prompt).toContain("sourceTextBlocks");
   });
 
+  it("keeps the Discovery prompt on the small current contract without v1 root fields", () => {
+    const prompt = buildMaterialDistillationPrompt("COMPREHENSIVE", { availableSourceRefs: ["T001"], sourceTextBlocks: [{ ref: "T001", text: "真实原文" }] });
+    expect(prompt).toContain("title, shortExplanation, type, quality, and sourceRefs");
+    expect(prompt).not.toContain("hasLongTermValue");
+    expect(prompt).not.toContain('"copywriting"');
+    expect(prompt).not.toContain("whyWorthAttention");
+  });
+
   it("rejects missing core discovery and copywriting fields", () => {
     expect(materialDistillationDiscoveryGenerationSchema.safeParse({ mode: "COMPREHENSIVE", message: "缺少依据", highlights: [{ type: "method", quality: "WORTH_KEEPING", title: "缺少说明", sourceRefs: ["S001"] }] }).success).toBe(false);
     expect(materialDistillationCopywritingGenerationSchema.safeParse({ mode: "COPYWRITING", message: "缺少骨架", copywriting: { coreProposition: "命题", sourceRefs: ["S001"] } }).success).toBe(false);
