@@ -60,7 +60,7 @@ export type LLMGenerateInput = ProviderInput & {
   content?: LLMContentBlock[];
   temperature?: number;
   maxCompletionTokens?: number;
-  structuredOutput?: { preferJsonSchema?: boolean; schemaName?: string };
+  structuredOutput?: { strategy?: "AUTO" | "JSON_OBJECT"; preferJsonSchema?: boolean; schemaName?: string };
 };
 
 export type LLMTokenUsage = {

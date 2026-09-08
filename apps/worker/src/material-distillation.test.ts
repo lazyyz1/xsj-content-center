@@ -13,8 +13,6 @@ const segmentIndex = buildTranscriptSourceIndex({ id: "transcript-segmented", ve
 
 function discovery(quality: "WORTH_KEEPING" | "OBSERVE" | "CASE_ONLY" | "DO_NOT_KEEP" = "WORTH_KEEPING") {
   return materialDistillationDiscoveryGenerationSchema.parse({
-    mode: "COMPREHENSIVE",
-    message: "发现一项值得判断的内容。",
     highlights: [{
       type: quality === "CASE_ONLY" ? "case_reference" : quality === "OBSERVE" ? "hypothesis" : "method",
       quality,
@@ -27,8 +25,6 @@ function discovery(quality: "WORTH_KEEPING" | "OBSERVE" | "CASE_ONLY" | "DO_NOT_
 
 function copywriting(sourceRefs = ["S001"]) {
   return materialDistillationCopywritingGenerationSchema.parse({
-    mode: "COPYWRITING",
-    message: "这条文案的组织方式值得研究。",
     copywriting: {
       coreProposition: "先判断再行动",
       angle: "从常见误区切入",
@@ -54,8 +50,8 @@ describe("material distillation contract", () => {
   });
 
   it("allows zero and multiple candidates without forcing durable value", () => {
-    const empty = materialDistillationDiscoveryGenerationSchema.parse({ mode: "COMPREHENSIVE", message: "暂时不用沉淀。", highlights: [] });
-    expect(normalizeMaterialDistillationOutput(empty, "COMPREHENSIVE", segmentIndex)).toMatchObject({ hasLongTermValue: false, highlights: [] });
+    const empty = materialDistillationDiscoveryGenerationSchema.parse({ highlights: [] });
+    expect(normalizeMaterialDistillationOutput(empty, "COMPREHENSIVE", segmentIndex)).toMatchObject({ hasLongTermValue: false, message: "这条内容有参考价值，但暂时没有发现特别值得长期留下的内容。", highlights: [] });
     const multiple = materialDistillationDiscoveryGenerationSchema.parse({ ...discovery(), highlights: [discovery().highlights[0], { ...discovery("OBSERVE").highlights[0], title: "先观察适用范围" }] });
     expect(normalizeMaterialDistillationOutput(multiple, "COMPREHENSIVE", segmentIndex).highlights).toHaveLength(2);
   });
@@ -109,11 +105,18 @@ describe("material distillation contract", () => {
     expect(prompt).not.toContain("hasLongTermValue");
     expect(prompt).not.toContain('"copywriting"');
     expect(prompt).not.toContain("whyWorthAttention");
+    expect(prompt).toContain('{"highlights":[]}');
   });
 
   it("rejects missing core discovery and copywriting fields", () => {
-    expect(materialDistillationDiscoveryGenerationSchema.safeParse({ mode: "COMPREHENSIVE", message: "缺少依据", highlights: [{ type: "method", quality: "WORTH_KEEPING", title: "缺少说明", sourceRefs: ["S001"] }] }).success).toBe(false);
-    expect(materialDistillationCopywritingGenerationSchema.safeParse({ mode: "COPYWRITING", message: "缺少骨架", copywriting: { coreProposition: "命题", sourceRefs: ["S001"] } }).success).toBe(false);
+    expect(materialDistillationDiscoveryGenerationSchema.safeParse({ highlights: [{ type: "method", quality: "WORTH_KEEPING", title: "缺少说明", sourceRefs: ["S001"] }] }).success).toBe(false);
+    expect(materialDistillationCopywritingGenerationSchema.safeParse({ copywriting: { coreProposition: "命题", sourceRefs: ["S001"] } }).success).toBe(false);
+    expect(materialDistillationDiscoveryGenerationSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("strictly rejects extra and legacy M7 root fields", () => {
+    expect(materialDistillationDiscoveryGenerationSchema.safeParse({ highlights: [], message: "旧提示" }).success).toBe(false);
+    expect(materialDistillationDiscoveryGenerationSchema.safeParse({ mode: "COMPREHENSIVE", message: "旧结构", hasLongTermValue: false, highlights: [], copywriting: null }).success).toBe(false);
   });
 
   it("keeps prompt injection inside untrusted source data and uses mode-specific instructions", () => {

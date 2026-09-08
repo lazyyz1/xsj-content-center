@@ -98,11 +98,11 @@ function evidenceList(items: string[], input: SourceRefInput) {
 
 /** Re-ground every retained item in the current transcript before persistence. */
 export function normalizeMaterialDistillationOutput(input: MaterialDistillationGeneration, mode: MaterialDistillationMode, sourceIndex: SourceRefInput) {
-  const highlights = mode === "COMPREHENSIVE" && input.mode === "COMPREHENSIVE" ? input.highlights.flatMap((item) => {
+  const highlights = mode === "COMPREHENSIVE" && "highlights" in input ? input.highlights.flatMap((item) => {
     const grounded = evidenceList(item.sourceRefs, sourceIndex);
     return grounded.length ? [{ type: item.type, quality: item.quality, title: item.title, essence: item.shortExplanation, whyWorthAttention: "", howTo: [], applicable: [], boundaries: [], evidence: grounded }] : [];
   }) : [];
-  const copywriting = mode === "COPYWRITING" && input.mode === "COPYWRITING" && input.copywriting
+  const copywriting = mode === "COPYWRITING" && "copywriting" in input && input.copywriting
     ? (() => {
       const { sourceRefs, ...content } = input.copywriting;
       const grounded = evidenceList(sourceRefs, sourceIndex);
@@ -110,10 +110,13 @@ export function normalizeMaterialDistillationOutput(input: MaterialDistillationG
     })()
     : null;
   const durable = highlights.some((item) => item.quality === "WORTH_KEEPING") || Boolean(copywriting);
+  const message = mode === "COPYWRITING"
+    ? copywriting ? "已根据视频文字稿整理出值得参考的文案结构。" : "这条内容暂时没有发现特别值得学习的文案结构。"
+    : highlights.length ? "已根据视频文字稿整理出值得进一步学习的内容。" : "这条内容有参考价值，但暂时没有发现特别值得长期留下的内容。";
   return materialDistillationGenerationSchema.parse({
     mode,
     hasLongTermValue: durable,
-    message: input.message.trim() || (durable ? "已根据视频文字稿整理出可继续参考的内容。" : "这条视频暂时没有足够依据形成可长期复用的总结。"),
+    message,
     highlights,
     copywriting,
   });
@@ -246,22 +249,22 @@ export async function processMaterialDistillationJob(job: Job<ContentIngestPaylo
     requestedModel = runtime.requestedModel ?? runtime.model;
     const runtimeAudit = { provider: runtime.providerName, requestedModel, providerMode: runtime.mode ?? "REAL" };
     const mode = distillation.mode as MaterialDistillationMode;
-    const systemPrompt = materialDistillationSystemBoundary + "\n\n" + generationQualityContract + "\n\nReturn plain Simplified Chinese and exactly the requested JSON schema. Requested mode: " + mode + ". Preserve uncertainty; do not invent a durable lesson.";
+    const systemPrompt = materialDistillationSystemBoundary + "\n\n" + generationQualityContract + "\n\nReturn plain Simplified Chinese and exactly the requested JSON object shape. Requested mode: " + mode + ". Preserve uncertainty; do not invent a durable lesson.";
     const prompt = buildMaterialDistillationPrompt(mode, context);
     const run = await db.$transaction(async (tx) => {
-      const created = await tx.aIRun.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "DISTILL_MATERIAL", provider: runtime.providerName, model: runtime.model, promptVersion: 2, status: "RUNNING", inputSummary: json(summary), metadata: json({ materialDistillationId: distillation.id, materialDistillationVersion: distillation.version, sourceItemId: record.sourceItemId, schemaVersion: MATERIAL_DISTILLATION_SCHEMA_VERSION, structuredOutput: "JSON_SCHEMA_WHEN_SUPPORTED", ...runtimeAudit }), contextTruncated } });
+      const created = await tx.aIRun.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "DISTILL_MATERIAL", provider: runtime.providerName, model: runtime.model, promptVersion: 2, status: "RUNNING", inputSummary: json(summary), metadata: json({ materialDistillationId: distillation.id, materialDistillationVersion: distillation.version, sourceItemId: record.sourceItemId, schemaVersion: MATERIAL_DISTILLATION_SCHEMA_VERSION, structuredOutput: "JSON_OBJECT", ...runtimeAudit }), contextTruncated } });
       await tx.materialDistillation.update({ where: { id: distillation.id }, data: { aiRunId: created.id } });
       await tx.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "ai.run_started", resourceType: "ai_run", resourceId: created.id, metadata: json({ action: "DISTILL_MATERIAL", promptVersion: 2, contextTruncated, materialDistillationId: distillation.id }) } });
       return created;
     });
     runId = run.id;
     const result = mode === "COPYWRITING"
-      ? await runtime.provider.generateStructured({ systemPrompt, prompt, maxCompletionTokens: 3_000, structuredOutput: { preferJsonSchema: true, schemaName: "material_copywriting_v2" } }, materialDistillationGenerationSchemaForMode("COPYWRITING"))
-      : await runtime.provider.generateStructured({ systemPrompt, prompt, maxCompletionTokens: 2_000, structuredOutput: { preferJsonSchema: true, schemaName: "material_discovery_v2" } }, materialDistillationGenerationSchemaForMode("COMPREHENSIVE"));
+      ? await runtime.provider.generateStructured({ systemPrompt, prompt, maxCompletionTokens: 3_000, structuredOutput: { strategy: "JSON_OBJECT" } }, materialDistillationGenerationSchemaForMode("COPYWRITING"))
+      : await runtime.provider.generateStructured({ systemPrompt, prompt, maxCompletionTokens: 2_000, structuredOutput: { strategy: "JSON_OBJECT" } }, materialDistillationGenerationSchemaForMode("COMPREHENSIVE"));
     const output = normalizeMaterialDistillationOutput(result.data.value, mode, sourceIndex);
     const latencyMs = Date.now() - startedAt.getTime();
     await db.$transaction([
-      db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(output), metadata: json({ materialDistillationId: distillation.id, materialDistillationVersion: distillation.version, sourceItemId: record.sourceItemId, schemaVersion: MATERIAL_DISTILLATION_SCHEMA_VERSION, structuredOutput: "JSON_SCHEMA_WHEN_SUPPORTED", ...runtimeAudit, actualModel: result.data.model }), providerRequestId: result.data.providerRequestId, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, finishedAt: new Date() } }),
+      db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(output), metadata: json({ materialDistillationId: distillation.id, materialDistillationVersion: distillation.version, sourceItemId: record.sourceItemId, schemaVersion: MATERIAL_DISTILLATION_SCHEMA_VERSION, structuredOutput: "JSON_OBJECT", ...runtimeAudit, actualModel: result.data.model }), providerRequestId: result.data.providerRequestId, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, finishedAt: new Date() } }),
       db.materialDistillation.update({ where: { id: distillation.id }, data: { status: "COMPLETED", output: json(output), errorCode: null, errorMessage: null } }),
       db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, provider: runtime.providerName, operation: "DISTILL_MATERIAL", requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, metadata: json({ airRunId: run.id, sourceItemId: record.sourceItemId, materialDistillationId: distillation.id, promptVersion: 2, contextTruncated, latencyMs, ...runtimeAudit, actualModel: result.data.model }) } }),
       db.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.requestedById, action: "material_distillation.succeeded", resourceType: "material_distillation", resourceId: distillation.id, metadata: json({ sourceItemId: record.sourceItemId, version: distillation.version, mode: distillation.mode, attempt, highlightCount: output.highlights.length, hasLongTermValue: output.hasLongTermValue }) } }),

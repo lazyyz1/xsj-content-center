@@ -15,8 +15,8 @@ let worker: ReturnType<typeof createContentIngestWorker>;
 const prompts: string[] = [];
 
 function generation(mode: "COMPREHENSIVE" | "COPYWRITING", sourceRef: string) {
-  if (mode === "COMPREHENSIVE") return { mode, message: "这条视频有一项值得以后复用的方法。", highlights: [{ type: "method", quality: "WORTH_KEEPING", title: "先判断再行动", shortExplanation: "先明确判断标准，再给具体步骤。", sourceRefs: [sourceRef] }] };
-  return { mode, message: "这条文案的组织方式值得参考。", copywriting: { coreProposition: "先给判断标准，再给行动步骤", angle: "从用户不知道如何判断切入", openingLogic: "先指出判断困难", progression: ["问题", "标准", "步骤"], skeleton: ["提出问题", "给判断标准", "给行动步骤"], evidenceFunction: "原文用于支持判断顺序", reusableStrategies: ["先判断再行动"], doNotCopy: ["来源作者的客户和增长数字"], secondEditDirections: ["换成自己的真实案例", "换目标受众"], rewriteSkeleton: ["新场景", "自己的判断", "可执行动作"], sourceRefs: [sourceRef] } };
+  if (mode === "COMPREHENSIVE") return { highlights: [{ type: "method", quality: "WORTH_KEEPING", title: "先判断再行动", shortExplanation: "先明确判断标准，再给具体步骤。", sourceRefs: [sourceRef] }] };
+  return { copywriting: { coreProposition: "先给判断标准，再给行动步骤", angle: "从用户不知道如何判断切入", openingLogic: "先指出判断困难", progression: ["问题", "标准", "步骤"], skeleton: ["提出问题", "给判断标准", "给行动步骤"], evidenceFunction: "原文用于支持判断顺序", reusableStrategies: ["先判断再行动"], doNotCopy: ["来源作者的客户和增长数字"], secondEditDirections: ["换成自己的真实案例", "换目标受众"], rewriteSkeleton: ["新场景", "自己的判断", "可执行动作"], sourceRefs: [sourceRef] } };
 }
 
 function m1Understanding() {

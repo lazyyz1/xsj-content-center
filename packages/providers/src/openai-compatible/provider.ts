@@ -130,7 +130,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
 
   async generateStructured<T>(input: LLMGenerateInput, schema: ZodType<T>) {
     const capabilities = resolveRequestCapabilities(this.config);
-    const responseFormat = input.structuredOutput?.preferJsonSchema && capabilities.supportsJsonSchema
+    const responseFormat = input.structuredOutput?.strategy !== "JSON_OBJECT" && input.structuredOutput?.preferJsonSchema && capabilities.supportsJsonSchema
       ? jsonSchemaResponseFormat(schema, input.structuredOutput.schemaName ?? "structured_response")
       : { type: "json_object" } as const;
     const result = await this.requestWithRetries(input, responseFormat);

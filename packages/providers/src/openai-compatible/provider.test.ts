@@ -32,7 +32,7 @@ beforeAll(async () => {
       if (prompt.includes("INVALID_ENVELOPE_SCHEMA")) return send(200, JSON.stringify({ choices: [] }));
       if (prompt.includes("INVALID_STRUCTURED")) return send(200, completion(JSON.stringify({ wrong: true })));
       if (prompt.includes("OLD_M7_ROOT")) return send(200, completion(JSON.stringify({ summary: { text: "old" }, insights: [] })));
-      if (prompt.includes("M7_DISCOVERY_REQUEST")) return send(200, completion(JSON.stringify({ mode: "COMPREHENSIVE", message: "", highlights: [] })));
+      if (prompt.includes("M7_DISCOVERY_REQUEST")) return send(200, completion(JSON.stringify({ highlights: [] })));
       if (prompt.includes("FENCED_STRUCTURED")) return send(200, completion("```json\n{\"ok\":true,\"title\":\"Fenced result\"}\n```"));
       if (prompt.includes("TIMEOUT")) return setTimeout(() => send(200, completion(JSON.stringify({ ok: true }))), 100);
       return send(200, completion(JSON.stringify({ ok: true, title: "Fixture result" })));
@@ -96,13 +96,18 @@ describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
     const responseFormat = lastRequestBody.response_format as { type: string; json_schema: { name: string; strict: boolean; schema: { type: string; required: string[]; properties: Record<string, unknown> } } };
     expect(responseFormat.type).toBe("json_schema");
     expect(responseFormat.json_schema).toMatchObject({ name: "material_discovery_v2", strict: true, schema: { type: "object" } });
-    expect(responseFormat.json_schema.schema.required.sort()).toEqual(["highlights", "message", "mode"]);
-    expect(Object.keys(responseFormat.json_schema.schema.properties).sort()).toEqual(["highlights", "message", "mode"]);
+    expect(responseFormat.json_schema.schema.required).toEqual(["highlights"]);
+    expect(Object.keys(responseFormat.json_schema.schema.properties)).toEqual(["highlights"]);
+  });
+
+  it("honors the M7 task strategy and uses JSON Object even when Kimi supports JSON Schema", async () => {
+    await kimiProvider().generateStructured({ prompt: "M7_DISCOVERY_REQUEST", structuredOutput: { strategy: "JSON_OBJECT", preferJsonSchema: true, schemaName: "ignored_for_this_task" } }, materialDistillationDiscoveryGenerationSchema);
+    expect(lastRequestBody).toMatchObject({ response_format: { type: "json_object" } });
   });
 
   it("keeps the independent copywriting contract separate", () => {
-    expect(materialDistillationCopywritingGenerationSchema.safeParse({ mode: "COPYWRITING", message: "", copywriting: null }).success).toBe(true);
-    expect(materialDistillationDiscoveryGenerationSchema.safeParse({ mode: "COPYWRITING", message: "", copywriting: null }).success).toBe(false);
+    expect(materialDistillationCopywritingGenerationSchema.safeParse({ copywriting: null }).success).toBe(true);
+    expect(materialDistillationDiscoveryGenerationSchema.safeParse({ copywriting: null }).success).toBe(false);
   });
 
   it("keeps existing Kimi structured calls on JSON mode unless they opt in", async () => {

@@ -42,14 +42,10 @@ export const materialDistillationDiscoveryHighlightSchema = z.object({
 }).strict();
 
 export const materialDistillationDiscoveryGenerationSchema = z.object({
-  mode: z.literal("COMPREHENSIVE"),
-  message: z.string().trim().max(1_000),
   highlights: z.array(materialDistillationDiscoveryHighlightSchema).max(5),
 }).strict();
 
 export const materialDistillationCopywritingGenerationSchema = z.object({
-  mode: z.literal("COPYWRITING"),
-  message: z.string().trim().max(1_000),
   copywriting: z.object({
     coreProposition: text(1_000),
     angle: text(1_000),
@@ -126,15 +122,18 @@ WORTH_KEEPING requires clear evidence, transfer value, practical information, an
 OBSERVE is for a useful idea whose evidence, scope, or boundary is not mature yet.
 CASE_ONLY is for value that mainly comes from one experience, customer, result, or story.
 DO_NOT_KEEP is for ordinary, promotional, one-off, vague, or low-reuse content.
-Do not force a fixed number of results. It is valid to return no candidates.`;
+Do not force a fixed number of results. It is valid to return no candidates.
+Return one plain JSON object only: no Markdown, explanation wrapper, or additional root fields.`;
 
 export function materialDistillationOutputInstruction(mode: MaterialDistillationMode) {
   if (mode === "COPYWRITING") {
     return `${commonJudgmentRules}
 Answer only how this text communicates: proposition, angle, opening logic, progression, skeleton, evidence function, reusable expression strategies, what must not be copied, second-edit directions, and a newly creatable skeleton.
-Do not summarize methods taught by the content. Do not rewrite the source by synonyms. If the text does not support a useful writing analysis, return copywriting=null and explain briefly in message.`;
+The root object contains only copywriting. A valid empty result is {"copywriting":null}.
+Do not summarize methods taught by the content. Do not rewrite the source by synonyms. If the text does not support a useful writing analysis, return copywriting=null.`;
   }
   return `${commonJudgmentRules}
 Answer only what this content teaches. For each candidate return title, shortExplanation, type, quality, and sourceRefs.
+The root object contains only highlights. Example: {"highlights":[{"title":"简短名称","shortExplanation":"为什么值得注意","type":"method","quality":"OBSERVE","sourceRefs":["T001"]}]}. If none qualify, return {"highlights":[]}.
 Do not return execution steps, scenarios, boundaries, quotations, or a full copywriting analysis. A mature method is deepened by the employee before it is saved.`;
 }
