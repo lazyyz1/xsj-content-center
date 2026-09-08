@@ -3,9 +3,10 @@ import {
   benchmarkPlaybookGenerationSchema,
   benchmarkPlaybookOutputInstruction,
   benchmarkPlaybookSystemBoundary,
+  buildTranscriptSourceIndex,
   materialDistillationGenerationSchema,
 } from "@content-center/providers";
-import { buildPlaybookAtoms, normalizeBenchmarkPlaybookOutput } from "./benchmark-playbook";
+import { buildPlaybookAtoms, buildPlaybookEvidenceContext, normalizeBenchmarkPlaybookOutput } from "./benchmark-playbook";
 
 function m7(sample: number, quality: "WORTH_KEEPING" | "OBSERVE" | "CASE_ONLY" = "WORTH_KEEPING") {
   const evidence = [{ quote: `真实原文 ${sample}`, sourceRef: "T001", kind: "TEXT_BLOCK" as const, index: 0 }];
@@ -123,7 +124,7 @@ describe("benchmark playbook contract", () => {
   });
 
   it("allows zero results and drops invalid or incomplete evidence coverage", () => {
-    expect(normalizeBenchmarkPlaybookOutput({ playbooks: [] }, atoms(3), inputs(3))).toMatchObject({ message: "目前还没有发现足够稳定的组合打法。", playbooks: [] });
+    expect(normalizeBenchmarkPlaybookOutput({ playbooks: [] }, atoms(3), inputs(3))).toMatchObject({ message: "目前还没有发现至少两条内容共同支持的具体组合打法。", playbooks: [] });
     const candidate = generated(["s1", "s2"]);
     candidate.playbooks[0]!.sections[0]!.evidenceRefs = ["missing"];
     expect(normalizeBenchmarkPlaybookOutput(candidate, atoms(3), inputs(3)).playbooks).toEqual([]);
@@ -148,6 +149,18 @@ describe("benchmark playbook contract", () => {
     expect(output.playbooks[0]?.evidence[0]).toMatchObject({ sampleId: "s1", sourceItemId: "source-1", materialDistillationId: "m7-1", materialDistillationVersion: 1, itemKind: "HIGHLIGHT", itemKey: "0", sourceRefs: ["T001"] });
   });
 
+  it("adds the M7 type and only the real Source Index blocks selected by M7", () => {
+    const selectedText = `${"客户结果和预约互动形成真实意向。".padEnd(470, "证")}。`;
+    const unselectedText = `${"这段完整文字稿没有被当前 M7 引用。".repeat(40)}。`;
+    const sourceIndex = buildTranscriptSourceIndex({ id: "transcript-1", version: 1, fullText: selectedText + unselectedText, segments: [] });
+    const output = m7(1);
+    const researchAtoms = buildPlaybookAtoms([{ ...inputs(1)[0]!, output }]);
+    const evidence = buildPlaybookEvidenceContext(output, sourceIndex);
+    expect(researchAtoms[0]).toMatchObject({ title: "强判断开头", essence: "先给明确判断", type: "copy_structure", quality: "WORTH_KEEPING" });
+    expect(evidence).toEqual([{ ref: "T001", text: selectedText }]);
+    expect(evidence.some(({ text }) => text.includes("没有被当前 M7 引用"))).toBe(false);
+  });
+
   it("strictly rejects unknown section codes, extra fields, and one-element templates", () => {
     const base = generated();
     expect(benchmarkPlaybookGenerationSchema.safeParse({ playbooks: [{ ...base.playbooks[0], sections: [{ code: "UNKNOWN", text: "x", evidenceRefs: ["V001-H01"] }] }] }).success).toBe(false);
@@ -163,6 +176,9 @@ describe("benchmark playbook contract", () => {
   });
 
   it("asks for grounded functional equivalence and rejects universal abstractions", () => {
+    expect(benchmarkPlaybookOutputInstruction).toContain("Candidate discovery and maturity are separate decisions");
+    expect(benchmarkPlaybookOutputInstruction).toContain("return it as OBSERVE instead of returning zero");
+    expect(benchmarkPlaybookOutputInstruction).toContain("Two supporting videos, uncertain long-term stability, or unknown effectiveness are not reasons to return zero");
     expect(benchmarkPlaybookOutputInstruction).toContain("functionally equivalent combinations");
     expect(benchmarkPlaybookOutputInstruction).toContain("briefly name the distinct concrete implementation in each supporting video");
     expect(benchmarkPlaybookOutputInstruction).toContain("Functional equivalence is not topic similarity");

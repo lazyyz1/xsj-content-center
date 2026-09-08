@@ -6,12 +6,14 @@ import {
   benchmarkPlaybookOutputInstruction,
   benchmarkPlaybookOutputSchema,
   benchmarkPlaybookSystemBoundary,
+  buildTranscriptSourceIndex,
   generationQualityContract,
   materialDistillationGenerationSchema,
   type BenchmarkPlaybookGeneration,
   type BenchmarkPlaybookInput,
   type BenchmarkPlaybookOutput,
   type MaterialDistillationOutput,
+  type TranscriptSourceIndex,
 } from "@content-center/providers";
 import { UnrecoverableError, type Job } from "bullmq";
 import { loadBenchmarkRuntime, type BenchmarkRuntime } from "./benchmark-analysis";
@@ -25,8 +27,10 @@ type PlaybookAtom = {
   materialDistillationVersion: number;
   itemKind: "HIGHLIGHT" | "COPYWRITING";
   itemKey: string;
-  text: string;
+  title: string;
+  essence: string;
   sourceRefs: string[];
+  type?: string;
   quality?: string;
 };
 
@@ -55,7 +59,19 @@ function sourceRefs(output: MaterialDistillationOutput) {
   return unique(evidence.flatMap(({ sourceRef }) => sourceRef ? [sourceRef] : []));
 }
 
-function copywritingAtoms(output: MaterialDistillationOutput, base: Omit<PlaybookAtom, "ref" | "itemKind" | "itemKey" | "text" | "sourceRefs">, prefix: string): PlaybookAtom[] {
+const EVIDENCE_CONTEXT_MAX_CHARS = 1_500;
+
+export function buildPlaybookEvidenceContext(output: MaterialDistillationOutput, sourceIndex: TranscriptSourceIndex) {
+  const selected = new Set(sourceRefs(output));
+  let usedChars = 0;
+  return sourceIndex.refs.flatMap(({ ref, text }) => {
+    if (!selected.has(ref) || usedChars + text.length > EVIDENCE_CONTEXT_MAX_CHARS) return [];
+    usedChars += text.length;
+    return [{ ref, text }];
+  });
+}
+
+function copywritingAtoms(output: MaterialDistillationOutput, base: Omit<PlaybookAtom, "ref" | "itemKind" | "itemKey" | "title" | "essence" | "sourceRefs" | "type">, prefix: string): PlaybookAtom[] {
   if (!output.copywriting) return [];
   const refs = sourceRefs(output);
   if (!refs.length) return [];
@@ -66,7 +82,7 @@ function copywritingAtoms(output: MaterialDistillationOutput, base: Omit<Playboo
   ];
   return fields.flatMap(([key, value]) => {
     const text = (Array.isArray(value) ? value.join("；") : value).trim();
-    return text ? [{ ...base, ref: `${prefix}-C${key}`, itemKind: "COPYWRITING", itemKey: key, text, sourceRefs: refs }] : [];
+    return text ? [{ ...base, ref: `${prefix}-C${key}`, itemKind: "COPYWRITING", itemKey: key, title: key, essence: text, sourceRefs: refs }] : [];
   });
 }
 
@@ -76,7 +92,7 @@ export function buildPlaybookAtoms(samples: Array<{ sampleId: string; sourceItem
     const base = { sampleId: sample.sampleId, sourceItemId: sample.sourceItemId, materialDistillationId: sample.materialDistillationId, materialDistillationVersion: sample.materialDistillationVersion };
     const highlights = sample.output.highlights.flatMap((highlight, index): PlaybookAtom[] => {
       const refs = unique(highlight.evidence.flatMap(({ sourceRef }) => sourceRef ? [sourceRef] : []));
-      return refs.length ? [{ ...base, ref: `${prefix}-H${String(index + 1).padStart(2, "0")}`, itemKind: "HIGHLIGHT", itemKey: String(index), text: `${highlight.title}：${highlight.essence}`, sourceRefs: refs, quality: highlight.quality }] : [];
+      return refs.length ? [{ ...base, ref: `${prefix}-H${String(index + 1).padStart(2, "0")}`, itemKind: "HIGHLIGHT", itemKey: String(index), title: highlight.title, essence: highlight.essence, sourceRefs: refs, type: highlight.type, quality: highlight.quality }] : [];
     });
     return [...highlights, ...copywritingAtoms(sample.output, base, prefix)];
   });
@@ -132,7 +148,7 @@ export function normalizeBenchmarkPlaybookOutput(input: BenchmarkPlaybookGenerat
   return benchmarkPlaybookOutputSchema.parse({
     kind: "PLAYBOOKS",
     schemaVersion: "benchmark-playbook-v1",
-    message: playbooks.length ? `在本次选择的 ${selectedSampleIds.length} 条内容中，找到了 ${playbooks.length} 套重复出现的内容搭配。` : "目前还没有发现足够稳定的组合打法。",
+    message: playbooks.length ? `在本次选择的 ${selectedSampleIds.length} 条内容中，找到了 ${playbooks.length} 套重复出现的内容搭配。` : "目前还没有发现至少两条内容共同支持的具体组合打法。",
     inputs,
     playbooks,
   });
@@ -149,7 +165,7 @@ export async function processBenchmarkPlaybookJob(job: Job<BenchmarkStudyPayload
   const startedAt = new Date();
   const record = await db.benchmarkStudy.findFirst({
     where: { id: job.data.studyId, workspaceId: job.data.workspaceId, createdById: job.data.requestedById },
-    include: { benchmarkAccount: { select: { id: true, workspaceId: true, name: true, platform: true } }, samples: { orderBy: { createdAt: "asc" }, include: { sourceItem: { select: { id: true, title: true } } } } },
+    include: { benchmarkAccount: { select: { id: true, workspaceId: true, name: true, platform: true } }, samples: { orderBy: { createdAt: "asc" }, include: { sourceItem: { select: { id: true, title: true, transcript: { select: { id: true, updatedAt: true, fullText: true, segments: true } } } } } } },
   });
   if (!record || record.benchmarkAccount.workspaceId !== record.workspaceId) throw new UnrecoverableError("Benchmark playbook study scope mismatch");
   if (record.status === "COMPLETED") return { status: "already-completed" as const, studyId: record.id };
@@ -160,14 +176,17 @@ export async function processBenchmarkPlaybookJob(job: Job<BenchmarkStudyPayload
     const distillation = distillations.find((item) => item.id === locked.materialDistillationId && item.sourceItemId === locked.sourceItemId && item.version === locked.materialDistillationVersion);
     const sample = record.samples.find((item) => item.id === locked.sampleId && item.sourceItemId === locked.sourceItemId);
     const output = distillation ? materialDistillationGenerationSchema.safeParse(distillation.output) : null;
-    return sample && distillation && output?.success ? [{ ...locked, title: sample.sourceItem.title || "未命名内容", output: output.data }] : [];
+    const transcript = sample?.sourceItem.transcript;
+    return sample && distillation && output?.success && transcript && distillation.transcriptUpdatedAtAtDistillation.getTime() === transcript.updatedAt.getTime()
+      ? [{ ...locked, title: sample.sourceItem.title || "未命名内容", output: output.data, sourceIndex: buildTranscriptSourceIndex({ id: transcript.id, updatedAt: transcript.updatedAt, fullText: transcript.fullText, segments: transcript.segments }) }]
+      : [];
   });
   if (rows.length !== manifest.data.distillations.length) throw new UnrecoverableError("Locked M7 evidence is unavailable");
   const atoms = buildPlaybookAtoms(rows);
   const context = {
     action: "IDENTIFY_BENCHMARK_PLAYBOOKS",
     benchmarkAccount: { name: record.benchmarkAccount.name, platform: record.benchmarkAccount.platform },
-    samples: rows.map((sample) => ({ sampleId: sample.sampleId, content: { title: sample.title }, materialDistillation: { id: sample.materialDistillationId, version: sample.materialDistillationVersion, elements: atoms.filter(({ sampleId }) => sampleId === sample.sampleId).map(({ ref, itemKind, itemKey, text, sourceRefs, quality }) => ({ ref, itemKind, itemKey, text, sourceRefs, ...(quality ? { quality } : {}) })) } })),
+    samples: rows.map((sample) => ({ sampleId: sample.sampleId, content: { title: sample.title }, materialDistillation: { id: sample.materialDistillationId, version: sample.materialDistillationVersion, items: atoms.filter(({ sampleId }) => sampleId === sample.sampleId).map(({ ref, itemKind, itemKey, title, essence, sourceRefs, type, quality }) => ({ ref, itemKind, itemKey, title, essence, sourceRefs, ...(type ? { type } : {}), ...(quality ? { quality } : {}) })), evidence: buildPlaybookEvidenceContext(sample.output, sample.sourceIndex) } })),
     cautions: [benchmarkPlaybookSystemBoundary, "M7 outputs are candidates, not absolute facts. Recheck repetition, exceptions, and boundaries across videos."],
   };
   const prompt = `Action: IDENTIFY_BENCHMARK_PLAYBOOKS\nContext:\n${JSON.stringify(context, null, 2)}\n${benchmarkPlaybookOutputInstruction}`;
