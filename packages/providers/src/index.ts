@@ -13,6 +13,7 @@ export * from "./source-providers";
 export * from "./source-external-metadata";
 export * from "./material-analysis";
 export * from "./benchmark-analysis";
+export * from "./benchmark-playbook";
 export * from "./material-distillation";
 export * from "./generation-quality";
 export * from "./source-index";

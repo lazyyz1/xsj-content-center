@@ -16,7 +16,7 @@ import {
 import { UnrecoverableError, type Job } from "bullmq";
 import type { BenchmarkStudyPayload } from "./queue";
 
-type BenchmarkRuntime = {
+export type BenchmarkRuntime = {
   provider: LLMProvider;
   providerName: string;
   model: string;
@@ -165,7 +165,7 @@ export function buildBenchmarkAnalysisPrompt(template: string, context: unknown)
   return `${renderPrompt(template, context)}\n${benchmarkAnalysisOutputInstruction}`;
 }
 
-async function loadRuntime(workspaceId: string): Promise<BenchmarkRuntime> {
+export async function loadBenchmarkRuntime(workspaceId: string): Promise<BenchmarkRuntime> {
   const integrations = new IntegrationService();
   const status = await integrations.getIntegrationStatus(workspaceId, "LLM");
   if (status.status === "DISABLED") throw new LLMError("LLM_DISABLED", "AI 模型已禁用。", false);
@@ -239,7 +239,7 @@ export async function processBenchmarkStudyJob(job: Job<BenchmarkStudyPayload>, 
   try {
     const template = await promptTemplate(record.workspaceId);
     templateVersion = template.version;
-    const runtime = dependencies.runtime ?? await loadRuntime(record.workspaceId);
+    const runtime = dependencies.runtime ?? await loadBenchmarkRuntime(record.workspaceId);
     runProvider = runtime.providerName;
     requestedModel = runtime.requestedModel ?? runtime.model;
     const runtimeAudit = { provider: runtime.providerName, requestedModel, providerMode: runtime.mode ?? "REAL" };

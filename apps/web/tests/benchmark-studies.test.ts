@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 const enqueueBenchmarkStudy = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "queued" }));
-vi.mock("@content-center/worker/queue", () => ({ enqueueBenchmarkStudy }));
+const enqueueBenchmarkPlaybookStudy = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "queued-playbooks" }));
+vi.mock("@content-center/worker/queue", () => ({ enqueueBenchmarkStudy, enqueueBenchmarkPlaybookStudy }));
 import { db } from "@content-center/db";
-import { createBenchmarkStudy, createBenchmarkStudySchema, listBenchmarkCandidates, listBenchmarkStudies } from "../server/discovery/benchmark-study-service";
+import { createBenchmarkPlaybookStudy, createBenchmarkPlaybookStudySchema, createBenchmarkStudy, createBenchmarkStudySchema, listBenchmarkCandidates, listBenchmarkStudies } from "../server/discovery/benchmark-study-service";
 import { createMethodFromBenchmarkStudy, getMethod } from "../server/methods/service";
 
 function understanding(quote: string) {
@@ -29,6 +30,10 @@ function studyOutput(sampleIds: string[]) {
   };
 }
 
+function distillationOutput(quote: string) {
+  return { mode: "COMPREHENSIVE", hasLongTermValue: false, message: "可以继续观察。", highlights: [{ type: "copy_structure", quality: "OBSERVE", title: "强判断后解释", essence: "先给判断，再解释原因。", whyWorthAttention: "", howTo: [], applicable: [], boundaries: [], evidence: [{ quote, sourceRef: "T001", kind: "TEXT_BLOCK", index: 0 }] }], copywriting: null };
+}
+
 describe("benchmark study request boundary", () => {
   it("accepts one through ten samples and rejects empty, oversized, or duplicate selections", () => {
     expect(createBenchmarkStudySchema.safeParse({ sampleIds: ["sample-1"] }).success).toBe(true);
@@ -36,6 +41,8 @@ describe("benchmark study request boundary", () => {
     expect(createBenchmarkStudySchema.safeParse({ sampleIds: [] }).success).toBe(false);
     expect(createBenchmarkStudySchema.safeParse({ sampleIds: Array.from({ length: 11 }, (_, index) => `sample-${index}`) }).success).toBe(false);
     expect(createBenchmarkStudySchema.safeParse({ sampleIds: ["sample-1", "sample-1"] }).success).toBe(false);
+    expect(createBenchmarkPlaybookStudySchema.safeParse({ sampleIds: ["sample-1", "sample-2", "sample-3"] }).success).toBe(true);
+    expect(createBenchmarkPlaybookStudySchema.safeParse({ sampleIds: ["sample-1", "sample-2"] }).success).toBe(false);
   });
 });
 
@@ -47,6 +54,7 @@ describe("benchmark study persistence and provenance", () => {
   let benchmarkId = "";
   let otherBenchmarkId = "";
   const snapshotIds: string[] = [];
+  const sourceIds: string[] = [];
 
   beforeAll(async () => {
     await db.user.createMany({ data: [{ id: ownerId, name: "Benchmark Owner", email: `${ownerId}@example.test` }, { id: colleagueId, name: "Benchmark Colleague", email: `${colleagueId}@example.test` }] });
@@ -62,9 +70,11 @@ describe("benchmark study persistence and provenance", () => {
       const snapshot = await db.benchmarkContentSnapshot.create({ data: { workspaceId, benchmarkAccountId: index === 6 ? otherBenchmarkId : benchmarkId, platform: "DOUYIN", externalId, title: `代表内容 ${index + 1}`, url: `https://example.test/${externalId}`, metadata: {} } });
       snapshotIds.push(snapshot.id);
       const source = await db.sourceItem.create({ data: { workspaceId, createdById: ownerId, sourceType: "VIDEO", sourcePlatform: "DOUYIN", externalId, title: `代表内容 ${index + 1}`, status: "READY", transcript: { create: { workspaceId, provider: "FIXTURE", providerMode: "REAL", fullText: `可靠依据 ${index + 1}`, segments: [] } } } });
+      sourceIds.push(source.id);
       if (index < 6) {
         const transcript = await db.transcript.findUniqueOrThrow({ where: { sourceItemId: source.id } });
         await db.materialAnalysis.create({ data: { workspaceId, sourceItemId: source.id, createdById: ownerId, version: 1, status: "COMPLETED", tags: [], keywords: [], keyPoints: [], understanding: understanding(`可靠依据 ${index + 1}`), transcriptUpdatedAtAtAnalysis: transcript.updatedAt } });
+        await db.materialDistillation.create({ data: { workspaceId, sourceItemId: source.id, createdById: ownerId, version: 1, mode: "COMPREHENSIVE", status: "COMPLETED", schemaVersion: "material-distillation-v2", output: distillationOutput(`可靠依据 ${index + 1}`), transcriptUpdatedAtAtDistillation: transcript.updatedAt } });
       }
     }
   });
@@ -105,6 +115,23 @@ describe("benchmark study persistence and provenance", () => {
     await expect(createBenchmarkStudy({ workspaceId, benchmarkAccountId: benchmarkId, userId: ownerId, sampleIds: [snapshotIds[6]!] })).rejects.toMatchObject({ code: "BENCHMARK_INVALID_SAMPLES" });
     await db.workspaceMember.update({ where: { workspaceId_userId: { workspaceId, userId: ownerId } }, data: { role: "VIEWER" } });
     await expect(createBenchmarkStudy({ workspaceId, benchmarkAccountId: benchmarkId, userId: ownerId, sampleIds: [snapshotIds[0]!] })).rejects.toMatchObject({ code: "BENCHMARK_FORBIDDEN" });
+    await expect(createBenchmarkPlaybookStudy({ workspaceId, benchmarkAccountId: benchmarkId, userId: ownerId, sampleIds: snapshotIds.slice(0, 3) })).rejects.toMatchObject({ code: "BENCHMARK_FORBIDDEN" });
     await db.workspaceMember.update({ where: { workspaceId_userId: { workspaceId, userId: ownerId } }, data: { role: "OWNER" } });
+  });
+
+  it("pins exact M7 versions for playbook history and keeps source deletion protected", async () => {
+    const candidates = await listBenchmarkCandidates({ workspaceId, benchmarkAccountId: benchmarkId });
+    expect(candidates.slice(0, 3).every(({ playbookReady, materialDistillationVersion }) => playbookReady && materialDistillationVersion === 1)).toBe(true);
+    const study = await createBenchmarkPlaybookStudy({ workspaceId, benchmarkAccountId: benchmarkId, userId: ownerId, sampleIds: snapshotIds.slice(0, 3) });
+    expect(study).toMatchObject({ kind: "PLAYBOOKS", version: 3, sampleCount: 3, status: "PROCESSING", samples: expect.arrayContaining([expect.objectContaining({ materialDistillationVersion: 1 })]) });
+    const transcript = await db.transcript.findUniqueOrThrow({ where: { sourceItemId: sourceIds[0] } });
+    await db.materialDistillation.create({ data: { workspaceId, sourceItemId: sourceIds[0]!, createdById: ownerId, version: 2, mode: "COMPREHENSIVE", status: "COMPLETED", schemaVersion: "material-distillation-v2", output: distillationOutput("后来更新的依据"), transcriptUpdatedAtAtDistillation: transcript.updatedAt } });
+    const history = await listBenchmarkStudies({ workspaceId, benchmarkAccountId: benchmarkId });
+    expect(history[0]).toMatchObject({ id: study.id, kind: "PLAYBOOKS", samples: expect.arrayContaining([expect.objectContaining({ sourceItemId: sourceIds[0], materialDistillationVersion: 1 })]) });
+    await expect(db.sourceItem.delete({ where: { id: sourceIds[0] } })).rejects.toMatchObject({ code: "P2003" });
+    await db.sourceItem.update({ where: { id: sourceIds[0] }, data: { status: "ARCHIVED" } });
+    await expect(listBenchmarkStudies({ workspaceId, benchmarkAccountId: benchmarkId })).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: study.id })]));
+    await db.sourceItem.update({ where: { id: sourceIds[0] }, data: { status: "READY" } });
+    expect(enqueueBenchmarkPlaybookStudy).toHaveBeenCalledTimes(1);
   });
 });

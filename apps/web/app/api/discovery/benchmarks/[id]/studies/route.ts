@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
 import {
   BenchmarkStudyError,
+  createBenchmarkPlaybookStudy,
+  createBenchmarkPlaybookStudySchema,
   createBenchmarkStudy,
   createBenchmarkStudySchema,
   listBenchmarkStudies,
@@ -28,12 +30,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const context = await getApiWorkspaceContext();
   if (!context) return apiError("UNAUTHORIZED", 401);
   if (context.role === "VIEWER") return apiError("FORBIDDEN", 403, "当前权限不能发起账号研究。");
-  const body = await request.json().catch(() => null) as { sampleIds?: unknown; snapshotIds?: unknown; contentSnapshotIds?: unknown } | null;
-  const parsed = createBenchmarkStudySchema.safeParse({ sampleIds: body?.sampleIds ?? body?.snapshotIds ?? body?.contentSnapshotIds });
-  if (!parsed.success) return apiError("BENCHMARK_INVALID_SAMPLES", 400, "请选择 1–10 条不重复的代表内容。");
+  const body = await request.json().catch(() => null) as { kind?: unknown; sampleIds?: unknown; snapshotIds?: unknown; contentSnapshotIds?: unknown } | null;
+  const playbooks = body?.kind === "PLAYBOOKS";
+  const schema = playbooks ? createBenchmarkPlaybookStudySchema : createBenchmarkStudySchema;
+  const parsed = schema.safeParse({ sampleIds: body?.sampleIds ?? body?.snapshotIds ?? body?.contentSnapshotIds });
+  if (!parsed.success) return apiError("BENCHMARK_INVALID_SAMPLES", 400, playbooks ? "请选择 3–10 条不重复的代表内容。" : "请选择 1–10 条不重复的代表内容。");
   try {
     const { id } = await params;
-    const study = await createBenchmarkStudy({ workspaceId: context.workspace.id, benchmarkAccountId: id, userId: context.session.user.id, sampleIds: parsed.data.sampleIds });
+    const study = playbooks
+      ? await createBenchmarkPlaybookStudy({ workspaceId: context.workspace.id, benchmarkAccountId: id, userId: context.session.user.id, sampleIds: parsed.data.sampleIds })
+      : await createBenchmarkStudy({ workspaceId: context.workspace.id, benchmarkAccountId: id, userId: context.session.user.id, sampleIds: parsed.data.sampleIds });
     return NextResponse.json(study, { status: 202 });
   } catch (error) {
     return studyApiError(error) ?? apiError("BENCHMARK_STUDY_CREATE_FAILED", 500, "账号研究暂时无法开始。");
