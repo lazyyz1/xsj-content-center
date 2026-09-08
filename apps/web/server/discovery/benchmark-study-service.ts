@@ -54,8 +54,8 @@ type BenchmarkStudySampleDTO = {
   id: string;
   sourceItemId: string;
   title: string;
-  materialAnalysisId: string;
-  materialAnalysisVersion: number;
+  materialAnalysisId: string | null;
+  materialAnalysisVersion: number | null;
   materialDistillationId: string | null;
   materialDistillationVersion: number | null;
 };
@@ -95,6 +95,14 @@ function key(platform: string, externalId: string) {
   return `${platform}:${externalId}`;
 }
 
+function traceableDistillation(value: { version: number; schemaVersion: string; output: Prisma.JsonValue | null }) {
+  if (!Number.isInteger(value.version) || value.version < 1 || value.schemaVersion !== "material-distillation-v2") return null;
+  const parsed = materialDistillationGenerationSchema.safeParse(value.output);
+  if (!parsed.success) return null;
+  const evidence = [...parsed.data.highlights.flatMap((item) => item.evidence), ...(parsed.data.copywriting?.evidence ?? [])];
+  return evidence.some(({ sourceRef }) => Boolean(sourceRef)) ? parsed.data : null;
+}
+
 async function account(workspaceId: string, benchmarkAccountId: string) {
   const row = await db.benchmarkAccount.findFirst({ where: { id: benchmarkAccountId, workspaceId, enabled: true }, select: { id: true, name: true, platform: true } });
   if (!row) throw new BenchmarkStudyError("BENCHMARK_NOT_FOUND", "对标账号不存在。");
@@ -120,8 +128,9 @@ export async function listBenchmarkCandidates(input: { workspaceId: string; benc
       id: true,
       sourcePlatform: true,
       externalId: true,
+      transcript: { select: { fullText: true } },
       materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { id: true, version: true, understanding: true } },
-      materialDistillations: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { id: true, version: true, schemaVersion: true, output: true } },
+      materialDistillations: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 20, select: { id: true, version: true, schemaVersion: true, output: true } },
     },
   });
   const sourceMap = new Map(sources.map((source) => [key(source.sourcePlatform, source.externalId ?? ""), source]));
@@ -130,9 +139,8 @@ export async function listBenchmarkCandidates(input: { workspaceId: string; benc
     const analysis = source?.materialAnalyses[0];
     const parsedAnalysis = analysis ? materialAnalysisOutputSchema.safeParse(analysis.understanding) : null;
     const ready = Boolean(parsedAnalysis?.success && "expression" in parsedAnalysis.data);
-    const distillation = source?.materialDistillations[0];
-    const parsedDistillation = distillation?.schemaVersion === "material-distillation-v2" ? materialDistillationGenerationSchema.safeParse(distillation.output) : null;
-    const playbookReady = ready && Boolean(parsedDistillation?.success);
+    const distillation = source?.materialDistillations.find((item) => traceableDistillation(item));
+    const playbookReady = Boolean(source?.transcript?.fullText.trim() && distillation);
     return {
       id: snapshot.id,
       externalId: snapshot.externalId,
@@ -177,7 +185,7 @@ function toDTO(row: StudyRow): BenchmarkStudyDTO {
     errorMessage: row.errorMessage,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
-    samples: row.samples.map((sample) => ({ id: sample.id, sourceItemId: sample.sourceItemId, title: sample.sourceItem.title || "未命名内容", materialAnalysisId: sample.materialAnalysis.id, materialAnalysisVersion: sample.materialAnalysis.version, materialDistillationId: locks.get(sample.id)?.materialDistillationId ?? null, materialDistillationVersion: locks.get(sample.id)?.materialDistillationVersion ?? null })),
+    samples: row.samples.map((sample) => ({ id: sample.id, sourceItemId: sample.sourceItemId, title: sample.sourceItem.title || "未命名内容", materialAnalysisId: sample.materialAnalysis?.id ?? null, materialAnalysisVersion: sample.materialAnalysis?.version ?? null, materialDistillationId: locks.get(sample.id)?.materialDistillationId ?? null, materialDistillationVersion: locks.get(sample.id)?.materialDistillationVersion ?? null })),
   };
 }
 
@@ -260,7 +268,7 @@ export async function createBenchmarkPlaybookStudy(input: { workspaceId: string;
       if (processing) throw new BenchmarkStudyError("BENCHMARK_STUDY_IN_PROGRESS", "这个账号已有一项研究正在进行，请稍候。");
       const snapshots = await tx.benchmarkContentSnapshot.findMany({ where: { id: { in: parsed.data.sampleIds }, workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id }, select: { id: true, platform: true, externalId: true } });
       if (snapshots.length !== parsed.data.sampleIds.length) throw new BenchmarkStudyError("BENCHMARK_INVALID_SAMPLES", "代表内容已变化，请刷新后重新选择。");
-      const sourceItems = await tx.sourceItem.findMany({ where: { workspaceId: input.workspaceId, OR: snapshots.map((snapshot) => ({ sourcePlatform: snapshot.platform, externalId: snapshot.externalId })) }, select: { id: true, sourcePlatform: true, externalId: true } });
+      const sourceItems = await tx.sourceItem.findMany({ where: { workspaceId: input.workspaceId, OR: snapshots.map((snapshot) => ({ sourcePlatform: snapshot.platform, externalId: snapshot.externalId })) }, select: { id: true, sourcePlatform: true, externalId: true, transcript: { select: { fullText: true } } } });
       const sourceMap = new Map(sourceItems.map((source) => [key(source.sourcePlatform, source.externalId ?? ""), source]));
       const candidates = snapshots.map((snapshot) => ({ snapshot, source: sourceMap.get(key(snapshot.platform, snapshot.externalId)) })).filter((item): item is { snapshot: typeof snapshots[number]; source: typeof sourceItems[number] } => Boolean(item.source));
       if (candidates.length !== snapshots.length) throw new BenchmarkStudyError("BENCHMARK_SAMPLE_NOT_READY", "有代表内容还没有收录，请先收录后再研究。");
@@ -270,23 +278,22 @@ export async function createBenchmarkPlaybookStudy(input: { workspaceId: string;
         tx.materialDistillation.findMany({ where: { workspaceId: input.workspaceId, sourceItemId: { in: sourceItemIds }, status: "COMPLETED" }, orderBy: { version: "desc" }, select: { id: true, sourceItemId: true, version: true, schemaVersion: true, output: true } }),
       ]);
       const latestAnalysis = new Map<string, typeof analyses[number]>();
-      for (const analysis of analyses) if (!latestAnalysis.has(analysis.sourceItemId)) latestAnalysis.set(analysis.sourceItemId, analysis);
+      for (const analysis of analyses) {
+        const parsedAnalysis = materialAnalysisOutputSchema.safeParse(analysis.understanding);
+        if (!latestAnalysis.has(analysis.sourceItemId) && parsedAnalysis.success && "expression" in parsedAnalysis.data) latestAnalysis.set(analysis.sourceItemId, analysis);
+      }
       const latestDistillation = new Map<string, typeof distillations[number]>();
-      for (const distillation of distillations) if (!latestDistillation.has(distillation.sourceItemId)) latestDistillation.set(distillation.sourceItemId, distillation);
-      if (candidates.some(({ source }) => {
-        const analysis = latestAnalysis.get(source.id);
-        const parsedAnalysis = analysis ? materialAnalysisOutputSchema.safeParse(analysis.understanding) : null;
-        return !parsedAnalysis?.success || !("expression" in parsedAnalysis.data);
-      })) throw new BenchmarkStudyError("BENCHMARK_SAMPLE_NOT_READY", "有代表内容还没有完成整理，请先去内容库处理后再试。");
+      for (const distillation of distillations) if (!latestDistillation.has(distillation.sourceItemId) && traceableDistillation(distillation)) latestDistillation.set(distillation.sourceItemId, distillation);
+      if (candidates.some(({ source }) => !source.transcript?.fullText.trim())) throw new BenchmarkStudyError("BENCHMARK_DISTILLATION_NOT_READY", "有代表内容还没有完成精华提炼，请先提炼后再看组合打法。");
       if (candidates.some(({ source }) => {
         const distillation = latestDistillation.get(source.id);
-        return !distillation || distillation.schemaVersion !== "material-distillation-v2" || !materialDistillationGenerationSchema.safeParse(distillation.output).success;
+        return !distillation;
       })) throw new BenchmarkStudyError("BENCHMARK_DISTILLATION_NOT_READY", "有代表内容还没有完成精华提炼，请先提炼后再看组合打法。");
       const previous = await tx.benchmarkStudy.findFirst({ where: { benchmarkAccountId: benchmark.id }, orderBy: { version: "desc" }, select: { version: true } });
       const study = await tx.benchmarkStudy.create({ data: { workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id, createdById: input.userId, version: (previous?.version ?? 0) + 1, status: "PROCESSING", sampleCount: candidates.length, insufficientSamples: false } });
       const samples = [];
       for (const candidate of candidates) {
-        samples.push(await tx.benchmarkStudySample.create({ data: { studyId: study.id, sourceItemId: candidate.source.id, materialAnalysisId: latestAnalysis.get(candidate.source.id)!.id, snapshotId: candidate.snapshot.id } }));
+        samples.push(await tx.benchmarkStudySample.create({ data: { studyId: study.id, sourceItemId: candidate.source.id, materialAnalysisId: latestAnalysis.get(candidate.source.id)?.id ?? null, snapshotId: candidate.snapshot.id } }));
       }
       const manifest = benchmarkPlaybookInputSchema.parse({ kind: "PLAYBOOK_INPUT", schemaVersion: "benchmark-playbook-v1", distillations: samples.map((sample) => {
         const distillation = latestDistillation.get(sample.sourceItemId)!;

@@ -215,18 +215,18 @@ export async function processBenchmarkStudyJob(job: Job<BenchmarkStudyPayload>, 
   if (record.status === "COMPLETED") return { status: "already-completed" as const, studyId: record.id };
   if (!record.samples.length || record.samples.length > 10) throw new UnrecoverableError("Benchmark study sample count is invalid");
   if (record.samples.some((sample) => {
-    if (sample.materialAnalysis.status !== "COMPLETED") return true;
+    if (!sample.materialAnalysis || sample.materialAnalysis.status !== "COMPLETED") return true;
     const parsed = materialAnalysisOutputSchema.safeParse(sample.materialAnalysis.understanding);
     return !parsed.success || !("expression" in parsed.data);
   })) throw new UnrecoverableError("Benchmark sample analysis is not completed");
 
-  const samples: StudySampleInput[] = record.samples.map((sample) => ({ sampleId: sample.id, understanding: sample.materialAnalysis.understanding }));
+  const samples: StudySampleInput[] = record.samples.map((sample) => ({ sampleId: sample.id, understanding: sample.materialAnalysis!.understanding }));
   const context = {
     benchmarkAccount: { name: record.benchmarkAccount.name, platform: record.benchmarkAccount.platform },
     samples: record.samples.map((sample) => ({
       sampleId: sample.id,
       content: { title: sample.sourceItem.title, platform: sample.sourceItem.sourcePlatform, externalId: sample.sourceItem.externalId },
-      materialAnalysis: { version: sample.materialAnalysis.version, understanding: sample.materialAnalysis.understanding },
+      materialAnalysis: { version: sample.materialAnalysis!.version, understanding: sample.materialAnalysis!.understanding },
     })),
     cautions: [benchmarkAnalysisSystemBoundary, "The number of samples is not an independent fact count.", "Only structured M1 understanding and its evidence are available; transcript, visual and audio data are not supplied."],
   };

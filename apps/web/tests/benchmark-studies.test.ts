@@ -53,6 +53,11 @@ describe("benchmark study persistence and provenance", () => {
   let workspaceId = "";
   let benchmarkId = "";
   let otherBenchmarkId = "";
+  let m8OnlySnapshotId = "";
+  let m8OnlySourceId = "";
+  let m4OnlySnapshotId = "";
+  let invalidM7SnapshotId = "";
+  let invalidM7VersionSnapshotId = "";
   const snapshotIds: string[] = [];
   const sourceIds: string[] = [];
 
@@ -77,6 +82,27 @@ describe("benchmark study persistence and provenance", () => {
         await db.materialDistillation.create({ data: { workspaceId, sourceItemId: source.id, createdById: ownerId, version: 1, mode: "COMPREHENSIVE", status: "COMPLETED", schemaVersion: "material-distillation-v2", output: distillationOutput(`可靠依据 ${index + 1}`), transcriptUpdatedAtAtDistillation: transcript.updatedAt } });
       }
     }
+    const createExtra = async (suffixName: string, title: string) => {
+      const externalId = `${suffixName}-${suffix}`;
+      const snapshot = await db.benchmarkContentSnapshot.create({ data: { workspaceId, benchmarkAccountId: benchmarkId, platform: "DOUYIN", externalId, title, url: `https://example.test/${externalId}`, metadata: {} } });
+      const source = await db.sourceItem.create({ data: { workspaceId, createdById: ownerId, sourceType: "VIDEO", sourcePlatform: "DOUYIN", externalId, title, status: "READY", transcript: { create: { workspaceId, provider: "FIXTURE", providerMode: "REAL", fullText: `${title}真实依据`, segments: [] } } } });
+      const transcript = await db.transcript.findUniqueOrThrow({ where: { sourceItemId: source.id } });
+      return { snapshot, source, transcript };
+    };
+    const m8Only = await createExtra("m8-only", "只有精华提炼");
+    m8OnlySnapshotId = m8Only.snapshot.id; m8OnlySourceId = m8Only.source.id;
+    await db.materialDistillation.create({ data: { workspaceId, sourceItemId: m8Only.source.id, createdById: ownerId, version: 1, mode: "COMPREHENSIVE", status: "COMPLETED", schemaVersion: "material-distillation-v2", output: distillationOutput("只有精华提炼真实依据"), transcriptUpdatedAtAtDistillation: m8Only.transcript.updatedAt } });
+    const m4Only = await createExtra("m4-only", "只有内容拆解");
+    m4OnlySnapshotId = m4Only.snapshot.id;
+    await db.materialAnalysis.create({ data: { workspaceId, sourceItemId: m4Only.source.id, createdById: ownerId, version: 1, status: "COMPLETED", tags: [], keywords: [], keyPoints: [], understanding: understanding("只有内容拆解真实依据"), transcriptUpdatedAtAtAnalysis: m4Only.transcript.updatedAt } });
+    const invalidM7 = await createExtra("invalid-m7", "精华引用无效");
+    invalidM7SnapshotId = invalidM7.snapshot.id;
+    const invalidOutput = distillationOutput("精华引用无效真实依据");
+    delete (invalidOutput.highlights[0]!.evidence[0] as { sourceRef?: string }).sourceRef;
+    await db.materialDistillation.create({ data: { workspaceId, sourceItemId: invalidM7.source.id, createdById: ownerId, version: 1, mode: "COMPREHENSIVE", status: "COMPLETED", schemaVersion: "material-distillation-v2", output: invalidOutput, transcriptUpdatedAtAtDistillation: invalidM7.transcript.updatedAt } });
+    const invalidM7Version = await createExtra("invalid-m7-version", "精华版本无效");
+    invalidM7VersionSnapshotId = invalidM7Version.snapshot.id;
+    await db.materialDistillation.create({ data: { workspaceId, sourceItemId: invalidM7Version.source.id, createdById: ownerId, version: 0, mode: "COMPREHENSIVE", status: "COMPLETED", schemaVersion: "material-distillation-v2", output: distillationOutput("精华版本无效真实依据"), transcriptUpdatedAtAtDistillation: invalidM7Version.transcript.updatedAt } });
   });
 
   afterAll(async () => {
@@ -89,8 +115,8 @@ describe("benchmark study persistence and provenance", () => {
 
   it("pins six same-account M1 results, preserves history, and saves a private multi-sample method", async () => {
     const candidates = await listBenchmarkCandidates({ workspaceId, benchmarkAccountId: benchmarkId });
-    expect(candidates).toHaveLength(6);
-    expect(candidates.every(({ ready }) => ready)).toBe(true);
+    expect(candidates).toHaveLength(10);
+    expect(candidates.filter(({ sourceItemId }) => sourceIds.slice(0, 6).includes(sourceItemId ?? "")).every(({ ready }) => ready)).toBe(true);
     const first = await createBenchmarkStudy({ workspaceId, benchmarkAccountId: benchmarkId, userId: ownerId, sampleIds: snapshotIds.slice(0, 6) });
     expect(first).toMatchObject({ version: 1, sampleCount: 6, insufficientSamples: false, status: "PROCESSING" });
     expect(first.samples).toHaveLength(6);
@@ -119,19 +145,31 @@ describe("benchmark study persistence and provenance", () => {
     await db.workspaceMember.update({ where: { workspaceId_userId: { workspaceId, userId: ownerId } }, data: { role: "OWNER" } });
   });
 
+  it("keeps M4 and M8 eligibility independent", async () => {
+    const candidates = await listBenchmarkCandidates({ workspaceId, benchmarkAccountId: benchmarkId });
+    expect(candidates.find(({ sourceItemId }) => sourceItemId === m8OnlySourceId)).toMatchObject({ ready: false, playbookReady: true, materialAnalysisId: null, materialDistillationVersion: 1 });
+    expect(candidates.find(({ id }) => id === m4OnlySnapshotId)).toMatchObject({ ready: true, playbookReady: false });
+    expect(candidates.find(({ id }) => id === invalidM7SnapshotId)).toMatchObject({ playbookReady: false });
+    expect(candidates.find(({ id }) => id === invalidM7VersionSnapshotId)).toMatchObject({ playbookReady: false });
+    await expect(createBenchmarkStudy({ workspaceId, benchmarkAccountId: benchmarkId, userId: ownerId, sampleIds: [m8OnlySnapshotId] })).rejects.toMatchObject({ code: "BENCHMARK_SAMPLE_NOT_READY" });
+    await expect(createBenchmarkPlaybookStudy({ workspaceId, benchmarkAccountId: benchmarkId, userId: ownerId, sampleIds: [snapshotIds[0]!, snapshotIds[1]!, m4OnlySnapshotId] })).rejects.toMatchObject({ code: "BENCHMARK_DISTILLATION_NOT_READY" });
+    await expect(createBenchmarkPlaybookStudy({ workspaceId, benchmarkAccountId: benchmarkId, userId: ownerId, sampleIds: [snapshotIds[0]!, snapshotIds[1]!, invalidM7SnapshotId] })).rejects.toMatchObject({ code: "BENCHMARK_DISTILLATION_NOT_READY" });
+    await expect(createBenchmarkPlaybookStudy({ workspaceId, benchmarkAccountId: benchmarkId, userId: ownerId, sampleIds: [snapshotIds[0]!, snapshotIds[1]!, invalidM7VersionSnapshotId] })).rejects.toMatchObject({ code: "BENCHMARK_DISTILLATION_NOT_READY" });
+  });
+
   it("pins exact M7 versions for playbook history and keeps source deletion protected", async () => {
     const candidates = await listBenchmarkCandidates({ workspaceId, benchmarkAccountId: benchmarkId });
-    expect(candidates.slice(0, 3).every(({ playbookReady, materialDistillationVersion }) => playbookReady && materialDistillationVersion === 1)).toBe(true);
-    const study = await createBenchmarkPlaybookStudy({ workspaceId, benchmarkAccountId: benchmarkId, userId: ownerId, sampleIds: snapshotIds.slice(0, 3) });
-    expect(study).toMatchObject({ kind: "PLAYBOOKS", version: 3, sampleCount: 3, status: "PROCESSING", samples: expect.arrayContaining([expect.objectContaining({ materialDistillationVersion: 1 })]) });
+    expect(candidates.find(({ sourceItemId }) => sourceItemId === m8OnlySourceId)).toMatchObject({ ready: false, playbookReady: true });
+    const study = await createBenchmarkPlaybookStudy({ workspaceId, benchmarkAccountId: benchmarkId, userId: ownerId, sampleIds: [snapshotIds[0]!, snapshotIds[1]!, m8OnlySnapshotId] });
+    expect(study).toMatchObject({ kind: "PLAYBOOKS", version: 3, sampleCount: 3, status: "PROCESSING", samples: expect.arrayContaining([expect.objectContaining({ sourceItemId: m8OnlySourceId, materialAnalysisId: null, materialAnalysisVersion: null, materialDistillationVersion: 1 }), expect.objectContaining({ materialAnalysisId: expect.any(String), materialDistillationVersion: 1 })]) });
     const transcript = await db.transcript.findUniqueOrThrow({ where: { sourceItemId: sourceIds[0] } });
     await db.materialDistillation.create({ data: { workspaceId, sourceItemId: sourceIds[0]!, createdById: ownerId, version: 2, mode: "COMPREHENSIVE", status: "COMPLETED", schemaVersion: "material-distillation-v2", output: distillationOutput("后来更新的依据"), transcriptUpdatedAtAtDistillation: transcript.updatedAt } });
     const history = await listBenchmarkStudies({ workspaceId, benchmarkAccountId: benchmarkId });
     expect(history[0]).toMatchObject({ id: study.id, kind: "PLAYBOOKS", samples: expect.arrayContaining([expect.objectContaining({ sourceItemId: sourceIds[0], materialDistillationVersion: 1 })]) });
-    await expect(db.sourceItem.delete({ where: { id: sourceIds[0] } })).rejects.toMatchObject({ code: "P2003" });
-    await db.sourceItem.update({ where: { id: sourceIds[0] }, data: { status: "ARCHIVED" } });
+    await expect(db.sourceItem.delete({ where: { id: m8OnlySourceId } })).rejects.toMatchObject({ code: "P2003" });
+    await db.sourceItem.update({ where: { id: m8OnlySourceId }, data: { status: "ARCHIVED" } });
     await expect(listBenchmarkStudies({ workspaceId, benchmarkAccountId: benchmarkId })).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: study.id })]));
-    await db.sourceItem.update({ where: { id: sourceIds[0] }, data: { status: "READY" } });
+    await db.sourceItem.update({ where: { id: m8OnlySourceId }, data: { status: "READY" } });
     expect(enqueueBenchmarkPlaybookStudy).toHaveBeenCalledTimes(1);
   });
 });

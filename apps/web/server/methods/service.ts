@@ -301,7 +301,7 @@ export async function createMethodFromBenchmarkStudy(input: {
   if (!method) throw new MethodError("METHOD_INVALID", "这次研究暂时没有可保存的方法。");
   const content = benchmarkMethodContent(method, input);
   if (!content.success) throw new MethodError("METHOD_INVALID", "请检查方法名称、步骤和适用边界。");
-  const evidenceBySample = new Map(study.samples.map((sample) => [sample.id, m1EvidenceQuotes(sample.materialAnalysis.understanding)]));
+  const evidenceBySample = new Map(study.samples.flatMap((sample) => sample.materialAnalysis ? [[sample.id, m1EvidenceQuotes(sample.materialAnalysis.understanding)] as const] : []));
   const groundedEvidence = method.evidence.filter((item) => evidenceBySample.get(item.sampleId)?.has(item.quote.trim()));
   if (!groundedEvidence.length) throw new MethodError("METHOD_INVALID", "这次研究没有足够的原文依据。");
   const asset = await db.$transaction(async (tx) => {

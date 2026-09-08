@@ -784,12 +784,12 @@ model BenchmarkStudySample {
   id                 String             @id @default(cuid())
   studyId            String
   sourceItemId       String
-  materialAnalysisId String
+  materialAnalysisId String?
   snapshotId         String?
   createdAt          DateTime           @default(now())
   study              BenchmarkStudy    @relation(fields: [studyId], references: [id], onDelete: Cascade)
   sourceItem         SourceItem        @relation(fields: [sourceItemId], references: [id], onDelete: Restrict)
-  materialAnalysis   MaterialAnalysis  @relation(fields: [materialAnalysisId], references: [id], onDelete: Restrict)
+  materialAnalysis   MaterialAnalysis? @relation(fields: [materialAnalysisId], references: [id], onDelete: Restrict)
   snapshot           BenchmarkContentSnapshot? @relation("BenchmarkStudySampleSnapshot", fields: [snapshotId], references: [id], onDelete: SetNull)
 
   @@unique([studyId, sourceItemId])
