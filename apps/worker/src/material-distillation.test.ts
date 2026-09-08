@@ -72,6 +72,34 @@ describe("material distillation contract", () => {
     expect(output.copywriting?.evidence).toEqual([expect.objectContaining({ quote: segments[0]!.text, sourceRef: "S001", segmentIndex: 0 })]);
   });
 
+  it.each([
+    { name: "结构优秀", source: "先指出常见误区，再给判断标准，最后给行动建议。", issue: "不照搬来源作者的案例" },
+    { name: "观点有问题", source: "先下强结论，再用反问推进，把相关性写成因果，最后给建议。", issue: "相关性不能直接当作因果" },
+    { name: "普通但完整", source: "先提出问题，然后解释原因，最后提醒读者采取一个动作。", issue: "结构可借，泛化观点不能照搬" },
+    { name: "强观点反问解释行动", source: "先给强判断，接着反问，再解释用户判断线索，最后提出行动建议。", issue: "强判断缺少证据时需要收敛" },
+  ])("critically analyzes $name copy instead of requiring excellent writing", ({ source, issue }) => {
+    const fixture = copywriting();
+    fixture.copywriting!.doNotCopy = [issue];
+    const parsed = materialDistillationCopywritingGenerationSchema.parse(fixture);
+    const prompt = buildMaterialDistillationPrompt("COPYWRITING", { availableSourceRefs: ["T001"], sourceTextBlocks: [{ ref: "T001", text: source }] });
+    expect(parsed.copywriting).not.toBeNull();
+    expect(parsed.copywriting?.doNotCopy).toContain(issue);
+    expect(prompt).toContain("Whether the writing is good is not the eligibility test");
+    expect(prompt).toContain("Analyze weaknesses critically instead of returning null");
+  });
+
+  it.each([
+    { name: "空文本", source: "" },
+    { name: "纯乱码", source: "������" },
+    { name: "极短碎片", source: "好。" },
+  ])("allows null only for genuinely unanalyzable $name", ({ source }) => {
+    expect(materialDistillationCopywritingGenerationSchema.parse({ copywriting: null })).toEqual({ copywriting: null });
+    const prompt = buildMaterialDistillationPrompt("COPYWRITING", { availableSourceRefs: source ? ["T001"] : [], sourceTextBlocks: source ? [{ ref: "T001", text: source }] : [] });
+    expect(prompt).toContain("Return copywriting=null only when analysis is genuinely impossible");
+    expect(prompt).toContain("too short to identify even a proposition, opening, or basic progression");
+    expect(prompt).not.toContain("WORTH_KEEPING");
+  });
+
   it("drops a copywriting result when none of its source refs exist", () => {
     const output = normalizeMaterialDistillationOutput(copywriting(["S999"]), "COPYWRITING", segmentIndex);
     expect(output).toMatchObject({ hasLongTermValue: false, highlights: [], copywriting: null });
