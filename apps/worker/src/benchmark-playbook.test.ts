@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  LLMError,
   benchmarkPlaybookGenerationSchema,
   benchmarkPlaybookOutputInstruction,
   benchmarkPlaybookSystemBoundary,
   buildTranscriptSourceIndex,
   materialDistillationGenerationSchema,
 } from "@content-center/providers";
-import { buildPlaybookAtoms, buildPlaybookEvidenceContext, normalizeBenchmarkPlaybookOutput } from "./benchmark-playbook";
+import { benchmarkPlaybookFailure, buildPlaybookAtoms, buildPlaybookEvidenceContext, normalizeBenchmarkPlaybookOutput, resolveBenchmarkPlaybookTaskConfig } from "./benchmark-playbook";
 
 function m7(sample: number, quality: "WORTH_KEEPING" | "OBSERVE" | "CASE_ONLY" = "WORTH_KEEPING") {
   const evidence = [{ quote: `真实原文 ${sample}`, sourceRef: "T001", kind: "TEXT_BLOCK" as const, index: 0 }];
@@ -184,5 +185,25 @@ describe("benchmark playbook contract", () => {
     expect(benchmarkPlaybookOutputInstruction).toContain("Functional equivalence is not topic similarity");
     expect(benchmarkPlaybookOutputInstruction).toContain('Reject universal templates such as "attract attention -> provide value -> CTA"');
     expect(benchmarkPlaybookOutputInstruction).toContain('It is valid to return {"playbooks":[]}');
+  });
+
+  it("keeps M8 failure diagnostics structural and value-free", () => {
+    const failure = benchmarkPlaybookFailure(new LLMError("LLM_INVALID_RESPONSE", "invalid", false, {
+      providerRequestId: "request-safe-id",
+      actualModel: "deepseek-v4-pro",
+      finishReason: "stop",
+      returnedRootKeys: ["playbooks"],
+      returnedFirstLevelObjectKeys: { playbooks: ["name", "sections"] },
+      validationIssues: [{ path: "playbooks.0.sections", code: "invalid_type", expected: "array", receivedType: "string" }],
+    }));
+    expect(failure).toMatchObject({ providerRequestId: "request-safe-id", actualModel: "deepseek-v4-pro", finishReason: "stop", returnedRootKeys: ["playbooks"], returnedFirstLevelObjectKeys: { playbooks: ["name", "sections"] }, validationIssues: [{ path: "playbooks.0.sections", code: "invalid_type", expected: "array", receivedType: "string" }] });
+    expect(JSON.stringify(failure)).not.toContain("evidence text");
+    expect(JSON.stringify(failure)).not.toContain("secret");
+  });
+
+  it("can select DeepSeek V4 Pro for M8 without changing the workspace default", () => {
+    expect(resolveBenchmarkPlaybookTaskConfig({})).toBeNull();
+    expect(resolveBenchmarkPlaybookTaskConfig({ M8_AI_PROVIDER: "DEEPSEEK", M8_AI_MODEL_ID: "deepseek-v4-pro", DEEPSEEK_API_KEY: "fixture-secret" })).toMatchObject({ provider: "DEEPSEEK", model: "deepseek-v4-pro", requestedModel: "deepseek-v4-pro", baseUrl: "https://api.deepseek.com", chatStructuredOutput: "JSON_OBJECT" });
+    expect(() => resolveBenchmarkPlaybookTaskConfig({ M8_AI_PROVIDER: "DEEPSEEK", M8_AI_MODEL_ID: "deepseek-v5", DEEPSEEK_API_KEY: "fixture-secret" })).toThrow("不在已批准目录中");
   });
 });

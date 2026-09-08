@@ -10,7 +10,7 @@ let retryRequests = 0;
 let lastRequestBody: Record<string, unknown> = {};
 
 function completion(content: string) {
-  return JSON.stringify({ id: "fixture-request", model: "fixture-model", choices: [{ message: { content } }], usage: { prompt_tokens: 12, completion_tokens: 7 } });
+  return JSON.stringify({ id: "fixture-request", model: "fixture-model", choices: [{ message: { content }, finish_reason: "stop" }], usage: { prompt_tokens: 12, completion_tokens: 7 } });
 }
 
 beforeAll(async () => {
@@ -31,6 +31,7 @@ beforeAll(async () => {
       if (prompt.includes("INVALID_ENVELOPE_JSON")) return send(200, "not-json");
       if (prompt.includes("INVALID_ENVELOPE_SCHEMA")) return send(200, JSON.stringify({ choices: [] }));
       if (prompt.includes("INVALID_STRUCTURED")) return send(200, completion(JSON.stringify({ wrong: true })));
+      if (prompt.includes("INVALID_PLAYBOOK_STRUCTURED")) return send(200, completion(JSON.stringify({ playbooks: [{ name: "hidden value", wrong: true }] })));
       if (prompt.includes("OLD_M7_ROOT")) return send(200, completion(JSON.stringify({ summary: { text: "old" }, insights: [] })));
       if (prompt.includes("M7_DISCOVERY_REQUEST")) return send(200, completion(JSON.stringify({ highlights: [] })));
       if (prompt.includes("M7_COPYWRITING_REQUEST")) return send(200, completion(JSON.stringify({ sections: [] })));
@@ -68,7 +69,7 @@ function deepSeekProvider(model: "deepseek-v4-flash" | "deepseek-v4-pro" | "deep
 
 describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
   it("sends OpenAI-compatible chat requests and returns real usage", async () => {
-    await expect(provider().generateText({ systemPrompt: "Fixture system", prompt: "SUCCESS" })).resolves.toMatchObject({ providerMode: "REAL", data: { model: "fixture-model", providerRequestId: "fixture-header-id", usage: { inputTokens: 12, outputTokens: 7 } } });
+    await expect(provider().generateText({ systemPrompt: "Fixture system", prompt: "SUCCESS" })).resolves.toMatchObject({ providerMode: "REAL", data: { model: "fixture-model", providerRequestId: "fixture-header-id", finishReason: "stop", usage: { inputTokens: 12, outputTokens: 7 } } });
   });
 
   it("uses Kimi 2.6 compatible request parameters", async () => {
@@ -171,7 +172,14 @@ describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
   it("rejects invalid structured output", async () => {
     await expect(provider().generateStructured({ prompt: "INVALID_STRUCTURED" }, z.object({ ok: z.boolean(), title: z.string() }))).rejects.toMatchObject({
       code: "LLM_INVALID_RESPONSE",
-      details: { validationIssues: expect.arrayContaining([expect.objectContaining({ path: "ok", code: "invalid_type", expected: "boolean", receivedType: "undefined" })]) },
+      details: { providerRequestId: "fixture-header-id", actualModel: "fixture-model", finishReason: "stop", returnedRootKeys: ["wrong"], validationIssues: expect.arrayContaining([expect.objectContaining({ path: "ok", code: "invalid_type", expected: "boolean", receivedType: "undefined" })]) },
+    });
+  });
+
+  it("records names from the first object in a returned array without recording values", async () => {
+    await expect(provider().generateStructured({ prompt: "INVALID_PLAYBOOK_STRUCTURED" }, z.object({ playbooks: z.array(z.object({ expected: z.string() })) }))).rejects.toMatchObject({
+      code: "LLM_INVALID_RESPONSE",
+      details: { returnedRootKeys: ["playbooks"], returnedFirstLevelObjectKeys: { playbooks: ["name", "wrong"] } },
     });
   });
 

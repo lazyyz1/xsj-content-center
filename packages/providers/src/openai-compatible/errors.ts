@@ -22,6 +22,8 @@ export class LLMError extends Error {
     readonly details: {
       httpStatus?: number;
       providerRequestId?: string;
+      actualModel?: string;
+      finishReason?: string;
       validationIssues?: Array<{ path: string; code: string; expected?: string; receivedType: string }>;
       returnedRootKeys?: string[];
       returnedFirstLevelObjectKeys?: Record<string, string[]>;

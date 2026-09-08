@@ -1,6 +1,8 @@
 import { db, type Prisma } from "@content-center/db";
+import { isAIProvider, selectAIModel } from "@content-center/integrations";
 import {
   LLMError,
+  OpenAICompatibleLLMProvider,
   benchmarkPlaybookGenerationSchema,
   benchmarkPlaybookInputSchema,
   benchmarkPlaybookOutputInstruction,
@@ -52,6 +54,36 @@ const universalPlaybookTexts = new Set([
 
 function isUniversalPlaybookText(text: string) {
   return universalPlaybookTexts.has(text.toLowerCase().replace(/[\s，。；、,:：\-_=→>]+/gu, ""));
+}
+
+type Environment = Record<string, string | undefined>;
+
+const environmentValue = (environment: Environment, name: string) => environment[name]?.trim() || undefined;
+
+export function resolveBenchmarkPlaybookTaskConfig(environment: Environment = process.env) {
+  const provider = environmentValue(environment, "M8_AI_PROVIDER");
+  if (!provider) return null;
+  const modelId = environmentValue(environment, "M8_AI_MODEL_ID");
+  if (!isAIProvider(provider) || !modelId) throw new LLMError("LLM_NOT_CONFIGURED", "M8 任务模型配置不完整。", false);
+  const model = selectAIModel({ provider, modelId, requires: ["text", "reasoning", "structuredOutput", "jsonObject"] });
+  if (!model) throw new LLMError("LLM_NOT_CONFIGURED", "M8 任务模型不在已批准目录中或能力不足。", false);
+  const apiKey = environmentValue(environment, provider === "KIMI" ? "KIMI_API_KEY" : "DEEPSEEK_API_KEY");
+  if (!apiKey) throw new LLMError("LLM_NOT_CONFIGURED", "M8 任务模型凭据未配置。", false);
+  return {
+    provider,
+    model: model.modelId,
+    requestedModel: model.modelId,
+    baseUrl: environmentValue(environment, "M8_AI_BASE_URL") ?? environmentValue(environment, provider === "KIMI" ? "KIMI_BASE_URL" : "DEEPSEEK_BASE_URL") ?? model.defaultBaseUrl,
+    apiKey,
+    capabilities: model.capabilities,
+    chatStructuredOutput: model.chatStructuredOutput,
+  };
+}
+
+export async function loadBenchmarkPlaybookRuntime(workspaceId: string): Promise<BenchmarkRuntime> {
+  const taskConfig = resolveBenchmarkPlaybookTaskConfig();
+  if (!taskConfig) return loadBenchmarkRuntime(workspaceId);
+  return { provider: new OpenAICompatibleLLMProvider(taskConfig), providerName: taskConfig.provider, model: taskConfig.model, requestedModel: taskConfig.requestedModel, mode: "REAL" };
 }
 
 function sourceRefs(output: MaterialDistillationOutput) {
@@ -154,8 +186,18 @@ export function normalizeBenchmarkPlaybookOutput(input: BenchmarkPlaybookGenerat
   });
 }
 
-function failure(error: unknown) {
-  if (error instanceof LLMError) return { code: error.code, message: error.message, retryable: error.retryable };
+export function benchmarkPlaybookFailure(error: unknown) {
+  if (error instanceof LLMError) return {
+    code: error.code,
+    message: error.message,
+    retryable: error.retryable,
+    providerRequestId: error.details.providerRequestId,
+    actualModel: error.details.actualModel,
+    finishReason: error.details.finishReason,
+    validationIssues: error.details.validationIssues,
+    returnedRootKeys: error.details.returnedRootKeys,
+    returnedFirstLevelObjectKeys: error.details.returnedFirstLevelObjectKeys,
+  };
   return { code: "BENCHMARK_PLAYBOOK_FAILED", message: "这次组合打法研究没有完成，请重试。", retryable: false };
 }
 
@@ -194,10 +236,12 @@ export async function processBenchmarkPlaybookJob(job: Job<BenchmarkStudyPayload
   let runId: string | undefined;
   let runProvider: string | undefined;
   let requestedModel: string | undefined;
+  let runMode: string | undefined;
   try {
-    const runtime = dependencies.runtime ?? await loadBenchmarkRuntime(record.workspaceId);
+    const runtime = dependencies.runtime ?? await loadBenchmarkPlaybookRuntime(record.workspaceId);
     runProvider = runtime.providerName;
     requestedModel = runtime.requestedModel ?? runtime.model;
+    runMode = runtime.mode ?? "REAL";
     const runtimeAudit = { provider: runtime.providerName, requestedModel, providerMode: runtime.mode ?? "REAL" };
     const run = await db.$transaction(async (tx) => {
       const created = await tx.aIRun.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, action: "ANALYZE_BENCHMARK", provider: runtime.providerName, model: runtime.model, promptVersion: 1, status: "RUNNING", inputSummary: json(summary), metadata: json({ benchmarkAction: "IDENTIFY_PLAYBOOKS", benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: rows.length, schemaVersion: "benchmark-playbook-v1", structuredOutput: "JSON_OBJECT", ...runtimeAudit }) } });
@@ -210,22 +254,23 @@ export async function processBenchmarkPlaybookJob(job: Job<BenchmarkStudyPayload
     const output = normalizeBenchmarkPlaybookOutput(result.data.value, atoms, manifest.data.distillations);
     const latencyMs = Date.now() - startedAt.getTime();
     await db.$transaction([
-      db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(output), metadata: json({ benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: rows.length, schemaVersion: "benchmark-playbook-v1", structuredOutput: "JSON_OBJECT", ...runtimeAudit, actualModel: result.data.model }), providerRequestId: result.data.providerRequestId, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, finishedAt: new Date() } }),
+      db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(output), metadata: json({ benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: rows.length, schemaVersion: "benchmark-playbook-v1", structuredOutput: "JSON_OBJECT", ...runtimeAudit, actualModel: result.data.model, finishReason: result.data.finishReason ?? null }), providerRequestId: result.data.providerRequestId, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, finishedAt: new Date() } }),
       db.benchmarkStudy.update({ where: { id: record.id }, data: { status: "COMPLETED", output: json(output), errorCode: null, errorMessage: null } }),
-      db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, provider: runtime.providerName, operation: "IDENTIFY_BENCHMARK_PLAYBOOKS", requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, metadata: json({ airRunId: run.id, benchmarkStudyId: record.id, sampleCount: rows.length, promptVersion: 1, latencyMs, ...runtimeAudit, actualModel: result.data.model }) } }),
+      db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, provider: runtime.providerName, operation: "IDENTIFY_BENCHMARK_PLAYBOOKS", requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, metadata: json({ airRunId: run.id, benchmarkStudyId: record.id, sampleCount: rows.length, promptVersion: 1, latencyMs, ...runtimeAudit, actualModel: result.data.model, finishReason: result.data.finishReason ?? null }) } }),
       db.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, action: "benchmark_playbook.succeeded", resourceType: "benchmark_study", resourceId: record.id, metadata: json({ sampleCount: rows.length, playbookCount: output.playbooks.length }) } }),
     ]);
     return { status: "ok" as const, studyId: record.id, sampleCount: rows.length };
   } catch (error) {
-    const failed = failure(error);
+    const failed = benchmarkPlaybookFailure(error);
+    const diagnostics = { structuredOutput: "JSON_OBJECT", requestedModel: requestedModel ?? null, actualModel: failed.actualModel ?? null, finishReason: failed.finishReason ?? null, validationIssues: failed.validationIssues ?? [], returnedRootKeys: failed.returnedRootKeys ?? [], returnedFirstLevelObjectKeys: failed.returnedFirstLevelObjectKeys ?? {} };
     if (runId) {
-      await db.aIRun.update({ where: { id: runId }, data: { status: "FAILED", errorCode: failed.code, errorMessage: "组合打法研究未完成。", finishedAt: new Date() } }).catch(() => undefined);
-      await db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, provider: runProvider ?? "LLM", operation: "IDENTIFY_BENCHMARK_PLAYBOOKS", requestId: runId, success: false, units: 1, cost: null, metadata: json({ airRunId: runId, benchmarkStudyId: record.id, errorCode: failed.code, requestedModel: requestedModel ?? null }) } }).catch(() => undefined);
+      await db.aIRun.update({ where: { id: runId }, data: { status: "FAILED", errorCode: failed.code, errorMessage: "组合打法研究未完成。", providerRequestId: failed.providerRequestId, metadata: json({ benchmarkAction: "IDENTIFY_PLAYBOOKS", benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: rows.length, schemaVersion: "benchmark-playbook-v1", provider: runProvider ?? "LLM", providerMode: runMode ?? "REAL", ...diagnostics }), finishedAt: new Date() } }).catch(() => undefined);
+      await db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, provider: runProvider ?? "LLM", operation: "IDENTIFY_BENCHMARK_PLAYBOOKS", requestId: runId, providerRequestId: failed.providerRequestId, success: false, units: 1, cost: null, metadata: json({ airRunId: runId, benchmarkStudyId: record.id, errorCode: failed.code, ...diagnostics }) } }).catch(() => undefined);
     }
     const attempt = job.attemptsMade + 1;
     const willRetry = failed.retryable && attempt < 3;
     await db.benchmarkStudy.update({ where: { id: record.id }, data: { status: willRetry ? "PROCESSING" : "FAILED", errorCode: failed.code, errorMessage: willRetry ? null : failed.message } }).catch(() => undefined);
-    await db.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, action: "benchmark_playbook.failed", resourceType: "benchmark_study", resourceId: record.id, metadata: json({ sampleCount: rows.length, attempt, retrying: willRetry, errorCode: failed.code }) } }).catch(() => undefined);
+    await db.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, action: "benchmark_playbook.failed", resourceType: "benchmark_study", resourceId: record.id, metadata: json({ sampleCount: rows.length, attempt, retrying: willRetry, errorCode: failed.code, ...diagnostics }) } }).catch(() => undefined);
     if (!failed.retryable) throw new UnrecoverableError(`${failed.code}: ${failed.message}`);
     throw error;
   }

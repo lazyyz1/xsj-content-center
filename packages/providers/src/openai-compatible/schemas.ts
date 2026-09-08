@@ -24,6 +24,7 @@ export const chatCompletionResponseSchema = z.object({
   model: z.string().optional(),
   choices: z.array(z.object({
     message: z.object({ content: z.string() }),
+    finish_reason: z.string().nullable().optional(),
   })).min(1),
   usage: z.object({
     prompt_tokens: z.number().int().nonnegative().optional(),

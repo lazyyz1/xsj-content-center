@@ -72,6 +72,7 @@ export type LLMTextResult = {
   text: string;
   model: string;
   providerRequestId?: string;
+  finishReason?: string;
   usage?: LLMTokenUsage;
 };
 

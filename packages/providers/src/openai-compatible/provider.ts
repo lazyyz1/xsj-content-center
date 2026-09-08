@@ -56,7 +56,8 @@ function returnedStructure(raw: unknown) {
   const returnedRootKeys = Object.keys(record).sort().slice(0, 50);
   const returnedFirstLevelObjectKeys = Object.fromEntries(returnedRootKeys.flatMap((key) => {
     const value = record[key];
-    return value && typeof value === "object" && !Array.isArray(value) ? [[key, Object.keys(value as Record<string, unknown>).sort().slice(0, 50)]] : [];
+    const firstLevel = Array.isArray(value) ? value[0] : value;
+    return firstLevel && typeof firstLevel === "object" && !Array.isArray(firstLevel) ? [[key, Object.keys(firstLevel as Record<string, unknown>).sort().slice(0, 50)]] : [];
   }));
   return { returnedRootKeys, ...(Object.keys(returnedFirstLevelObjectKeys).length ? { returnedFirstLevelObjectKeys } : {}) };
 }
@@ -138,12 +139,14 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
     try {
       raw = parseStructuredJson(result.data.text);
     } catch {
-      throw new LLMError("LLM_INVALID_RESPONSE", "AI 模型没有返回有效 JSON。", false, { providerRequestId: result.data.providerRequestId });
+      throw new LLMError("LLM_INVALID_RESPONSE", "AI 模型没有返回有效 JSON。", false, { providerRequestId: result.data.providerRequestId, actualModel: result.data.model, finishReason: result.data.finishReason });
     }
     const parsed = schema.safeParse(raw);
     if (!parsed.success) {
       throw new LLMError("LLM_INVALID_RESPONSE", "AI 模型返回的数据结构不符合要求。", false, {
         providerRequestId: result.data.providerRequestId,
+        actualModel: result.data.model,
+        finishReason: result.data.finishReason,
         validationIssues: parsed.error.issues.slice(0, 20).map((issue) => validationIssue(issue, raw)),
         ...returnedStructure(raw),
       });
@@ -203,6 +206,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
         text: parsed.data.choices[0].message.content,
         model: parsed.data.model ?? this.config.model,
         providerRequestId,
+        finishReason: parsed.data.choices[0]?.finish_reason ?? undefined,
         usage: parsed.data.usage ? { inputTokens: parsed.data.usage.prompt_tokens, outputTokens: parsed.data.usage.completion_tokens } : undefined,
       },
     };
