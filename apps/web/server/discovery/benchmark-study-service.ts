@@ -4,13 +4,16 @@ import { db, type Prisma } from "@content-center/db";
 import {
   benchmarkAnalysisOutputSchema,
   benchmarkCreatorProfileInputSchema,
+  benchmarkCreatorProfileInputV2Schema,
   benchmarkCreatorProfileOutputSchema,
+  benchmarkCreatorProfileOutputV2Schema,
   benchmarkPlaybookInputSchema,
   benchmarkPlaybookOutputSchema,
   materialAnalysisOutputSchema,
   materialDistillationGenerationSchema,
   type BenchmarkAnalysisOutput,
   type BenchmarkCreatorProfileOutput,
+  type BenchmarkCreatorProfileOutputV2,
   type BenchmarkPlaybookOutput,
 } from "@content-center/providers";
 import { enqueueBenchmarkCreatorProfileStudy, enqueueBenchmarkPlaybookStudy, enqueueBenchmarkStudy } from "@content-center/worker/queue";
@@ -78,7 +81,7 @@ export type BenchmarkStudyDTO = {
   sampleCount: number;
   insufficientSamples: boolean;
   kind: "ACCOUNT_RESEARCH" | "PLAYBOOKS" | "CREATOR_PROFILE";
-  output: BenchmarkAnalysisOutput | BenchmarkPlaybookOutput | BenchmarkCreatorProfileOutput | null;
+  output: BenchmarkAnalysisOutput | BenchmarkPlaybookOutput | BenchmarkCreatorProfileOutput | BenchmarkCreatorProfileOutputV2 | null;
   aiRunId: string | null;
   errorCode: string | null;
   errorMessage: string | null;
@@ -92,6 +95,10 @@ function json(value: unknown): Prisma.InputJsonValue {
 }
 
 function storedStudy(value: Prisma.JsonValue | null) {
+  const creatorProfileV2 = benchmarkCreatorProfileOutputV2Schema.safeParse(value);
+  if (creatorProfileV2.success) return { kind: "CREATOR_PROFILE" as const, output: creatorProfileV2.data, locks: creatorProfileV2.data.inputs };
+  const creatorProfileInputV2 = benchmarkCreatorProfileInputV2Schema.safeParse(value);
+  if (creatorProfileInputV2.success) return { kind: "CREATOR_PROFILE" as const, output: null, locks: creatorProfileInputV2.data.distillations };
   const creatorProfile = benchmarkCreatorProfileOutputSchema.safeParse(value);
   if (creatorProfile.success) return { kind: "CREATOR_PROFILE" as const, output: creatorProfile.data, locks: creatorProfile.data.inputs };
   const creatorProfileInput = benchmarkCreatorProfileInputSchema.safeParse(value);
@@ -102,6 +109,24 @@ function storedStudy(value: Prisma.JsonValue | null) {
   if (playbookInput.success) return { kind: "PLAYBOOKS" as const, output: null, locks: playbookInput.data.distillations };
   const research = benchmarkAnalysisOutputSchema.safeParse(value);
   return { kind: "ACCOUNT_RESEARCH" as const, output: research.success ? research.data : null, locks: [] };
+}
+
+function priorProfile(value: Prisma.JsonValue | null, studyId: string, version: number) {
+  const current = benchmarkCreatorProfileOutputV2Schema.safeParse(value);
+  if (current.success) return { studyId, version, schemaVersion: current.data.schemaVersion, cards: current.data.cards.map(({ code, status, text }) => ({ code, status, text })) };
+  const legacy = benchmarkCreatorProfileOutputSchema.safeParse(value);
+  if (!legacy.success) return null;
+  const section = (codes: Array<typeof legacy.data.sections[number]["code"]>) => legacy.data.sections.filter(({ code }) => codes.includes(code));
+  const cards = [
+    ["PROFILE", section(["POSITIONING", "AUDIENCE"])],
+    ["CONTENT_MIX", section(["THEME"])],
+    ["TOPIC_STYLE", section(["TOPIC_PATTERN"])],
+    ["CONTENT_STYLE", section(["VIDEO_STYLE", "EVIDENCE_STYLE"])],
+    ["RECURRING_VIEWPOINT", section(["RECURRING_VIEWPOINT"])],
+    ["LEARN", section(["LEARN"])],
+    ["AVOID", section(["AVOID"])],
+  ].flatMap(([code, matches]) => Array.isArray(matches) && matches.length ? [{ code, status: "OBSERVE" as const, text: matches.map(({ text }) => text).join("\n") }] : []);
+  return { studyId, version, schemaVersion: legacy.data.schemaVersion, cards };
 }
 
 function key(platform: string, externalId: string) {
@@ -377,19 +402,23 @@ export async function createBenchmarkCreatorProfileStudy(input: { workspaceId: s
       }
       if (candidates.some(({ source }) => !latestDistillation.has(source.id))) throw new BenchmarkStudyError("BENCHMARK_DISTILLATION_NOT_READY", "先选择至少 5 条已经完成精华提炼的代表内容。");
       const accountResearch = completedStudies.find(({ output }) => benchmarkAnalysisOutputSchema.safeParse(output).success) ?? null;
+      const previousProfileStudy = completedStudies.find(({ output }) => benchmarkCreatorProfileOutputV2Schema.safeParse(output).success || benchmarkCreatorProfileOutputSchema.safeParse(output).success) ?? null;
+      const previousProfile = previousProfileStudy ? priorProfile(previousProfileStudy.output, previousProfileStudy.id, previousProfileStudy.version) : null;
       const previous = await tx.benchmarkStudy.findFirst({ where: { benchmarkAccountId: benchmark.id }, orderBy: { version: "desc" }, select: { version: true } });
       const study = await tx.benchmarkStudy.create({ data: { workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id, createdById: input.userId, version: (previous?.version ?? 0) + 1, status: "PROCESSING", sampleCount: candidates.length, insufficientSamples: false } });
       const samples = [];
       for (const candidate of candidates) samples.push(await tx.benchmarkStudySample.create({ data: { studyId: study.id, sourceItemId: candidate.source.id, materialAnalysisId: latestAnalysis.get(candidate.source.id)?.id ?? null, snapshotId: candidate.snapshot.id } }));
-      const manifest = benchmarkCreatorProfileInputSchema.parse({
+      const manifest = benchmarkCreatorProfileInputV2Schema.parse({
         kind: "CREATOR_PROFILE_INPUT",
-        schemaVersion: "benchmark-creator-profile-v1",
+        schemaVersion: "benchmark-creator-profile-v2",
         account: { name: benchmark.name, platform: benchmark.platform, bio: benchmark.bio, tags: tagsFromTexts([benchmark.bio ?? "", ...snapshots.map(({ title }) => title)]) },
         distillations: samples.map((sample) => { const distillation = latestDistillation.get(sample.sourceItemId)!; return { sampleId: sample.id, sourceItemId: sample.sourceItemId, materialDistillationId: distillation.id, materialDistillationVersion: distillation.version }; }),
         accountResearch: accountResearch ? { studyId: accountResearch.id, version: accountResearch.version } : null,
+        priorProfileVersion: previousProfile?.version ?? null,
+        priorProfile: previousProfile,
       });
       await tx.benchmarkStudy.update({ where: { id: study.id }, data: { output: json(manifest) } });
-      await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "benchmark_creator_profile.created", resourceType: "benchmark_study", resourceId: study.id, metadata: json({ benchmarkAccountId: benchmark.id, sampleCount: candidates.length, materialDistillationIds: manifest.distillations.map(({ materialDistillationId }) => materialDistillationId), accountResearchStudyId: manifest.accountResearch?.studyId ?? null }) } });
+      await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "benchmark_creator_profile.created", resourceType: "benchmark_study", resourceId: study.id, metadata: json({ benchmarkAccountId: benchmark.id, sampleCount: candidates.length, materialDistillationIds: manifest.distillations.map(({ materialDistillationId }) => materialDistillationId), accountResearchStudyId: manifest.accountResearch?.studyId ?? null, priorProfileVersion: manifest.priorProfile?.version ?? null }) } });
       return { id: study.id, maxAttempts: 3 };
     }, { isolationLevel: "Serializable" });
   } catch (error) {

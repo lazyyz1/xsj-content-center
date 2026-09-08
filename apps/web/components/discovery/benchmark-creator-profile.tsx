@@ -15,6 +15,13 @@ const platformLabel: Record<string, string> = { DOUYIN: "抖音", XIAOHONGSHU: "
 const qualityLabel: Record<Highlight["quality"], string> = { WORTH_KEEPING: "值得留下", OBSERVE: "先观察", CASE_ONLY: "案例参考", DO_NOT_KEEP: "暂不沉淀" };
 const methodStatus: Record<BenchmarkCreatorDetailDTO["savedMethods"][number]["status"], string> = { SAVED: "已收藏", TRIAL: "试用中", CORE: "常用", DISABLED: "已停用" };
 const creatorProfileLabel = {
+  PROFILE: "他大概是一个什么类型的博主",
+  CONTENT_MIX: "他最近主要在拍什么",
+  TOPIC_STYLE: "他经常怎么选题",
+  CONTENT_STYLE: "他通常怎么讲、怎么证明",
+  RECURRING_VIEWPOINT: "他反复在讲什么",
+  LEARN: "我们可以学什么",
+  AVOID: "哪些不要直接照搬",
   POSITIONING: "主要讲什么",
   AUDIENCE: "主要面向谁",
   THEME: "高频主题",
@@ -22,11 +29,10 @@ const creatorProfileLabel = {
   VIDEO_STYLE: "内容特色",
   EVIDENCE_STYLE: "如何建立说服力",
   ATTENTION_TRUST: "关注与信任特征",
-  RECURRING_VIEWPOINT: "反复出现的观点",
+  // V1 history remains readable with its original employee-facing labels.
   METHOD_TENDENCY: "目前观察到的内容方法",
-  LEARN: "我们可以学什么",
-  AVOID: "哪些不要照搬",
 } as const;
+const creatorProfileStatus = { CLEAR: "比较明确", OBSERVE: "目前观察到" } as const;
 
 function Empty({ children, compact = false }: { children: string; compact?: boolean }) {
   return <div className={`benchmark-empty ${compact ? "benchmark-empty-compact" : ""}`}>{children}</div>;
@@ -118,7 +124,7 @@ function AccountResearchSummary({ profile }: { profile: BenchmarkCreatorDetailDT
 
 function AICreatorProfile({ profile, selectedCount, canGenerate, busy, onShowResearch, onGenerate }: { profile: BenchmarkCreatorDetailDTO; selectedCount: number; canGenerate: boolean; busy: boolean; onShowResearch: () => void; onGenerate: () => void }) {
   const result = profile.creatorProfile;
-  const priority = ["POSITIONING", "AUDIENCE", "THEME", "TOPIC_PATTERN", "VIDEO_STYLE", "EVIDENCE_STYLE", "ATTENTION_TRUST", "RECURRING_VIEWPOINT", "METHOD_TENDENCY", "LEARN", "AVOID"] as const;
+  const priority: Array<keyof typeof creatorProfileLabel> = ["PROFILE", "CONTENT_MIX", "TOPIC_STYLE", "CONTENT_STYLE", "RECURRING_VIEWPOINT", "LEARN", "AVOID", "POSITIONING", "AUDIENCE", "THEME", "TOPIC_PATTERN", "VIDEO_STYLE", "EVIDENCE_STYLE", "ATTENTION_TRUST", "METHOD_TENDENCY"];
   const ordered = [...(result?.sections ?? [])].sort((left, right) => priority.indexOf(left.code) - priority.indexOf(right.code));
   const previews = ordered.slice(0, 6);
   const more = ordered.slice(6);
@@ -126,7 +132,7 @@ function AICreatorProfile({ profile, selectedCount, canGenerate, busy, onShowRes
   const action = selectionReady ? <Button variant="secondary" disabled={!canGenerate || busy} onClick={onGenerate}>{busy ? <Loader2 size={14} className="animate-spin" /> : null}{result ? "更新画像" : "生成账号画像"}</Button> : <Button variant="secondary" onClick={onShowResearch}>选择代表内容</Button>;
   return <section className="benchmark-section benchmark-glass" data-testid="ai-creator-profile"><PreviewHeading title="AI 账号画像" description="根据你选择的代表内容，整理这个博主反复出现的内容特点。" action={action} />
     {!selectionReady ? <p className="mt-3 text-xs text-[var(--text-secondary)]">先去研究页选择至少 5 条已经完成精华提炼的代表内容。</p> : null}
-    {result ? <><div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{previews.map((section) => <article key={section.code} className="rounded-2xl border border-white/70 bg-white/60 p-4"><p className="text-sm font-semibold">{creatorProfileLabel[section.code]}</p><p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{section.text}</p>{section.sources.length ? <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1">{section.sources.slice(0, 2).map((source) => <Link key={source.id} href={`/library/${source.id}`} className="text-xs text-[var(--accent)]">{source.title}</Link>)}</div> : null}</article>)}</div>{more.length ? <details className="mt-3 rounded-2xl border border-white/70 bg-white/45 p-4"><summary className="cursor-pointer text-sm font-medium text-[var(--accent)]">查看更多画像观察</summary><div className="mt-3 grid gap-3 md:grid-cols-2">{more.map((section) => <article key={section.code}><p className="text-sm font-semibold">{creatorProfileLabel[section.code]}</p><p className="mt-1 text-sm leading-6 text-[var(--text-secondary)]">{section.text}</p></article>)}</div></details> : null}</> : <div className="mt-3"><Empty compact>还没有生成账号画像。选择 5–10 条代表内容后，可以在这里形成有来源的账号观察。</Empty></div>}
+    {result ? ordered.length ? <><div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{previews.map((section) => <article key={section.code} className="rounded-2xl border border-white/70 bg-white/60 p-4"><div className="flex items-start justify-between gap-2"><p className="text-sm font-semibold">{creatorProfileLabel[section.code]}</p>{section.status ? <Badge>{creatorProfileStatus[section.status]}</Badge> : null}</div><p className="mt-2 whitespace-pre-line text-sm leading-6 text-[var(--text-secondary)]">{section.text}</p>{section.sources.length ? <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1">{section.sources.slice(0, 2).map((source) => <Link key={source.id} href={`/library/${source.id}`} className="text-xs text-[var(--accent)]">{source.title}</Link>)}</div> : null}</article>)}</div>{more.length ? <details className="mt-3 rounded-2xl border border-white/70 bg-white/45 p-4"><summary className="cursor-pointer text-sm font-medium text-[var(--accent)]">查看更多画像观察</summary><div className="mt-3 grid gap-3 md:grid-cols-2">{more.map((section) => <article key={section.code}><div className="flex items-start justify-between gap-2"><p className="text-sm font-semibold">{creatorProfileLabel[section.code]}</p>{section.status ? <Badge>{creatorProfileStatus[section.status]}</Badge> : null}</div><p className="mt-1 whitespace-pre-line text-sm leading-6 text-[var(--text-secondary)]">{section.text}</p></article>)}</div></details> : null}</> : <div className="mt-3"><Empty compact>当前研究内容还不足以判断。</Empty></div> : <div className="mt-3"><Empty compact>还没有生成账号画像。选择 5–10 条代表内容后，可以在这里形成有来源的账号观察。</Empty></div>}
   </section>;
 }
 

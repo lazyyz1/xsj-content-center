@@ -1,7 +1,7 @@
 import "server-only";
 
 import { db } from "@content-center/db";
-import { benchmarkAnalysisOutputSchema, benchmarkCreatorProfileOutputSchema, benchmarkPlaybookOutputSchema, materialDistillationGenerationSchema, type BenchmarkCreatorProfileSectionCode } from "@content-center/providers";
+import { benchmarkAnalysisOutputSchema, benchmarkCreatorProfileOutputSchema, benchmarkCreatorProfileOutputV2Schema, benchmarkPlaybookOutputSchema, materialDistillationGenerationSchema, type BenchmarkCreatorProfileCardCode, type BenchmarkCreatorProfileSectionCode } from "@content-center/providers";
 import { listBenchmarkStudies } from "./benchmark-study-service";
 
 const key = (platform: string, externalId: string) => `${platform}:${externalId}`;
@@ -14,7 +14,7 @@ export type BenchmarkCreatorDetailDTO = {
   copywriting: Array<{ sourceItemId: string; sourceTitle: string; core: string; opening: string; progression: string[]; reusable: string[]; avoid: string[] }>;
   accountResearch: null | { sampleCount: number; groups: Array<{ title: string; items: Array<{ name: string; summary: string; sources: Array<{ id: string; title: string }> }> }> };
   playbooks: Array<{ name: string; maturity: "OBSERVE" | "STABLE"; elements: string[]; flow: string; useCase: string; sources: Array<{ id: string; title: string }> }>;
-  creatorProfile: null | { studyId: string; version: number; createdAt: string; message: string; sections: Array<{ code: BenchmarkCreatorProfileSectionCode; text: string; sources: Array<{ id: string; title: string }> }> };
+  creatorProfile: null | { studyId: string; version: number; createdAt: string; message: string; sections: Array<{ code: BenchmarkCreatorProfileSectionCode | BenchmarkCreatorProfileCardCode; status: "CLEAR" | "OBSERVE" | null; text: string; sources: Array<{ id: string; title: string }> }> };
   savedMethods: Array<{ id: string; title: string; status: "SAVED" | "TRIAL" | "CORE" | "DISABLED" }>;
 };
 
@@ -128,14 +128,17 @@ export async function getBenchmarkCreatorDetail(input: { workspaceId: string; be
   })) : [];
 
   const creatorProfileStudy = completedStudies.find((study) => study.kind === "CREATOR_PROFILE" && study.output && "kind" in study.output && study.output.kind === "CREATOR_PROFILE");
-  const parsedCreatorProfile = creatorProfileStudy ? benchmarkCreatorProfileOutputSchema.safeParse(creatorProfileStudy.output) : null;
-  const creatorProfile = parsedCreatorProfile?.success && creatorProfileStudy ? {
+  const parsedCreatorProfileV2 = creatorProfileStudy ? benchmarkCreatorProfileOutputV2Schema.safeParse(creatorProfileStudy.output) : null;
+  const parsedCreatorProfileV1 = creatorProfileStudy && !parsedCreatorProfileV2?.success ? benchmarkCreatorProfileOutputSchema.safeParse(creatorProfileStudy.output) : null;
+  const parsedProfile = parsedCreatorProfileV2?.success ? { message: parsedCreatorProfileV2.data.message, sections: parsedCreatorProfileV2.data.cards } : parsedCreatorProfileV1?.success ? { message: parsedCreatorProfileV1.data.message, sections: parsedCreatorProfileV1.data.sections.map((section) => ({ ...section, status: null })) } : null;
+  const creatorProfile = parsedProfile && creatorProfileStudy ? {
     studyId: creatorProfileStudy.id,
     version: creatorProfileStudy.version,
     createdAt: creatorProfileStudy.createdAt,
-    message: parsedCreatorProfile.data.message,
-    sections: parsedCreatorProfile.data.sections.map((section) => ({
+    message: parsedProfile.message,
+    sections: parsedProfile.sections.map((section) => ({
       code: section.code,
+      status: section.status,
       text: section.text,
       sources: [...new Set(section.evidence.map(({ sourceItemId }) => sourceItemId))].flatMap((sourceItemId) => {
         const sample = creatorProfileStudy.samples.find((item) => item.sourceItemId === sourceItemId);

@@ -100,7 +100,7 @@ describe("benchmark creator profile read model", () => {
     expect(profile?.copywriting).toEqual([expect.objectContaining({ sourceTitle: "代表视频 2", core: "把判断说清楚" })]);
     expect(profile?.accountResearch).toMatchObject({ sampleCount: 2, groups: [expect.objectContaining({ title: "常见主题" }), expect.objectContaining({ title: "常用开头" })] });
     expect(profile?.playbooks).toEqual([expect.objectContaining({ name: "判断后进入行动", maturity: "OBSERVE", sources: expect.arrayContaining([expect.objectContaining({ title: "代表视频 1" })]) })]);
-    expect(profile?.creatorProfile).toMatchObject({ version: 4, message: "已形成两项账号画像观察。", sections: [expect.objectContaining({ code: "POSITIONING", sources: [expect.objectContaining({ title: "代表视频 1" })] }), expect.objectContaining({ code: "THEME" })] });
+    expect(profile?.creatorProfile).toMatchObject({ version: 4, message: "已形成两项账号画像观察。", sections: [expect.objectContaining({ code: "POSITIONING", status: null, sources: [expect.objectContaining({ title: "代表视频 1" })] }), expect.objectContaining({ code: "THEME", status: null })] });
     expect(profile?.savedMethods).toEqual([expect.objectContaining({ title: "已经留下的方法", status: "SAVED" })]);
     expect(JSON.stringify(profile)).not.toContain("不应泄漏的内容");
     await expect(getBenchmarkCreatorDetail({ workspaceId: otherWorkspaceId, benchmarkAccountId: benchmarkId, ownerUserId: otherOwnerId })).resolves.toBeNull();
@@ -108,7 +108,7 @@ describe("benchmark creator profile read model", () => {
 
   it("uses employee language and links sources back to the existing material detail", async () => {
     const source = await readFile(new URL("../components/discovery/benchmark-creator-profile.tsx", import.meta.url), "utf8");
-    for (const text of ["画像", "内容", "研究", "代表内容", "观点与精华", "AI 账号画像", "生成账号画像", "更新画像", "主要讲什么", "高频主题", "我们可以学什么", "视频怎么写", "账号研究", "常见内容模式", "我们已经留下了什么", "查看素材", "查看依据", "查看完整素材"]) expect(source).toContain(text);
+    for (const text of ["画像", "内容", "研究", "代表内容", "观点与精华", "AI 账号画像", "生成账号画像", "更新画像", "他大概是一个什么类型的博主", "他最近主要在拍什么", "他经常怎么选题", "他通常怎么讲、怎么证明", "他反复在讲什么", "我们可以学什么", "哪些不要直接照搬", "比较明确", "目前观察到", "当前研究内容还不足以判断", "视频怎么写", "账号研究", "常见内容模式", "我们已经留下了什么", "查看素材", "查看依据", "查看完整素材"]) expect(source).toContain(text);
     expect(source).toContain("href={`/library/${source.id}`}");
     expect(source).toContain('role="dialog"');
     expect(source).toContain('role="tablist"');

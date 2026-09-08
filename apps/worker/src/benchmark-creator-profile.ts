@@ -3,17 +3,26 @@ import {
   LLMError,
   benchmarkAnalysisOutputSchema,
   benchmarkCreatorProfileGenerationSchema,
+  benchmarkCreatorProfileGenerationV2Schema,
   benchmarkCreatorProfileInputSchema,
+  benchmarkCreatorProfileInputV2Schema,
   benchmarkCreatorProfileOutputInstruction,
+  benchmarkCreatorProfileOutputV2Instruction,
   benchmarkCreatorProfileOutputSchema,
+  benchmarkCreatorProfileOutputV2Schema,
+  benchmarkCreatorProfileCardCandidateSchema,
   benchmarkCreatorProfileSectionCandidateSchema,
   benchmarkCreatorProfileSystemBoundary,
   buildTranscriptSourceIndex,
   generationQualityContract,
   materialDistillationGenerationSchema,
   type BenchmarkCreatorProfileGeneration,
+  type BenchmarkCreatorProfileGenerationV2,
   type BenchmarkCreatorProfileInput,
+  type BenchmarkCreatorProfileInputV2,
   type BenchmarkCreatorProfileOutput,
+  type BenchmarkCreatorProfileOutputV2,
+  type BenchmarkCreatorProfileCardCandidate,
   type BenchmarkCreatorProfileSectionCandidate,
   type MaterialDistillationOutput,
   type TranscriptSourceIndex,
@@ -172,6 +181,114 @@ export function normalizeBenchmarkCreatorProfileOutput(input: BenchmarkCreatorPr
   return normalizeBenchmarkCreatorProfileResult(input, atoms, manifest).output;
 }
 
+const profileCardOrder = ["PROFILE", "CONTENT_MIX", "TOPIC_STYLE", "CONTENT_STYLE", "RECURRING_VIEWPOINT", "LEARN", "AVOID"] as const;
+const actionCardCodes = new Set(["LEARN", "AVOID"]);
+const emptyAdvice = new Set(["学习他的专业", "学习专业", "不要完全照搬", "注意结合自身情况"]);
+const consultancyTerms = ["竞争壁垒", "增长飞轮", "商业闭环", "执行断层", "底层范式", "结构性优势", "战略杠杆", "认知占领", "生态位", "增长模型", "护城河", "失败根因"];
+const specificStyleGroups = [
+  /采访|访谈/u,
+  /到校|现场记录/u,
+  /多角色|多人复述|第三方复述/u,
+  /跟拍/u,
+  /直播/u,
+];
+
+function atomText(atom: CreatorProfileAtom) {
+  return `${atom.title}\n${atom.text}\n${atom.evidence.map(({ text }) => text).join("\n")}`;
+}
+
+function evidenceFromAtoms(atoms: CreatorProfileAtom[]) {
+  return atoms.map((atom) => ({ evidenceRef: atom.ref, sampleId: atom.sampleId, sourceItemId: atom.sourceItemId, materialDistillationId: atom.materialDistillationId, materialDistillationVersion: atom.materialDistillationVersion, itemKind: atom.itemKind, itemKey: atom.itemKey, sourceRefs: atom.sourceRefs }));
+}
+
+function supportedConsultancyLanguage(text: string, atoms: CreatorProfileAtom[]) {
+  return consultancyTerms.every((term) => !text.includes(term) || new Set(atoms.filter((atom) => atomText(atom).includes(term)).map(({ sourceItemId }) => sourceItemId)).size >= 2);
+}
+
+function contentStyleIsIntersection(text: string, atoms: CreatorProfileAtom[]) {
+  return specificStyleGroups.every((pattern) => !pattern.test(text) || new Set(atoms.filter((atom) => pattern.test(atomText(atom))).map(({ sourceItemId }) => sourceItemId)).size >= 2);
+}
+
+function v2LanguageGate(card: BenchmarkCreatorProfileCardCandidate, atoms: CreatorProfileAtom[], sampleCount: number) {
+  if (genericTexts.has(normalizedText(card.text)) || emptyAdvice.has(normalizedText(card.text))) return false;
+  if (causalClaim.test(card.text) || !supportedConsultancyLanguage(card.text, atoms)) return false;
+  if (card.code !== "AVOID" && ownFactClaim.test(card.text)) return false;
+  if (card.code === "CONTENT_MIX") {
+    const currentSamples = new RegExp(`(?:当前(?:已)?分析的|当前样本(?:共|有)?|目前研究到的)[\\s\\S]{0,12}${sampleCount}\\s*条`, "u");
+    if (!currentSamples.test(card.text) || /%|百分之|账号.{0,8}占比/u.test(card.text)) return false;
+  }
+  if (card.code === "CONTENT_STYLE" && !contentStyleIsIntersection(card.text, atoms)) return false;
+  if (card.code === "RECURRING_VIEWPOINT" && card.text.split(/\r?\n/u).filter((line) => /^\s*[•·*-]\s*/u.test(line)).length > 3) return false;
+  return true;
+}
+
+function statusAtEvidenceCeiling(card: BenchmarkCreatorProfileCardCandidate, sourceCount: number) {
+  if (card.code === "PROFILE") return sourceCount >= 3 ? card.status : "OBSERVE" as const;
+  return sourceCount >= 3 ? card.status : "OBSERVE" as const;
+}
+
+export function normalizeBenchmarkCreatorProfileV2Result(input: BenchmarkCreatorProfileGenerationV2, atoms: CreatorProfileAtom[], manifest: BenchmarkCreatorProfileInputV2) {
+  const atomMap = new Map(atoms.map((atom) => [atom.ref, atom]));
+  const parsedCards: Array<{ card: BenchmarkCreatorProfileCardCandidate; atoms: CreatorProfileAtom[] }> = [];
+  const seenCodes = new Set<string>();
+  const validationIssues: Array<{ path: string; code: string; expected?: string; receivedType: string }> = [];
+  input.cards.forEach((candidate, index) => {
+    const parsed = benchmarkCreatorProfileCardCandidateSchema.safeParse(candidate);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        const detail = issue as unknown as { code: string; path: PropertyKey[]; expected?: unknown };
+        validationIssues.push({ path: ["cards", index, ...detail.path].join("."), code: detail.code, ...(typeof detail.expected === "string" ? { expected: detail.expected } : {}), receivedType: valueType(valueAtPath(candidate, detail.path)) });
+      }
+      return;
+    }
+    const card = parsed.data;
+    if (seenCodes.has(card.code)) return;
+    const cardAtoms = unique(card.evidenceRefs).flatMap((ref) => atomMap.get(ref) ?? []);
+    if (!cardAtoms.length || !v2LanguageGate(card, cardAtoms, manifest.distillations.length)) return;
+    seenCodes.add(card.code);
+    parsedCards.push({ card, atoms: cardAtoms });
+  });
+
+  const accepted = new Map<string, BenchmarkCreatorProfileOutputV2["cards"][number]>();
+  for (const { card, atoms: cardAtoms } of parsedCards.filter(({ card }) => !actionCardCodes.has(card.code))) {
+    const sourceCount = new Set(cardAtoms.map(({ sourceItemId }) => sourceItemId)).size;
+    const minimumSources = card.code === "PROFILE" ? 1 : 2;
+    if (sourceCount < minimumSources) continue;
+    accepted.set(card.code, { code: card.code, status: statusAtEvidenceCeiling(card, sourceCount), text: card.text, evidenceRefs: cardAtoms.map(({ ref }) => ref), evidence: evidenceFromAtoms(cardAtoms) });
+  }
+
+  const upstreamCards = [...accepted.values()];
+  const upstreamRefs = new Set(upstreamCards.flatMap(({ evidenceRefs }) => evidenceRefs));
+  for (const { card, atoms: cardAtoms } of parsedCards.filter(({ card }) => actionCardCodes.has(card.code))) {
+    const derivedAtoms = cardAtoms.filter(({ ref }) => upstreamRefs.has(ref));
+    if (new Set(derivedAtoms.map(({ sourceItemId }) => sourceItemId)).size < 2) continue;
+    const referencedUpstream = upstreamCards.filter(({ evidenceRefs }) => evidenceRefs.some((ref) => derivedAtoms.some((atom) => atom.ref === ref)));
+    if (!referencedUpstream.length) continue;
+    const status = card.status === "CLEAR" && referencedUpstream.some(({ status }) => status === "CLEAR") ? "CLEAR" : "OBSERVE";
+    accepted.set(card.code, { code: card.code, status, text: card.text, evidenceRefs: derivedAtoms.map(({ ref }) => ref), evidence: evidenceFromAtoms(derivedAtoms) });
+  }
+
+  const cards = profileCardOrder.flatMap((code) => accepted.get(code) ?? []);
+  if (input.cards.length > 0 && cards.length === 0) {
+    throw new LLMError("LLM_INVALID_RESPONSE", "AI 模型返回的账号画像候选全部不可用。", false, { rawCandidateCount: input.cards.length, validCandidateCount: 0, droppedCandidateCount: input.cards.length, validationIssues });
+  }
+  const output = benchmarkCreatorProfileOutputV2Schema.parse({
+    kind: "CREATOR_PROFILE",
+    schemaVersion: "benchmark-creator-profile-v2",
+    message: cards.length ? `已根据当前 ${manifest.distillations.length} 条代表内容形成 ${cards.length} 张账号画像卡。` : "当前研究内容还不足以判断。",
+    account: manifest.account,
+    inputs: manifest.distillations,
+    accountResearch: manifest.accountResearch,
+    priorProfileVersion: manifest.priorProfileVersion,
+    cards,
+  });
+  return { output, diagnostics: { rawCardCount: input.cards.length, validCardCount: cards.length, droppedCardCount: input.cards.length - cards.length } };
+}
+
+export function normalizeBenchmarkCreatorProfileV2Output(input: BenchmarkCreatorProfileGenerationV2, atoms: CreatorProfileAtom[], manifest: BenchmarkCreatorProfileInputV2): BenchmarkCreatorProfileOutputV2 {
+  return normalizeBenchmarkCreatorProfileV2Result(input, atoms, manifest).output;
+}
+
 function profileFailure(error: unknown) {
   if (error instanceof LLMError) return {
     code: error.code,
@@ -186,6 +303,9 @@ function profileFailure(error: unknown) {
     rawCandidateCount: error.details.rawCandidateCount,
     validCandidateCount: error.details.validCandidateCount,
     droppedCandidateCount: error.details.droppedCandidateCount,
+    rawCardCount: error.details.rawCandidateCount,
+    validCardCount: error.details.validCandidateCount,
+    droppedCardCount: error.details.droppedCandidateCount,
   };
   return { code: "BENCHMARK_CREATOR_PROFILE_FAILED", message: "这次账号画像没有完成，请重试。", retryable: false };
 }
@@ -200,10 +320,12 @@ export async function processBenchmarkCreatorProfileJob(job: Job<BenchmarkStudyP
   });
   if (!record || record.benchmarkAccount.workspaceId !== record.workspaceId) throw new UnrecoverableError("Benchmark creator profile scope mismatch");
   if (record.status === "COMPLETED") return { status: "already-completed" as const, studyId: record.id };
-  const manifest = benchmarkCreatorProfileInputSchema.safeParse(record.output);
-  if (!manifest.success) throw new UnrecoverableError("Benchmark creator profile input is missing");
-  const distillations = await db.materialDistillation.findMany({ where: { workspaceId: record.workspaceId, id: { in: manifest.data.distillations.map(({ materialDistillationId }) => materialDistillationId) }, status: "COMPLETED" } });
-  const rows = manifest.data.distillations.flatMap((locked) => {
+  const manifestV2 = benchmarkCreatorProfileInputV2Schema.safeParse(record.output);
+  const manifestV1 = benchmarkCreatorProfileInputSchema.safeParse(record.output);
+  if (!manifestV2.success && !manifestV1.success) throw new UnrecoverableError("Benchmark creator profile input is missing");
+  const manifest: BenchmarkCreatorProfileInput | BenchmarkCreatorProfileInputV2 = manifestV2.success ? manifestV2.data : manifestV1.success ? manifestV1.data : (() => { throw new UnrecoverableError("Benchmark creator profile input is missing"); })();
+  const distillations = await db.materialDistillation.findMany({ where: { workspaceId: record.workspaceId, id: { in: manifest.distillations.map(({ materialDistillationId }) => materialDistillationId) }, status: "COMPLETED" } });
+  const rows = manifest.distillations.flatMap((locked) => {
     const distillation = distillations.find((item) => item.id === locked.materialDistillationId && item.sourceItemId === locked.sourceItemId && item.version === locked.materialDistillationVersion);
     const sample = record.samples.find((item) => item.id === locked.sampleId && item.sourceItemId === locked.sourceItemId);
     const output = distillation ? materialDistillationGenerationSchema.safeParse(distillation.output) : null;
@@ -212,21 +334,23 @@ export async function processBenchmarkCreatorProfileJob(job: Job<BenchmarkStudyP
       ? [{ ...locked, title: sample.sourceItem.title || "未命名内容", output: output.data, sourceIndex: buildTranscriptSourceIndex({ id: transcript.id, updatedAt: transcript.updatedAt, fullText: transcript.fullText, segments: transcript.segments }) }]
       : [];
   });
-  if (rows.length !== manifest.data.distillations.length) throw new UnrecoverableError("Locked M7 evidence is unavailable");
+  if (rows.length !== manifest.distillations.length) throw new UnrecoverableError("Locked M7 evidence is unavailable");
   const atoms = buildCreatorProfileAtoms(rows);
   if (!atoms.length) throw new UnrecoverableError("Creator profile evidence atoms are unavailable");
-  const accountResearch = manifest.data.accountResearch ? await db.benchmarkStudy.findFirst({ where: { id: manifest.data.accountResearch.studyId, workspaceId: record.workspaceId, benchmarkAccountId: record.benchmarkAccountId, version: manifest.data.accountResearch.version, status: "COMPLETED" }, select: { output: true } }) : null;
+  const accountResearch = manifest.accountResearch ? await db.benchmarkStudy.findFirst({ where: { id: manifest.accountResearch.studyId, workspaceId: record.workspaceId, benchmarkAccountId: record.benchmarkAccountId, version: manifest.accountResearch.version, status: "COMPLETED" }, select: { output: true } }) : null;
   const parsedResearch = accountResearch ? benchmarkAnalysisOutputSchema.safeParse(accountResearch.output) : null;
   const context = {
     action: "GENERATE_BENCHMARK_CREATOR_PROFILE",
-    account: manifest.data.account,
+    account: manifest.account,
     videos: rows.map((row) => ({ sampleId: row.sampleId, title: row.title, materialDistillation: { id: row.materialDistillationId, version: row.materialDistillationVersion, items: atoms.filter(({ sampleId }) => sampleId === row.sampleId).map(({ ref, itemKind, itemKey, title, text, type, quality, sourceRefs, evidence }) => ({ ref, itemKind, itemKey, title, text, sourceRefs, evidence, ...(type ? { type } : {}), ...(quality ? { quality } : {}) })) } })),
     accountResearch: parsedResearch?.success ? parsedResearch.data : null,
+    priorProfile: manifestV2.success ? manifestV2.data.priorProfile : null,
     cautions: [benchmarkCreatorProfileSystemBoundary, "M7 items are candidate observations. Account-level sections still require independent cross-video support."],
   };
-  const prompt = `Action: GENERATE_BENCHMARK_CREATOR_PROFILE\nContext:\n${JSON.stringify(context, null, 2)}\n${benchmarkCreatorProfileOutputInstruction}`;
+  const prompt = `Action: GENERATE_BENCHMARK_CREATOR_PROFILE\nContext:\n${JSON.stringify(context, null, 2)}\n${manifestV2.success ? benchmarkCreatorProfileOutputV2Instruction : benchmarkCreatorProfileOutputInstruction}`;
   const contextTruncated = JSON.stringify(context).length > 200_000;
-  const summary = { benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: rows.length, materialDistillationIds: rows.map(({ materialDistillationId }) => materialDistillationId), accountResearchStudyId: manifest.data.accountResearch?.studyId ?? null, schemaVersion: "benchmark-creator-profile-v1" };
+  const schemaVersion = manifestV2.success ? "benchmark-creator-profile-v2" : "benchmark-creator-profile-v1";
+  const summary = { benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: rows.length, materialDistillationIds: rows.map(({ materialDistillationId }) => materialDistillationId), accountResearchStudyId: manifest.accountResearch?.studyId ?? null, priorProfileVersion: manifestV2.success ? manifestV2.data.priorProfileVersion : null, schemaVersion };
   let runId: string | undefined;
   let runProvider: string | undefined;
   let requestedModel: string | undefined;
@@ -238,29 +362,34 @@ export async function processBenchmarkCreatorProfileJob(job: Job<BenchmarkStudyP
     runMode = runtime.mode ?? "REAL";
     const runtimeAudit = { provider: runtime.providerName, requestedModel, providerMode: runMode };
     const run = await db.$transaction(async (tx) => {
-      const created = await tx.aIRun.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, action: "ANALYZE_BENCHMARK", provider: runtime.providerName, model: runtime.model, promptVersion: 1, status: "RUNNING", inputSummary: json(summary), metadata: json({ benchmarkAction: "GENERATE_CREATOR_PROFILE", benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: rows.length, schemaVersion: "benchmark-creator-profile-v1", structuredOutput: "JSON_OBJECT", ...runtimeAudit }), contextTruncated } });
+      const created = await tx.aIRun.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, action: "ANALYZE_BENCHMARK", provider: runtime.providerName, model: runtime.model, promptVersion: 2, status: "RUNNING", inputSummary: json(summary), metadata: json({ benchmarkAction: "GENERATE_CREATOR_PROFILE", benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: rows.length, schemaVersion, structuredOutput: "JSON_OBJECT", ...runtimeAudit }), contextTruncated } });
       await tx.benchmarkStudy.update({ where: { id: record.id }, data: { aiRunId: created.id, errorCode: null, errorMessage: null } });
       await tx.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, action: "benchmark_creator_profile.started", resourceType: "benchmark_study", resourceId: record.id, metadata: json({ aiRunId: created.id, sampleCount: rows.length }) } });
       return created;
     });
     runId = run.id;
-    const result = await runtime.provider.generateStructured({ systemPrompt: `${benchmarkCreatorProfileSystemBoundary}\n\n${generationQualityContract}`, prompt, maxCompletionTokens: 3_500, structuredOutput: { strategy: "JSON_OBJECT" } }, benchmarkCreatorProfileGenerationSchema);
-    const normalized = normalizeBenchmarkCreatorProfileResult(result.data.value, atoms, manifest.data);
+    const request = { systemPrompt: `${benchmarkCreatorProfileSystemBoundary}\n\n${generationQualityContract}`, prompt, maxCompletionTokens: 3_500, structuredOutput: { strategy: "JSON_OBJECT" as const } };
+    const result = manifestV2.success
+      ? await runtime.provider.generateStructured(request, benchmarkCreatorProfileGenerationV2Schema)
+      : await runtime.provider.generateStructured(request, benchmarkCreatorProfileGenerationSchema);
+    const normalized = manifestV2.success
+      ? normalizeBenchmarkCreatorProfileV2Result(result.data.value as BenchmarkCreatorProfileGenerationV2, atoms, manifestV2.data)
+      : normalizeBenchmarkCreatorProfileResult(result.data.value as BenchmarkCreatorProfileGeneration, atoms, manifest as BenchmarkCreatorProfileInput);
     const output = normalized.output;
     const candidateDiagnostics = normalized.diagnostics;
     const latencyMs = Date.now() - startedAt.getTime();
     await db.$transaction([
-      db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(output), metadata: json({ benchmarkAction: "GENERATE_CREATOR_PROFILE", benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: rows.length, schemaVersion: "benchmark-creator-profile-v1", structuredOutput: "JSON_OBJECT", ...candidateDiagnostics, ...runtimeAudit, actualModel: result.data.model, finishReason: result.data.finishReason ?? null }), providerRequestId: result.data.providerRequestId, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, finishedAt: new Date() } }),
+      db.aIRun.update({ where: { id: run.id }, data: { status: "SUCCEEDED", outputJson: json(output), metadata: json({ benchmarkAction: "GENERATE_CREATOR_PROFILE", benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: rows.length, schemaVersion, structuredOutput: "JSON_OBJECT", ...candidateDiagnostics, ...runtimeAudit, actualModel: result.data.model, finishReason: result.data.finishReason ?? null }), providerRequestId: result.data.providerRequestId, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, finishedAt: new Date() } }),
       db.benchmarkStudy.update({ where: { id: record.id }, data: { status: "COMPLETED", output: json(output), errorCode: null, errorMessage: null } }),
-      db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, provider: runtime.providerName, operation: "GENERATE_BENCHMARK_CREATOR_PROFILE", requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, metadata: json({ airRunId: run.id, benchmarkStudyId: record.id, sampleCount: rows.length, promptVersion: 1, latencyMs, ...candidateDiagnostics, ...runtimeAudit, actualModel: result.data.model, finishReason: result.data.finishReason ?? null }) } }),
-      db.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, action: "benchmark_creator_profile.succeeded", resourceType: "benchmark_study", resourceId: record.id, metadata: json({ sampleCount: rows.length, sectionCount: output.sections.length, ...candidateDiagnostics }) } }),
+      db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, provider: runtime.providerName, operation: "GENERATE_BENCHMARK_CREATOR_PROFILE", requestId: run.id, providerRequestId: result.data.providerRequestId, success: true, units: 1, cost: null, inputTokens: result.data.usage?.inputTokens, outputTokens: result.data.usage?.outputTokens, metadata: json({ airRunId: run.id, benchmarkStudyId: record.id, sampleCount: rows.length, promptVersion: 2, latencyMs, ...candidateDiagnostics, ...runtimeAudit, actualModel: result.data.model, finishReason: result.data.finishReason ?? null }) } }),
+      db.auditLog.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, action: "benchmark_creator_profile.succeeded", resourceType: "benchmark_study", resourceId: record.id, metadata: json({ sampleCount: rows.length, cardCount: "cards" in output ? output.cards.length : output.sections.length, ...candidateDiagnostics }) } }),
     ]);
     return { status: "ok" as const, studyId: record.id, sampleCount: rows.length };
   } catch (error) {
     const failed = profileFailure(error);
-    const diagnostics = { structuredOutput: "JSON_OBJECT", requestedModel: requestedModel ?? null, actualModel: failed.actualModel ?? null, finishReason: failed.finishReason ?? null, validationIssues: failed.validationIssues ?? [], returnedRootKeys: failed.returnedRootKeys ?? [], returnedFirstLevelObjectKeys: failed.returnedFirstLevelObjectKeys ?? {}, rawCandidateCount: failed.rawCandidateCount ?? null, validCandidateCount: failed.validCandidateCount ?? null, droppedCandidateCount: failed.droppedCandidateCount ?? null };
+    const diagnostics = { structuredOutput: "JSON_OBJECT", requestedModel: requestedModel ?? null, actualModel: failed.actualModel ?? null, finishReason: failed.finishReason ?? null, validationIssues: failed.validationIssues ?? [], returnedRootKeys: failed.returnedRootKeys ?? [], returnedFirstLevelObjectKeys: failed.returnedFirstLevelObjectKeys ?? {}, rawCandidateCount: failed.rawCandidateCount ?? null, validCandidateCount: failed.validCandidateCount ?? null, droppedCandidateCount: failed.droppedCandidateCount ?? null, rawCardCount: failed.rawCardCount ?? null, validCardCount: failed.validCardCount ?? null, droppedCardCount: failed.droppedCardCount ?? null };
     if (runId) {
-      await db.aIRun.update({ where: { id: runId }, data: { status: "FAILED", errorCode: failed.code, errorMessage: "账号画像未完成。", providerRequestId: failed.providerRequestId, metadata: json({ benchmarkAction: "GENERATE_CREATOR_PROFILE", benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: rows.length, schemaVersion: "benchmark-creator-profile-v1", provider: runProvider ?? "LLM", providerMode: runMode ?? "REAL", ...diagnostics }), finishedAt: new Date() } }).catch(() => undefined);
+      await db.aIRun.update({ where: { id: runId }, data: { status: "FAILED", errorCode: failed.code, errorMessage: "账号画像未完成。", providerRequestId: failed.providerRequestId, metadata: json({ benchmarkAction: "GENERATE_CREATOR_PROFILE", benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: rows.length, schemaVersion, provider: runProvider ?? "LLM", providerMode: runMode ?? "REAL", ...diagnostics }), finishedAt: new Date() } }).catch(() => undefined);
       await db.apiUsage.create({ data: { workspaceId: record.workspaceId, userId: record.createdById, provider: runProvider ?? "LLM", operation: "GENERATE_BENCHMARK_CREATOR_PROFILE", requestId: runId, providerRequestId: failed.providerRequestId, success: false, units: 1, cost: null, metadata: json({ airRunId: runId, benchmarkStudyId: record.id, errorCode: failed.code, ...diagnostics }) } }).catch(() => undefined);
     }
     const attempt = job.attemptsMade + 1;
