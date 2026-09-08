@@ -38,6 +38,18 @@ function unique(items: string[]) {
   return items.filter((item, index) => items.indexOf(item) === index);
 }
 
+const universalPlaybookTexts = new Set([
+  "吸引注意提供价值引导行动", "吸引注意提供价值行动号召", "吸引注意提供价值cta",
+  "痛点解决方案引导行动", "痛点解决方案行动号召", "痛点解决方案cta",
+  "提出问题分析问题解决问题", "建立信任提高转化",
+  "attractattentionprovidevaluecalltoaction", "attractattentionprovidevaluecta",
+  "painpointsolutioncalltoaction", "painpointsolutioncta", "buildtrustimproveconversion",
+]);
+
+function isUniversalPlaybookText(text: string) {
+  return universalPlaybookTexts.has(text.toLowerCase().replace(/[\s，。；、,:：\-_=→>]+/gu, ""));
+}
+
 function sourceRefs(output: MaterialDistillationOutput) {
   const evidence = output.copywriting?.evidence ?? output.highlights.flatMap((highlight) => highlight.evidence);
   return unique(evidence.flatMap(({ sourceRef }) => sourceRef ? [sourceRef] : []));
@@ -75,6 +87,7 @@ export function normalizeBenchmarkPlaybookOutput(input: BenchmarkPlaybookGenerat
   const atomMap = new Map(atoms.map((atom) => [atom.ref, atom]));
   const validSamples = new Set(selectedSampleIds);
   const playbooks = input.playbooks.flatMap((candidate) => {
+    if (candidate.sections.some(({ code, text }) => (code === "ELEMENT" || code === "FLOW") && isUniversalPlaybookText(text))) return [];
     const declaredSupport = unique(candidate.supportSampleIds).filter((id) => validSamples.has(id));
     const declaredExceptions = unique(candidate.exceptionSampleIds).filter((id) => validSamples.has(id) && !declaredSupport.includes(id));
     const allowed = new Set([...declaredSupport, ...declaredExceptions]);
