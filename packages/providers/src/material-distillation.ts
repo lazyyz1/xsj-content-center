@@ -42,7 +42,7 @@ export const materialDistillationDiscoveryHighlightSchema = z.object({
 }).strict();
 
 export const materialDistillationDiscoveryGenerationSchema = z.object({
-  highlights: z.array(materialDistillationDiscoveryHighlightSchema).max(5),
+  highlights: z.array(z.unknown()).max(20),
 }).strict();
 
 export const materialDistillationCopywritingSectionCodeSchema = z.enum([
@@ -83,6 +83,7 @@ export const materialDistillationCopywritingGenerationSchema = z.object({
 });
 
 export type MaterialDistillationDiscoveryGeneration = z.infer<typeof materialDistillationDiscoveryGenerationSchema>;
+export type MaterialDistillationDiscoveryHighlight = z.infer<typeof materialDistillationDiscoveryHighlightSchema>;
 export type MaterialDistillationCopywritingGeneration = z.infer<typeof materialDistillationCopywritingGenerationSchema>;
 export type MaterialDistillationGeneration = MaterialDistillationDiscoveryGeneration | MaterialDistillationCopywritingGeneration;
 
@@ -161,7 +162,7 @@ Analyze how the text communicates, not the methods taught by its content. Call o
   }
   return `${sourceRefOutputRules}
 ${discoveryJudgmentRules}
-Answer only what this content teaches. For each candidate return title, shortExplanation, type, quality, and sourceRefs.
+Answer only what this content teaches. Return at most 5 candidates, with the most useful first. For each candidate return title, shortExplanation, type, quality, and sourceRefs.
 The root object contains only highlights. Example: {"highlights":[{"title":"简短名称","shortExplanation":"为什么值得注意","type":"method","quality":"OBSERVE","sourceRefs":["T001"]}]}. If none qualify, return {"highlights":[]}.
 Do not return execution steps, scenarios, boundaries, quotations, or a full copywriting analysis. A mature method is deepened by the employee before it is saved.`;
 }

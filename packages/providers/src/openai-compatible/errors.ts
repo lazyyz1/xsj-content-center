@@ -25,6 +25,10 @@ export class LLMError extends Error {
       validationIssues?: Array<{ path: string; code: string; expected?: string; receivedType: string }>;
       returnedRootKeys?: string[];
       returnedFirstLevelObjectKeys?: Record<string, string[]>;
+      rawCandidateCount?: number;
+      validCandidateCount?: number;
+      droppedCandidateCount?: number;
+      truncatedToFive?: boolean;
     } = {},
   ) {
     super(message);
