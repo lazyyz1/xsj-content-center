@@ -1,0 +1,117 @@
+import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+
+import { db } from "@content-center/db";
+import { benchmarkAnalysisOutputSchema, benchmarkPlaybookInputSchema, benchmarkPlaybookOutputSchema, materialDistillationGenerationSchema } from "@content-center/providers";
+import { getBenchmarkCreatorDetail } from "../server/discovery/benchmark-creator-read-model";
+
+const suffix = randomUUID();
+const ownerId = `creator-profile-${suffix}`;
+const otherOwnerId = `creator-profile-other-${suffix}`;
+let workspaceId = "";
+let otherWorkspaceId = "";
+let benchmarkId = "";
+let emptyBenchmarkId = "";
+
+function evidence(quote: string) {
+  return [{ quote, sourceRef: "T001", kind: "TEXT_BLOCK" as const, index: 0 }];
+}
+
+function discoveryOutput(quote: string, title: string) {
+  return materialDistillationGenerationSchema.parse({ mode: "COMPREHENSIVE", hasLongTermValue: true, message: "已整理。", highlights: [{ type: "method", quality: "WORTH_KEEPING", title, essence: "先用真实内容说明判断，再进入具体做法。", whyWorthAttention: "", howTo: [], applicable: [], boundaries: [], evidence: evidence(quote) }], copywriting: null });
+}
+
+function copywritingOutput(quote: string) {
+  return materialDistillationGenerationSchema.parse({
+    mode: "COPYWRITING", hasLongTermValue: true, message: "已整理文案。", highlights: [],
+    copywriting: { coreProposition: "把判断说清楚", angle: "从员工熟悉的问题切入", openingLogic: "开头直接提出判断", progression: ["提出判断", "解释原因", "给出行动"], skeleton: [], evidenceFunction: "使用一个真实例子说明", reusableStrategies: ["先判断再解释"], doNotCopy: ["不要照搬来源经历"], secondEditDirections: ["换成自己的事实"], rewriteSkeleton: [], evidence: evidence(quote) },
+  });
+}
+
+describe("benchmark creator profile read model", () => {
+  beforeAll(async () => {
+    await db.user.createMany({ data: [{ id: ownerId, name: "Profile Owner", email: `${ownerId}@example.test` }, { id: otherOwnerId, name: "Other Owner", email: `${otherOwnerId}@example.test` }] });
+    const [workspace, otherWorkspace] = await Promise.all([
+      db.workspace.create({ data: { name: "Creator Profile", slug: `creator-profile-${suffix}`, members: { create: { userId: ownerId, role: "OWNER" } } } }),
+      db.workspace.create({ data: { name: "Other Profile", slug: `creator-profile-other-${suffix}`, members: { create: { userId: otherOwnerId, role: "OWNER" } } } }),
+    ]);
+    workspaceId = workspace.id; otherWorkspaceId = otherWorkspace.id;
+    const [benchmark, emptyBenchmark] = await Promise.all([
+      db.benchmarkAccount.create({ data: { workspaceId, platform: "DOUYIN", externalAccountId: `creator-${suffix}`, name: "真实研究博主", bio: "分享可以核对的内容经验", avatarUrl: "https://example.test/avatar.jpg", createdById: ownerId } }),
+      db.benchmarkAccount.create({ data: { workspaceId, platform: "DOUYIN", externalAccountId: `empty-${suffix}`, name: "还没有资料的博主", createdById: ownerId } }),
+    ]);
+    benchmarkId = benchmark.id; emptyBenchmarkId = emptyBenchmark.id;
+
+    const snapshots: Array<{ id: string; externalId: string }> = [];
+    for (let index = 0; index < 20; index += 1) snapshots.push(await db.benchmarkContentSnapshot.create({ data: { workspaceId, benchmarkAccountId: benchmarkId, platform: "DOUYIN", externalId: `profile-work-${suffix}-${index}`, title: `账号内容 ${index + 1}`, url: `https://example.test/work-${index}`, coverUrl: index < 4 ? `https://example.test/cover-${index}.jpg` : null, metadata: {} } }));
+
+    const sources = [];
+    const distillations: Array<{ id: string }> = [];
+    for (let index = 0; index < 4; index += 1) {
+      const quote = `可核对来源 ${index + 1}`;
+      const source = await db.sourceItem.create({ data: { workspaceId, createdById: ownerId, sourceType: "VIDEO", sourcePlatform: "DOUYIN", externalId: snapshots[index]!.externalId, title: `代表视频 ${index + 1}`, status: "READY", ...(index < 3 ? { transcript: { create: { workspaceId, provider: "FIXTURE", providerMode: "REAL", fullText: quote, segments: [] } } } : {}) } });
+      sources.push(source);
+      if (index < 3) {
+        const transcript = await db.transcript.findUniqueOrThrow({ where: { sourceItemId: source.id } });
+        distillations.push(await db.materialDistillation.create({ data: { workspaceId, sourceItemId: source.id, createdById: ownerId, version: 1, mode: index === 1 ? "COPYWRITING" : "COMPREHENSIVE", status: "COMPLETED", schemaVersion: "material-distillation-v2", output: index === 1 ? copywritingOutput(quote) : discoveryOutput(quote, `精华 ${index + 1}`), transcriptUpdatedAtAtDistillation: transcript.updatedAt } }));
+      }
+    }
+
+    const research = await db.benchmarkStudy.create({ data: { workspaceId, benchmarkAccountId: benchmarkId, createdById: ownerId, version: 1, status: "COMPLETED", sampleCount: 2, insufficientSamples: true, samples: { create: [{ sourceItemId: sources[0]!.id, snapshotId: snapshots[0]!.id }, { sourceItemId: sources[1]!.id, snapshotId: snapshots[1]!.id }] } }, include: { samples: true } });
+    const researchEvidence = research.samples.map((sample, index) => ({ sampleId: sample.id, quote: `可核对来源 ${index + 1}` }));
+    const finding = { name: "先给判断", summary: "两条内容都先说明判断，再解释原因。", occurrenceSampleIds: research.samples.map(({ id }) => id), exceptionSampleIds: [], evidence: researchEvidence };
+    await db.benchmarkStudy.update({ where: { id: research.id }, data: { output: benchmarkAnalysisOutputSchema.parse({ topicDirections: [finding], openingPatterns: [finding], structures: [], persuasionMethods: [], expressionHabits: [], endings: [], commonMethods: [], exceptions: [], repeatedCaseNotes: [], stableMethodsFound: false, message: "只描述所选内容。" }) } });
+
+    const playbook = await db.benchmarkStudy.create({ data: { workspaceId, benchmarkAccountId: benchmarkId, createdById: ownerId, version: 2, status: "COMPLETED", sampleCount: 3, insufficientSamples: false, samples: { create: sources.slice(0, 3).map((source, index) => ({ sourceItemId: source.id, snapshotId: snapshots[index]!.id })) } }, include: { samples: true } });
+    const locks = playbook.samples.map((sample, index) => ({ sampleId: sample.id, sourceItemId: sample.sourceItemId, materialDistillationId: distillations[index]!.id, materialDistillationVersion: 1 }));
+    await db.benchmarkStudy.update({ where: { id: playbook.id }, data: { output: benchmarkPlaybookOutputSchema.parse({ kind: "PLAYBOOKS", schemaVersion: "benchmark-playbook-v1", message: "找到一套常见搭配。", inputs: locks, playbooks: [{ name: "判断后进入行动", maturity: "OBSERVE", elements: ["明确判断", "具体行动"], flow: "先说明判断，再解释并给行动。", useCase: "需要把观点说清楚时。", exceptions: "不是每条内容都这样组织。", doNotCopy: "不要照搬来源事实。", supportSampleIds: playbook.samples.slice(0, 2).map(({ id }) => id), exceptionSampleIds: [playbook.samples[2]!.id], evidence: locks.slice(0, 2).map((lock, index) => ({ evidenceRef: `V00${index + 1}-H01`, ...lock, itemKind: "HIGHLIGHT", itemKey: "0", sourceRefs: ["T001"] })) }] }) } });
+    const failed = await db.benchmarkStudy.create({ data: { workspaceId, benchmarkAccountId: benchmarkId, createdById: ownerId, version: 3, status: "FAILED", sampleCount: 3, insufficientSamples: false, errorCode: "LLM_INVALID_RESPONSE", samples: { create: sources.slice(0, 3).map((source, index) => ({ sourceItemId: source.id, snapshotId: snapshots[index]!.id })) } }, include: { samples: true } });
+    await db.benchmarkStudy.update({ where: { id: failed.id }, data: { output: benchmarkPlaybookInputSchema.parse({ kind: "PLAYBOOK_INPUT", schemaVersion: "benchmark-playbook-v1", distillations: failed.samples.map((sample, index) => ({ sampleId: sample.id, sourceItemId: sample.sourceItemId, materialDistillationId: distillations[index]!.id, materialDistillationVersion: 1 })) }) } });
+
+    await db.methodAsset.create({ data: { workspaceId, ownerUserId: ownerId, status: "SAVED", versions: { create: { version: 1, title: "已经留下的方法", steps: ["先判断"], applicableScenarios: ["解释问题"], boundaries: ["不照搬事实"], sourceMaterialDistillationId: distillations[0]!.id, evidence: evidence("可核对来源 1"), editedById: ownerId } } } });
+
+    const otherAccount = await db.benchmarkAccount.create({ data: { workspaceId: otherWorkspaceId, platform: "DOUYIN", externalAccountId: `other-${suffix}`, name: "其他空间博主", createdById: otherOwnerId } });
+    await db.benchmarkContentSnapshot.create({ data: { workspaceId: otherWorkspaceId, benchmarkAccountId: otherAccount.id, platform: "DOUYIN", externalId: `other-work-${suffix}`, title: "不应泄漏的内容", url: "https://example.test/other", metadata: {} } });
+  });
+
+  afterAll(async () => {
+    await db.methodAsset.deleteMany({ where: { workspaceId } });
+    await db.benchmarkStudy.deleteMany({ where: { workspaceId } });
+    await db.workspace.deleteMany({ where: { id: { in: [workspaceId, otherWorkspaceId] } } });
+    await db.user.deleteMany({ where: { id: { in: [ownerId, otherOwnerId] } } });
+    await db.$disconnect();
+  });
+
+  it("summarizes real existing sources, research, optional patterns, and saved methods", async () => {
+    const profile = await getBenchmarkCreatorDetail({ workspaceId, benchmarkAccountId: benchmarkId, ownerUserId: ownerId });
+    expect(profile).toMatchObject({ account: { name: "真实研究博主" }, stats: { discovered: 20, collected: 4, studied: 3, distilled: 3, copywriting: 1 } });
+    expect(profile?.representativeSources).toHaveLength(4);
+    expect(profile?.representativeSources.find(({ title }) => title === "代表视频 4")).toMatchObject({ hasTranscript: false, hasDistillation: false });
+    expect(profile?.highlights.map(({ title }) => title).sort()).toEqual(["精华 1", "精华 3"]);
+    expect(profile?.highlights.every(({ sourceItemId }) => Boolean(sourceItemId))).toBe(true);
+    expect(profile?.copywriting).toEqual([expect.objectContaining({ sourceTitle: "代表视频 2", core: "把判断说清楚" })]);
+    expect(profile?.accountResearch).toMatchObject({ sampleCount: 2, groups: [expect.objectContaining({ title: "常见主题" }), expect.objectContaining({ title: "常用开头" })] });
+    expect(profile?.playbooks).toEqual([expect.objectContaining({ name: "判断后进入行动", maturity: "OBSERVE", sources: expect.arrayContaining([expect.objectContaining({ title: "代表视频 1" })]) })]);
+    expect(profile?.savedMethods).toEqual([expect.objectContaining({ title: "已经留下的方法", status: "SAVED" })]);
+    expect(JSON.stringify(profile)).not.toContain("不应泄漏的内容");
+    await expect(getBenchmarkCreatorDetail({ workspaceId: otherWorkspaceId, benchmarkAccountId: benchmarkId, ownerUserId: otherOwnerId })).resolves.toBeNull();
+  });
+
+  it("uses employee language and links sources back to the existing material detail", async () => {
+    const source = await readFile(new URL("../components/discovery/benchmark-creator-profile.tsx", import.meta.url), "utf8");
+    for (const text of ["代表内容", "观点与精华", "视频怎么写", "账号研究", "常见内容模式", "我们已经留下了什么", "查看素材", "查看依据"]) expect(source).toContain(text);
+    expect(source).toContain("href={`/library/${source.id}`}");
+    for (const term of [">M1<", ">M4<", ">M7<", ">M8<", "BenchmarkStudy", "MaterialDistillation", "SourceRef", ">Schema<", ">Provider<", ">Worker<", ">AIRun<", ">JSON<", "Version Lock"]) expect(source).not.toContain(term);
+  });
+
+  it("keeps the creator page usable when every optional research area is empty", async () => {
+    const profile = await getBenchmarkCreatorDetail({ workspaceId, benchmarkAccountId: emptyBenchmarkId, ownerUserId: ownerId });
+    if (!profile) throw new Error("empty profile missing");
+    expect(profile).toMatchObject({ stats: { discovered: 0, collected: 0, studied: 0, distilled: 0, copywriting: 0 }, representativeSources: [], highlights: [], copywriting: [], accountResearch: null, playbooks: [], savedMethods: [] });
+    const source = await readFile(new URL("../components/discovery/benchmark-creator-profile.tsx", import.meta.url), "utf8");
+    for (const text of ["还没有收录这个博主的代表内容。", "这些内容还没有完成精华提炼。", "这些代表内容还没有文案深挖结果。", "还没有完成账号层研究。", "暂时还没有形成可靠的内容模式判断。", "还没有从这个博主的内容中保存方法。"]) expect(source).toContain(text);
+  });
+});
