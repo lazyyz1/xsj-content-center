@@ -1,4 +1,4 @@
-/* finesse · register=product · shell=glass-tabs+detail-drawer · palette=cool-blue-grey · density=6 */
+/* finesse · register=product · shell=floating-research-canvas · palette=cool-slate-cobalt · density=7 */
 import { notFound } from "next/navigation";
 import { BenchmarkWorkspace } from "@/components/discovery/benchmark-workspace";
 import { requireWorkspace } from "@/server/access";

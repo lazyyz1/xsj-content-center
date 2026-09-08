@@ -107,7 +107,8 @@ describe("benchmark creator profile read model", () => {
     expect(source).toContain('role="dialog"');
     expect(source).toContain('role="tablist"');
     expect(source).toContain("profile.representativeSources.slice(0, 4)");
-    expect(source).toContain("profile.highlights.slice(0, 4)");
+    expect(source).toContain("profile.highlights.slice(0, 3)");
+    expect(source).toContain('data-selected={selected === highlight ? "true" : "false"}');
     for (const term of [">M1<", ">M4<", ">M7<", ">M8<", "BenchmarkStudy", "MaterialDistillation", "SourceRef", ">Schema<", ">Provider<", ">Worker<", ">AIRun<", ">JSON<", "Version Lock"]) expect(source).not.toContain(term);
   });
 
@@ -126,6 +127,6 @@ describe("benchmark creator profile read model", () => {
     if (!profile) throw new Error("empty profile missing");
     expect(profile).toMatchObject({ stats: { discovered: 0, collected: 0, studied: 0, distilled: 0, copywriting: 0 }, representativeSources: [], highlights: [], copywriting: [], accountResearch: null, playbooks: [], savedMethods: [] });
     const source = await readFile(new URL("../components/discovery/benchmark-creator-profile.tsx", import.meta.url), "utf8");
-    for (const text of ["还没有收录这个博主的代表内容。", "这些内容还没有完成精华提炼。", "这些代表内容还没有文案深挖结果。", "还没有完成账号层研究。", "暂时还没有形成可靠的内容模式判断", "还没有从这个博主的内容中保存方法。"]) expect(source).toContain(text);
+    for (const text of ["还没有收录这个博主的代表内容。", "这些内容还没有完成精华提炼。", "还没有完成账号层研究。", "暂时还没有形成可靠的内容模式判断", "还没有从这个博主的内容中保存方法。"]) expect(source).toContain(text);
   });
 });
