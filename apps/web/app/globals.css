@@ -78,3 +78,232 @@ select,
 textarea {
   font: inherit;
 }
+
+.benchmark-page {
+  --benchmark-accent-soft: rgb(36 107 253 / 0.1);
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  padding: 0.35rem;
+  border-radius: 1.75rem;
+  background:
+    radial-gradient(circle at 8% 4%, rgb(154 196 255 / 0.22), transparent 28rem),
+    radial-gradient(circle at 92% 10%, rgb(213 230 255 / 0.35), transparent 24rem),
+    rgb(239 244 252 / 0.82);
+}
+
+.benchmark-glass {
+  border: 1px solid rgb(255 255 255 / 0.68);
+  background: rgb(250 252 255 / 0.76);
+  box-shadow: 0 18px 45px -32px rgb(36 71 128 / 0.45), 0 1px 3px rgb(36 71 128 / 0.07);
+  -webkit-backdrop-filter: blur(18px) saturate(1.08);
+  backdrop-filter: blur(18px) saturate(1.08);
+}
+
+.benchmark-tag,
+.benchmark-quality {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  border: 1px solid rgb(36 107 253 / 0.12);
+  border-radius: 999px;
+  padding: 0 0.65rem;
+  background: rgb(241 246 255 / 0.82);
+  color: #45617f;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.benchmark-tabs {
+  display: flex;
+  gap: 1.8rem;
+  min-height: 3.5rem;
+  margin: 0.65rem 0 0.9rem;
+  padding: 0 1rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.benchmark-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.benchmark-tab {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 3rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.benchmark-tab[aria-selected="true"] {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.benchmark-tab[aria-selected="true"]::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  content: "";
+}
+
+.benchmark-tab:focus-visible,
+.benchmark-text-action:focus-visible,
+.benchmark-highlight-card:focus-visible,
+.benchmark-content-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.benchmark-text-action {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.benchmark-content-card {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgb(50 75 110 / 0.09);
+  border-radius: 1rem;
+  background: rgb(255 255 255 / 0.58);
+  box-shadow: 0 10px 28px -25px rgb(30 61 108 / 0.55);
+  transition: transform 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.benchmark-content-card:hover {
+  transform: translateY(-2px);
+  background: rgb(255 255 255 / 0.82);
+  box-shadow: 0 18px 35px -28px rgb(30 61 108 / 0.65);
+}
+
+.benchmark-media-fallback {
+  display: grid;
+  place-items: center;
+  min-height: 4.5rem;
+  background: linear-gradient(145deg, rgb(230 239 252 / 0.9), rgb(245 248 253 / 0.92));
+  color: #7890ad;
+}
+
+.benchmark-highlight-card {
+  min-height: 10rem;
+  min-width: 0;
+  border: 1px solid rgb(50 75 110 / 0.09);
+  border-radius: 1rem;
+  padding: 0.9rem;
+  background: rgb(255 255 255 / 0.5);
+  color: inherit;
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, background-color 160ms ease;
+}
+
+.benchmark-highlight-card:hover {
+  transform: translateY(-2px);
+  border-color: rgb(36 107 253 / 0.35);
+  background: rgb(255 255 255 / 0.78);
+}
+
+.benchmark-empty {
+  border: 1px dashed rgb(50 75 110 / 0.14);
+  border-radius: 1rem;
+  padding: 1.25rem;
+  background: rgb(255 255 255 / 0.34);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.benchmark-empty-compact {
+  padding: 0.9rem 1rem;
+}
+
+.benchmark-drawer-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+.benchmark-drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: rgb(24 39 64 / 0.24);
+  animation: benchmark-fade-in 180ms ease-out both;
+}
+
+.benchmark-drawer-panel {
+  position: absolute;
+  inset: auto 0 0;
+  max-height: min(88dvh, 52rem);
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.75);
+  border-radius: 1.5rem 1.5rem 0 0;
+  background: rgb(248 251 255 / 0.94);
+  box-shadow: 0 -24px 70px -38px rgb(25 48 84 / 0.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.1);
+  backdrop-filter: blur(24px) saturate(1.1);
+  animation: benchmark-sheet-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (max-width: 767px) {
+  .benchmark-page button {
+    min-height: 2.75rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .benchmark-page {
+    padding: 0.75rem;
+  }
+
+  .benchmark-drawer-panel {
+    inset: 0.75rem 0.75rem 0.75rem auto;
+    width: min(29rem, calc(100vw - 2rem));
+    max-height: none;
+    border-radius: 1.5rem;
+    box-shadow: -28px 0 80px -42px rgb(25 48 84 / 0.65);
+    animation-name: benchmark-drawer-in;
+  }
+}
+
+@keyframes benchmark-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes benchmark-drawer-in {
+  from { transform: translateX(2rem); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes benchmark-sheet-in {
+  from { transform: translateY(2rem); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .benchmark-content-card,
+  .benchmark-highlight-card,
+  .benchmark-drawer-backdrop,
+  .benchmark-drawer-panel {
+    animation: none;
+    transition: none;
+  }
+}

@@ -7,7 +7,7 @@ import { listBenchmarkStudies } from "./benchmark-study-service";
 const key = (platform: string, externalId: string) => `${platform}:${externalId}`;
 
 export type BenchmarkCreatorDetailDTO = {
-  account: { id: string; name: string; platform: string; avatarUrl: string | null; bio: string | null; lastSyncedAt: string | null };
+  account: { id: string; name: string; platform: string; avatarUrl: string | null; bio: string | null; lastSyncedAt: string | null; tags: string[] };
   stats: { discovered: number; collected: number; studied: number; distilled: number; copywriting: number };
   representativeSources: Array<{ id: string; title: string; coverUrl: string | null; hasTranscript: boolean; hasDistillation: boolean; hasCopywriting: boolean }>;
   highlights: Array<{ title: string; explanation: string; quality: "WORTH_KEEPING" | "OBSERVE" | "CASE_ONLY" | "DO_NOT_KEEP"; sourceItemId: string; sourceTitle: string }>;
@@ -52,6 +52,14 @@ export async function getBenchmarkCreatorDetail(input: { workspaceId: string; be
   ]);
 
   const snapshotKeys = new Set(snapshots.map((snapshot) => key(snapshot.platform, snapshot.externalId)));
+  const tagCounts = new Map<string, number>();
+  for (const text of [account.bio ?? "", ...snapshots.map(({ title }) => title)]) {
+    for (const match of text.matchAll(/#([\p{L}\p{N}_-]{2,20})/gu)) {
+      const tag = match[1];
+      if (tag) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+    }
+  }
+  const tags = [...tagCounts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "zh-CN")).slice(0, 5).map(([tag]) => tag);
   const sources = snapshots.length ? await db.sourceItem.findMany({
     where: { workspaceId: input.workspaceId, OR: snapshots.map((snapshot) => ({ sourcePlatform: snapshot.platform, externalId: snapshot.externalId })) },
     select: {
@@ -127,7 +135,7 @@ export async function getBenchmarkCreatorDetail(input: { workspaceId: string; be
   }).slice(0, 8);
 
   return {
-    account: { ...account, lastSyncedAt: account.lastSyncedAt?.toISOString() ?? null },
+    account: { ...account, lastSyncedAt: account.lastSyncedAt?.toISOString() ?? null, tags },
     stats: { discovered: snapshots.length, collected: sources.length, studied: studiedSourceIds.size, distilled: parsedBySource.size, copywriting: copywriting.length },
     representativeSources,
     highlights,

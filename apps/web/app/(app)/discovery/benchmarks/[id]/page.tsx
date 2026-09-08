@@ -1,6 +1,5 @@
-/* finesse · register=product · shell=existing-sidebar+research-dossier · palette=existing-product · density=7 */
+/* finesse · register=product · shell=glass-tabs+detail-drawer · palette=cool-blue-grey · density=6 */
 import { notFound } from "next/navigation";
-import { BenchmarkCreatorProfile } from "@/components/discovery/benchmark-creator-profile";
 import { BenchmarkWorkspace } from "@/components/discovery/benchmark-workspace";
 import { requireWorkspace } from "@/server/access";
 import { getBenchmarkCreatorDetail } from "@/server/discovery/benchmark-creator-read-model";
@@ -14,5 +13,5 @@ export default async function BenchmarkPage({ params }: PageProps<"/discovery/be
     listBenchmarkCandidates({ workspaceId: workspace.id, benchmarkAccountId: profile.account.id }),
     listBenchmarkStudies({ workspaceId: workspace.id, benchmarkAccountId: profile.account.id }),
   ]);
-  return <BenchmarkWorkspace benchmark={profile.account} candidates={candidates} studies={studies} canRefresh={role !== "VIEWER"} canManage={role === "OWNER" || role === "ADMIN"}><BenchmarkCreatorProfile profile={profile} /></BenchmarkWorkspace>;
+  return <BenchmarkWorkspace profile={profile} candidates={candidates} studies={studies} canRefresh={role !== "VIEWER"} canManage={role === "OWNER" || role === "ADMIN"} />;
 }

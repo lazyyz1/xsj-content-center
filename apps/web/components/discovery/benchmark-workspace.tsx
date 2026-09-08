@@ -1,15 +1,18 @@
 "use client";
 
+/* finesse · glass-tabs+detail-drawer · palette=cool-blue-grey · density=6 */
+
 import { Badge, Button, Card } from "@content-center/ui";
 import type { BenchmarkAnalysisOutput, BenchmarkPlaybookOutput, ExternalContent } from "@content-center/providers";
+import { BenchmarkCreatorContent, BenchmarkCreatorHeader, BenchmarkCreatorProfile, WorkspaceTabs, type BenchmarkView } from "@/components/discovery/benchmark-creator-profile";
+import type { BenchmarkCreatorDetailDTO } from "@/server/discovery/benchmark-creator-read-model";
 import type { BenchmarkCandidateDTO, BenchmarkStudyDTO } from "@/server/discovery/benchmark-study-service";
 import { ArrowLeft, ArrowRight, BookmarkPlus, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Work = Omit<ExternalContent, "rawProviderMetadata"> & { sourceItemId: string | null; inIdea: boolean };
-const platformLabel: Record<string, string> = { DOUYIN: "抖音", XIAOHONGSHU: "小红书" };
 
 function externalContentPayload(item: Work) {
   const { sourceItemId, inIdea, ...payload } = item;
@@ -25,8 +28,10 @@ async function request(url: string, init?: RequestInit) {
 
 function list(value: string | string[]) { return typeof value === "string" ? [value] : value; }
 
-export function BenchmarkWorkspace({ benchmark, candidates, studies: initialStudies, canRefresh, canManage, children }: { benchmark: { id: string; name: string; platform: string; avatarUrl: string | null; bio: string | null; lastSyncedAt: string | null }; candidates: BenchmarkCandidateDTO[]; studies: BenchmarkStudyDTO[]; canRefresh: boolean; canManage: boolean; children?: ReactNode }) {
+export function BenchmarkWorkspace({ profile, candidates, studies: initialStudies, canRefresh, canManage }: { profile: BenchmarkCreatorDetailDTO; candidates: BenchmarkCandidateDTO[]; studies: BenchmarkStudyDTO[]; canRefresh: boolean; canManage: boolean }) {
+  const benchmark = profile.account;
   const router = useRouter();
+  const [view, setView] = useState<BenchmarkView>("PROFILE");
   const [sort, setSort] = useState<"LATEST" | "POPULAR">("LATEST");
   const [items, setItems] = useState<Work[] | null>(null);
   const [studies, setStudies] = useState(initialStudies);
@@ -66,11 +71,22 @@ export function BenchmarkWorkspace({ benchmark, candidates, studies: initialStud
   }
 
   const visibleStudies = studies.filter((study) => !(study.kind === "PLAYBOOKS" && study.status === "FAILED"));
-  return <><div className="mb-5 flex items-center justify-between gap-4"><Link href="/discovery" className="inline-flex min-h-11 items-center gap-2 text-sm text-[var(--text-secondary)]"><ArrowLeft size={16} /> 返回内容发现</Link>{canManage ? <Button variant="secondary" onClick={() => void remove()}><Trash2 size={14} /> 停用对标</Button> : null}</div>{children ?? <Card className="p-5"><div className="flex items-start gap-4">{benchmark.avatarUrl ? <img src={benchmark.avatarUrl} alt="" className="h-16 w-16 rounded-full object-cover" /> : <div className="grid h-16 w-16 rounded-full bg-[var(--surface-elevated)] text-xl font-semibold">{benchmark.name.slice(0, 1)}</div>}<div><Badge>{platformLabel[benchmark.platform]}</Badge><h1 className="mt-2 text-2xl font-semibold">{benchmark.name}</h1>{benchmark.bio ? <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">{benchmark.bio}</p> : null}</div></div></Card>}
-    <RepresentativeContent candidates={candidates} selected={selected} canStudy={canRefresh} action={action} onToggle={toggleCandidate} onStart={(kind) => void startStudy(kind)} />
-    <StudyHistory studies={visibleStudies} action={action} onSave={saveMethod} />
-    {error ? <p role="alert" className="mt-4 text-sm text-[var(--danger)]">{error}</p> : null}{notice ? <p role="status" className="mt-4 flex flex-wrap items-center gap-3 text-sm text-[var(--success)]">{notice}<Link href="/library/methods" className="font-medium text-[var(--accent)]">查看我的方法</Link></p> : null}
-    <section className="mt-6"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><h2 className="text-lg font-semibold">账号作品</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">只读取一页作品信息，不会自动下载内容。</p></div><div className="flex gap-2"><select value={sort} onChange={(event) => setSort(event.target.value as "LATEST" | "POPULAR")} className="h-9 rounded-lg border bg-[var(--surface)] px-3 text-sm"><option value="LATEST">最新内容</option><option value="POPULAR">热门内容</option></select><Button disabled={!canRefresh || busy} onClick={() => void load()}>{busy ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} {items ? "刷新" : "加载作品"}</Button></div></div>{!canRefresh ? <p className="mt-4 rounded-xl border p-4 text-sm text-[var(--text-secondary)]">当前权限可查看对标账号，但不会发起付费数据刷新。</p> : null}{items === null ? <Card className="mt-4 grid min-h-48 place-items-center p-8 text-center"><div><p className="font-medium">作品尚未加载</p><p className="mt-2 text-sm text-[var(--text-secondary)]">点击“加载作品”后才会请求内容数据服务。</p></div></Card> : items.length ? <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{items.map((item) => <Card key={`${item.platform}:${item.externalId}`} className="overflow-hidden">{item.coverUrl ? <img src={item.coverUrl} alt="" className="aspect-video w-full object-cover" /> : <div className="aspect-video bg-[var(--surface-elevated)]" />}<div className="p-4"><div className="flex gap-2">{item.sourceItemId ? <Badge className="text-[var(--success)]">已收录</Badge> : null}{item.inIdea ? <Badge>已加入选题</Badge> : null}</div><h3 className="mt-3 line-clamp-2 font-semibold">{item.title || item.description || "未命名内容"}</h3><div className="mt-4 flex flex-wrap gap-2">{item.sourceItemId ? <Button variant="secondary" asChild><Link href={`/library/${item.sourceItemId}`}>查看素材</Link></Button> : <Button variant="secondary" disabled={Boolean(action)} onClick={() => void collect(item)}>{action === `${item.platform}:${item.externalId}` ? <Loader2 size={14} className="animate-spin" /> : <BookmarkPlus size={14} />} 收录素材</Button>}<Button disabled={Boolean(action)} onClick={() => void create(item)}>{action === `project:${item.externalId}` ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />} 开始创作</Button></div></div></Card>)}</div> : <Card className="mt-4 p-8 text-center text-sm text-[var(--text-secondary)]">该账号暂无可用作品。</Card>}</section></>;
+  return <div className="benchmark-page"><div className="mb-4 flex items-center justify-between gap-4"><Link href="/discovery" className="inline-flex min-h-11 items-center gap-2 text-sm text-[var(--text-secondary)]"><ArrowLeft size={16} /> 返回内容发现</Link>{canManage ? <Button variant="secondary" onClick={() => void remove()}><Trash2 size={14} /> 停用对标</Button> : null}</div>
+    <BenchmarkCreatorHeader profile={profile} />
+    <WorkspaceTabs value={view} onChange={setView} />
+    {view === "PROFILE" ? <BenchmarkCreatorProfile profile={profile} onShowContent={() => setView("CONTENT")} /> : null}
+    {view === "CONTENT" ? <BenchmarkCreatorContent profile={profile} /> : null}
+    {view === "RESEARCH" ? <div data-testid="benchmark-research-view" role="tabpanel" className="benchmark-glass rounded-3xl p-4 sm:p-5">
+      <RepresentativeContent candidates={candidates} selected={selected} canStudy={canRefresh} action={action} onToggle={toggleCandidate} onStart={(kind) => void startStudy(kind)} />
+      <StudyHistory studies={visibleStudies} action={action} onSave={saveMethod} />
+      {error ? <p role="alert" className="mt-4 text-sm text-[var(--danger)]">{error}</p> : null}{notice ? <p role="status" className="mt-4 flex flex-wrap items-center gap-3 text-sm text-[var(--success)]">{notice}<Link href="/library/methods" className="font-medium text-[var(--accent)]">查看我的方法</Link></p> : null}
+      <AccountWorks sort={sort} setSort={setSort} items={items} busy={busy} canRefresh={canRefresh} action={action} onLoad={() => void load()} onCollect={(item) => void collect(item)} onCreate={(item) => void create(item)} />
+    </div> : null}
+  </div>;
+}
+
+function AccountWorks({ sort, setSort, items, busy, canRefresh, action, onLoad, onCollect, onCreate }: { sort: "LATEST" | "POPULAR"; setSort: (value: "LATEST" | "POPULAR") => void; items: Work[] | null; busy: boolean; canRefresh: boolean; action: string; onLoad: () => void; onCollect: (item: Work) => void; onCreate: (item: Work) => void }) {
+  return <section className="mt-8"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><h2 className="text-lg font-semibold">账号作品</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">只读取一页作品信息，不会自动下载内容。</p></div><div className="flex gap-2"><select value={sort} onChange={(event) => setSort(event.target.value as "LATEST" | "POPULAR")} className="h-11 rounded-xl border bg-white/65 px-3 text-sm"><option value="LATEST">最新内容</option><option value="POPULAR">热门内容</option></select><Button disabled={!canRefresh || busy} onClick={onLoad}>{busy ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} {items ? "刷新" : "加载作品"}</Button></div></div>{!canRefresh ? <p className="mt-4 rounded-xl border p-4 text-sm text-[var(--text-secondary)]">当前权限可查看对标账号，但不会发起付费数据刷新。</p> : null}{items === null ? <Card className="mt-4 grid min-h-40 place-items-center border-white/60 bg-white/55 p-8 text-center shadow-none"><div><p className="font-medium">作品尚未加载</p><p className="mt-2 text-sm text-[var(--text-secondary)]">点击“加载作品”后才会请求内容数据服务。</p></div></Card> : items.length ? <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{items.map((item) => <Card key={`${item.platform}:${item.externalId}`} className="overflow-hidden border-white/60 bg-white/60">{item.coverUrl ? <img src={item.coverUrl} alt="" className="aspect-video w-full object-cover" /> : <div className="aspect-video bg-[var(--surface-elevated)]" />}<div className="p-4"><div className="flex gap-2">{item.sourceItemId ? <Badge className="text-[var(--success)]">已收录</Badge> : null}{item.inIdea ? <Badge>已加入选题</Badge> : null}</div><h3 className="mt-3 line-clamp-2 font-semibold">{item.title || item.description || "未命名内容"}</h3><div className="mt-4 flex flex-wrap gap-2">{item.sourceItemId ? <Button variant="secondary" asChild><Link href={`/library/${item.sourceItemId}`}>查看素材</Link></Button> : <Button variant="secondary" disabled={Boolean(action)} onClick={() => onCollect(item)}>{action === `${item.platform}:${item.externalId}` ? <Loader2 size={14} className="animate-spin" /> : <BookmarkPlus size={14} />} 收录素材</Button>}<Button disabled={Boolean(action)} onClick={() => onCreate(item)}>{action === `project:${item.externalId}` ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />} 开始创作</Button></div></div></Card>)}</div> : <Card className="mt-4 p-8 text-center text-sm text-[var(--text-secondary)]">该账号暂无可用作品。</Card>}</section>;
 }
 
 function RepresentativeContent({ candidates, selected, canStudy, action, onToggle, onStart }: { candidates: BenchmarkCandidateDTO[]; selected: string[]; canStudy: boolean; action: string; onToggle: (id: string) => void; onStart: (kind: "ACCOUNT_RESEARCH" | "PLAYBOOKS") => void }) {
