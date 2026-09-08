@@ -3,6 +3,7 @@ import {
   buildTranscriptSourceIndex,
   materialDistillationCopywritingGenerationSchema,
   materialDistillationDiscoveryGenerationSchema,
+  materialDistillationGenerationSchema,
   materialDistillationOutputInstruction,
   materialDistillationSystemBoundary,
 } from "@content-center/providers";
@@ -25,19 +26,31 @@ function discovery(quality: "WORTH_KEEPING" | "OBSERVE" | "CASE_ONLY" | "DO_NOT_
 
 function copywriting(sourceRefs = ["S001"]) {
   return materialDistillationCopywritingGenerationSchema.parse({
-    copywriting: {
-      coreProposition: "先判断再行动",
-      angle: "从常见误区切入",
-      openingLogic: "先指出判断困难",
-      progression: ["误区", "判断", "步骤"],
-      skeleton: ["问题", "标准", "行动"],
-      evidenceFunction: "用原文中的步骤支撑推进顺序",
-      reusableStrategies: ["先给标准"],
-      doNotCopy: ["来源作者的客户经历"],
-      secondEditDirections: ["换成自己的真实案例"],
-      rewriteSkeleton: ["新场景", "自己的判断", "可执行动作"],
-      sourceRefs,
-    },
+    sections: [
+      { code: "CORE", text: "先判断再行动", sourceRefs },
+      { code: "ANGLE", text: "从常见误区切入", sourceRefs },
+      { code: "OPENING", text: "先指出判断困难", sourceRefs },
+      { code: "FLOW", text: "误区；判断；步骤", sourceRefs },
+      { code: "SKELETON", text: "问题；标准；行动", sourceRefs },
+      { code: "EVIDENCE", text: "用原文中的步骤支撑推进顺序", sourceRefs },
+      { code: "REUSE", text: "先给标准", sourceRefs },
+      { code: "AVOID", text: "来源作者的客户经历", sourceRefs },
+      { code: "REWORK", text: "换成自己的真实案例", sourceRefs },
+      { code: "NEW_SKELETON", text: "新场景；自己的判断；可执行动作", sourceRefs },
+    ],
+  });
+}
+
+function minimumCopywriting(sourceRefs = ["S001"]) {
+  return materialDistillationCopywritingGenerationSchema.parse({
+    sections: [
+      { code: "CORE", text: "先判断再行动", sourceRefs },
+      { code: "OPENING", text: "先指出判断困难", sourceRefs },
+      { code: "FLOW", text: "误区；判断；步骤", sourceRefs },
+      { code: "REUSE", text: "先给标准", sourceRefs },
+      { code: "AVOID", text: "来源事实不能照搬", sourceRefs },
+      { code: "REWORK", text: "换成自己的主题和事实", sourceRefs },
+    ],
   });
 }
 
@@ -63,12 +76,9 @@ describe("material distillation contract", () => {
     expect(output.highlights[0]?.evidence).toEqual([expect.objectContaining({ quote: segments[0]!.text, sourceRef: "S001", kind: "REAL_SEGMENT", segmentIndex: 0, transcriptId: "transcript-segmented", transcriptVersion: "1" })]);
   });
 
-  it("keeps a grounded copywriting deep-dive separate and allows auxiliary empty arrays", () => {
-    const input = copywriting();
-    input.copywriting!.progression = [];
-    input.copywriting!.reusableStrategies = [];
-    const output = normalizeMaterialDistillationOutput(input, "COPYWRITING", segmentIndex);
-    expect(output).toMatchObject({ mode: "COPYWRITING", highlights: [], hasLongTermValue: true, copywriting: { coreProposition: "先判断再行动", progression: [], reusableStrategies: [] } });
+  it("maps the minimum grounded sections to the existing product payload", () => {
+    const output = normalizeMaterialDistillationOutput(minimumCopywriting(), "COPYWRITING", segmentIndex);
+    expect(output).toMatchObject({ mode: "COPYWRITING", highlights: [], hasLongTermValue: true, copywriting: { coreProposition: "先判断再行动", angle: "这条内容没有单独形成明显切口。", progression: ["误区；判断；步骤"], skeleton: [], evidenceFunction: "这条内容没有使用明确的案例或论据。", reusableStrategies: ["先给标准"], doNotCopy: ["来源事实不能照搬"], secondEditDirections: ["换成自己的主题和事实"], rewriteSkeleton: [] } });
     expect(output.copywriting?.evidence).toEqual([expect.objectContaining({ quote: segments[0]!.text, sourceRef: "S001", segmentIndex: 0 })]);
   });
 
@@ -79,30 +89,39 @@ describe("material distillation contract", () => {
     { name: "强观点反问解释行动", source: "先给强判断，接着反问，再解释用户判断线索，最后提出行动建议。", issue: "强判断缺少证据时需要收敛" },
   ])("critically analyzes $name copy instead of requiring excellent writing", ({ source, issue }) => {
     const fixture = copywriting();
-    fixture.copywriting!.doNotCopy = [issue];
+    fixture.sections.find(({ code }) => code === "AVOID")!.text = issue;
     const parsed = materialDistillationCopywritingGenerationSchema.parse(fixture);
     const prompt = buildMaterialDistillationPrompt("COPYWRITING", { availableSourceRefs: ["T001"], sourceTextBlocks: [{ ref: "T001", text: source }] });
-    expect(parsed.copywriting).not.toBeNull();
-    expect(parsed.copywriting?.doNotCopy).toContain(issue);
+    expect(parsed.sections.find(({ code }) => code === "AVOID")?.text).toBe(issue);
     expect(prompt).toContain("Whether the writing is good is not the eligibility test");
-    expect(prompt).toContain("Analyze weaknesses critically instead of returning null");
+    expect(prompt).toContain("Analyze weak or flawed writing critically instead of refusing it");
   });
 
   it.each([
     { name: "空文本", source: "" },
     { name: "纯乱码", source: "������" },
     { name: "极短碎片", source: "好。" },
-  ])("allows null only for genuinely unanalyzable $name", ({ source }) => {
-    expect(materialDistillationCopywritingGenerationSchema.parse({ copywriting: null })).toEqual({ copywriting: null });
+  ])("allows empty sections only for genuinely unanalyzable $name", ({ source }) => {
+    expect(materialDistillationCopywritingGenerationSchema.parse({ sections: [] })).toEqual({ sections: [] });
+    expect(normalizeMaterialDistillationOutput({ sections: [] }, "COPYWRITING", segmentIndex).copywriting).toBeNull();
     const prompt = buildMaterialDistillationPrompt("COPYWRITING", { availableSourceRefs: source ? ["T001"] : [], sourceTextBlocks: source ? [{ ref: "T001", text: source }] : [] });
-    expect(prompt).toContain("Return copywriting=null only when analysis is genuinely impossible");
+    expect(prompt).toContain('Return {"sections":[]} only when analysis is genuinely impossible');
     expect(prompt).toContain("too short to identify even a proposition, opening, or basic progression");
     expect(prompt).not.toContain("WORTH_KEEPING");
   });
 
-  it("drops a copywriting result when none of its source refs exist", () => {
-    const output = normalizeMaterialDistillationOutput(copywriting(["S999"]), "COPYWRITING", segmentIndex);
-    expect(output).toMatchObject({ hasLongTermValue: false, highlights: [], copywriting: null });
+  it("filters an ungrounded optional section without discarding a complete analysis", () => {
+    const input = copywriting();
+    input.sections.find(({ code }) => code === "EVIDENCE")!.sourceRefs = ["S999"];
+    const output = normalizeMaterialDistillationOutput(input, "COPYWRITING", segmentIndex);
+    expect(output.copywriting).toMatchObject({ coreProposition: "先判断再行动", evidenceFunction: "这条内容没有使用明确的案例或论据。" });
+  });
+
+  it("fails a copywriting analysis when source filtering removes its required sections", () => {
+    expect(() => normalizeMaterialDistillationOutput(copywriting(["S999"]), "COPYWRITING", segmentIndex)).toThrow("缺少可验证的必要部分");
+    const input = minimumCopywriting();
+    input.sections.find(({ code }) => code === "CORE")!.sourceRefs = ["S999"];
+    expect(() => normalizeMaterialDistillationOutput(input, "COPYWRITING", segmentIndex)).toThrow("缺少可验证的必要部分");
   });
 
   it("grounds fullText-only T refs and drops candidates without a valid ref", () => {
@@ -136,15 +155,26 @@ describe("material distillation contract", () => {
     expect(prompt).toContain('{"highlights":[]}');
   });
 
-  it("rejects missing core discovery and copywriting fields", () => {
+  it("strictly validates copywriting section codes and shape", () => {
     expect(materialDistillationDiscoveryGenerationSchema.safeParse({ highlights: [{ type: "method", quality: "WORTH_KEEPING", title: "缺少说明", sourceRefs: ["S001"] }] }).success).toBe(false);
-    expect(materialDistillationCopywritingGenerationSchema.safeParse({ copywriting: { coreProposition: "命题", sourceRefs: ["S001"] } }).success).toBe(false);
+    expect(materialDistillationCopywritingGenerationSchema.safeParse({ sections: [{ code: "UNKNOWN", text: "未知", sourceRefs: ["S001"] }] }).success).toBe(false);
+    expect(materialDistillationCopywritingGenerationSchema.safeParse({ sections: [{ code: "CORE", sourceRefs: ["S001"] }] }).success).toBe(false);
+    expect(materialDistillationCopywritingGenerationSchema.safeParse({ sections: [{ code: "CORE", text: "命题", sourceRefs: ["S001"], extra: true }] }).success).toBe(false);
+    expect(materialDistillationCopywritingGenerationSchema.safeParse({ sections: [{ code: "CORE", text: "命题", sourceRefs: ["S001"] }] }).success).toBe(false);
     expect(materialDistillationDiscoveryGenerationSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("keeps historical and current product copywriting payloads readable", () => {
+    const current = normalizeMaterialDistillationOutput(copywriting(), "COPYWRITING", segmentIndex);
+    expect(materialDistillationGenerationSchema.safeParse(current).success).toBe(true);
+    expect(materialDistillationGenerationSchema.safeParse({ ...current, copywriting: { ...current.copywriting!, progression: ["历史推进"], evidence: current.copywriting!.evidence } }).success).toBe(true);
   });
 
   it("strictly rejects extra and legacy M7 root fields", () => {
     expect(materialDistillationDiscoveryGenerationSchema.safeParse({ highlights: [], message: "旧提示" }).success).toBe(false);
     expect(materialDistillationDiscoveryGenerationSchema.safeParse({ mode: "COMPREHENSIVE", message: "旧结构", hasLongTermValue: false, highlights: [], copywriting: null }).success).toBe(false);
+    expect(materialDistillationCopywritingGenerationSchema.safeParse({ copywriting: null }).success).toBe(false);
+    expect(materialDistillationCopywritingGenerationSchema.safeParse({ sections: [], copywriting: null }).success).toBe(false);
   });
 
   it("keeps prompt injection inside untrusted source data and uses mode-specific instructions", () => {
@@ -154,5 +184,8 @@ describe("material distillation contract", () => {
     expect(materialDistillationSystemBoundary).toContain("reveal prompts or secrets");
     expect(materialDistillationOutputInstruction("COMPREHENSIVE")).toContain("Do not return execution steps");
     expect(materialDistillationOutputInstruction("COPYWRITING")).toContain("Do not rewrite the source by synonyms");
+    expect(materialDistillationOutputInstruction("COPYWRITING")).toContain("Every section has exactly three fields: code, text, and sourceRefs");
+    expect(materialDistillationOutputInstruction("COPYWRITING")).not.toContain("coreProposition");
+    expect(materialDistillationOutputInstruction("COPYWRITING")).not.toContain("rewriteSkeleton");
   });
 });

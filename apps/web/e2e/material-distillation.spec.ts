@@ -16,7 +16,18 @@ const prompts: string[] = [];
 
 function generation(mode: "COMPREHENSIVE" | "COPYWRITING", sourceRef: string) {
   if (mode === "COMPREHENSIVE") return { highlights: [{ type: "method", quality: "WORTH_KEEPING", title: "先判断再行动", shortExplanation: "先明确判断标准，再给具体步骤。", sourceRefs: [sourceRef] }] };
-  return { copywriting: { coreProposition: "先给判断标准，再给行动步骤", angle: "从用户不知道如何判断切入", openingLogic: "先指出判断困难", progression: ["问题", "标准", "步骤"], skeleton: ["提出问题", "给判断标准", "给行动步骤"], evidenceFunction: "原文用于支持判断顺序", reusableStrategies: ["先判断再行动"], doNotCopy: ["来源作者的客户和增长数字"], secondEditDirections: ["换成自己的真实案例", "换目标受众"], rewriteSkeleton: ["新场景", "自己的判断", "可执行动作"], sourceRefs: [sourceRef] } };
+  return { sections: [
+    { code: "CORE", text: "先给判断标准，再给行动步骤", sourceRefs: [sourceRef] },
+    { code: "ANGLE", text: "从用户不知道如何判断切入", sourceRefs: [sourceRef] },
+    { code: "OPENING", text: "先指出判断困难", sourceRefs: [sourceRef] },
+    { code: "FLOW", text: "问题；标准；步骤", sourceRefs: [sourceRef] },
+    { code: "SKELETON", text: "提出问题；给判断标准；给行动步骤", sourceRefs: [sourceRef] },
+    { code: "EVIDENCE", text: "原文用于支持判断顺序", sourceRefs: [sourceRef] },
+    { code: "REUSE", text: "先判断再行动", sourceRefs: [sourceRef] },
+    { code: "AVOID", text: "来源作者的客户和增长数字", sourceRefs: [sourceRef] },
+    { code: "REWORK", text: "换成自己的真实案例和目标受众", sourceRefs: [sourceRef] },
+    { code: "NEW_SKELETON", text: "新场景；自己的判断；可执行动作", sourceRefs: [sourceRef] },
+  ] };
 }
 
 function m1Understanding() {
@@ -91,6 +102,7 @@ test("distills one transcript, restores results, preserves history, and saves gr
   await expect(page.getByTestId("material-distillation-card")).toContainText("这条视频最值得学什么", { timeout: 20_000 });
   await expect(db.ingestJob.count({ where: { sourceItemId: source.id, jobType: "DISTILL_MATERIAL" } })).resolves.toBe(1);
   await expect(db.aIRun.count({ where: { workspaceId, action: "DISTILL_MATERIAL" } })).resolves.toBe(1);
+  await expect(db.aIRun.findFirstOrThrow({ where: { workspaceId, action: "DISTILL_MATERIAL" }, select: { promptVersion: true } })).resolves.toEqual({ promptVersion: 3 });
   const complete = page.getByTestId("material-distillation-card");
   await expect(complete).toContainText("值得留下");
   await expect(complete.getByRole("heading", { name: "这条文案怎么组织" })).toHaveCount(0);

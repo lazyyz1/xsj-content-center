@@ -45,21 +45,42 @@ export const materialDistillationDiscoveryGenerationSchema = z.object({
   highlights: z.array(materialDistillationDiscoveryHighlightSchema).max(5),
 }).strict();
 
-export const materialDistillationCopywritingGenerationSchema = z.object({
-  copywriting: z.object({
-    coreProposition: text(1_000),
-    angle: text(1_000),
-    openingLogic: text(1_000),
-    progression: z.array(text(500)).max(12),
-    skeleton: z.array(text(500)).max(12),
-    evidenceFunction: text(1_000),
-    reusableStrategies: z.array(text(500)).max(8),
-    doNotCopy: z.array(text(500)).max(8),
-    secondEditDirections: z.array(text(500)).max(8),
-    rewriteSkeleton: z.array(text(500)).max(12),
-    sourceRefs: z.array(sourceRef).min(1).max(8),
-  }).strict().nullable(),
+export const materialDistillationCopywritingSectionCodeSchema = z.enum([
+  "CORE",
+  "ANGLE",
+  "OPENING",
+  "FLOW",
+  "SKELETON",
+  "EVIDENCE",
+  "REUSE",
+  "AVOID",
+  "REWORK",
+  "NEW_SKELETON",
+]);
+
+export const materialDistillationCopywritingSectionSchema = z.object({
+  code: materialDistillationCopywritingSectionCodeSchema,
+  text: text(2_000),
+  sourceRefs: z.array(sourceRef).min(1).max(8),
 }).strict();
+
+export const materialDistillationCopywritingGenerationSchema = z.object({
+  sections: z.array(materialDistillationCopywritingSectionSchema).max(10),
+}).strict().superRefine(({ sections }, context) => {
+  if (sections.length === 0) return;
+  const codes = sections.map(({ code }) => code);
+  const uniqueCodes = new Set(codes);
+  if (uniqueCodes.size !== codes.length) context.addIssue({ code: "custom", path: ["sections"], message: "Each copywriting section code may appear only once." });
+  const requireCode = (code: z.infer<typeof materialDistillationCopywritingSectionCodeSchema>) => {
+    if (!uniqueCodes.has(code)) context.addIssue({ code: "custom", path: ["sections"], message: `Missing required copywriting section: ${code}.` });
+  };
+  requireCode("CORE");
+  requireCode("REUSE");
+  requireCode("AVOID");
+  requireCode("REWORK");
+  if (!uniqueCodes.has("ANGLE") && !uniqueCodes.has("OPENING")) context.addIssue({ code: "custom", path: ["sections"], message: "Copywriting analysis requires ANGLE or OPENING." });
+  if (!uniqueCodes.has("FLOW") && !uniqueCodes.has("SKELETON")) context.addIssue({ code: "custom", path: ["sections"], message: "Copywriting analysis requires FLOW or SKELETON." });
+});
 
 export type MaterialDistillationDiscoveryGeneration = z.infer<typeof materialDistillationDiscoveryGenerationSchema>;
 export type MaterialDistillationCopywritingGeneration = z.infer<typeof materialDistillationCopywritingGenerationSchema>;
@@ -130,12 +151,13 @@ Do not force a fixed number of results. It is valid to return no candidates.`;
 export function materialDistillationOutputInstruction(mode: MaterialDistillationMode) {
   if (mode === "COPYWRITING") {
     return `${sourceRefOutputRules}
-The user explicitly chose to study how this text is written. Default to a complete copywriting object whenever the source has a recognizable proposition, opening, or progression, even when the writing is mediocre, overstated, weakly supported, or not worth copying.
-Whether the writing is good is not the eligibility test. Analyze weaknesses critically instead of returning null: identify unsupported strong claims, correlation presented as causation, excessive conflict, an unfulfilled reversal, weak evidence, absolute wording, abrupt promotion, or a structure that is reusable even when its viewpoint is not.
-Return copywriting=null only when analysis is genuinely impossible: the transcript is empty, severely corrupted or garbled, only isolated fragments, a pure list/parameter/tag dump with no expression progression, or too short to identify even a proposition, opening, or basic progression.
-Answer only how this text communicates: proposition, angle, opening logic, progression, skeleton, evidence function, reusable expression strategies, what must not be copied, second-edit directions, and a newly creatable skeleton.
-The root object contains only copywriting. A valid empty result is {"copywriting":null}.
-Use doNotCopy and secondEditDirections to separate reusable structure from flawed claims or third-party facts. Do not summarize methods taught by the content or transfer the source author's identity, customers, revenue, experience, or results. Do not rewrite the source by synonyms.`;
+The user explicitly chose to study how this text is written. Whether the writing is good is not the eligibility test. Analyze weak or flawed writing critically instead of refusing it.
+Return only {"sections":[...]}. Every section has exactly three fields: code, text, and sourceRefs. Allowed codes are CORE, ANGLE, OPENING, FLOW, SKELETON, EVIDENCE, REUSE, AVOID, REWORK, and NEW_SKELETON. Return each code at most once; put multiple short points for one dimension in its text.
+For analyzable writing include CORE, at least one of ANGLE/OPENING, at least one of FLOW/SKELETON, and REUSE, AVOID, REWORK. EVIDENCE and NEW_SKELETON are optional when the source does not support them.
+Use CORE for the main proposition, ANGLE for the entry angle, OPENING for how the opening works, FLOW for progression, SKELETON for the overall structure, EVIDENCE for the role of cases or arguments, REUSE for transferable expression choices, AVOID for unsupported claims or source-specific material, REWORK for adapting the approach to the employee's own topic and facts, and NEW_SKELETON for a newly creatable outline.
+Example: {"sections":[{"code":"CORE","text":"核心判断","sourceRefs":["T001"]},{"code":"OPENING","text":"直接提出问题","sourceRefs":["T001"]},{"code":"FLOW","text":"判断；解释；行动","sourceRefs":["T001"]},{"code":"REUSE","text":"先给判断再解释","sourceRefs":["T001"]},{"code":"AVOID","text":"不要照搬来源事实","sourceRefs":["T001"]},{"code":"REWORK","text":"换成自己的主题和事实","sourceRefs":["T001"]}]}.
+Return {"sections":[]} only when analysis is genuinely impossible: the transcript is empty, severely corrupted or garbled, only isolated fragments, a pure list/parameter/tag dump with no expression progression, or too short to identify even a proposition, opening, or basic progression.
+Analyze how the text communicates, not the methods taught by its content. Call out unsupported strong claims, correlation presented as causation, excessive conflict, weak evidence, absolute wording, or abrupt promotion in the relevant text, especially AVOID. Do not transfer the source author's identity, customers, revenue, experience, or results. Do not rewrite the source by synonyms.`;
   }
   return `${sourceRefOutputRules}
 ${discoveryJudgmentRules}

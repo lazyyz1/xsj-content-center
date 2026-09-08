@@ -33,6 +33,7 @@ beforeAll(async () => {
       if (prompt.includes("INVALID_STRUCTURED")) return send(200, completion(JSON.stringify({ wrong: true })));
       if (prompt.includes("OLD_M7_ROOT")) return send(200, completion(JSON.stringify({ summary: { text: "old" }, insights: [] })));
       if (prompt.includes("M7_DISCOVERY_REQUEST")) return send(200, completion(JSON.stringify({ highlights: [] })));
+      if (prompt.includes("M7_COPYWRITING_REQUEST")) return send(200, completion(JSON.stringify({ sections: [] })));
       if (prompt.includes("FENCED_STRUCTURED")) return send(200, completion("```json\n{\"ok\":true,\"title\":\"Fenced result\"}\n```"));
       if (prompt.includes("TIMEOUT")) return setTimeout(() => send(200, completion(JSON.stringify({ ok: true }))), 100);
       return send(200, completion(JSON.stringify({ ok: true, title: "Fixture result" })));
@@ -103,11 +104,13 @@ describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
   it("honors the M7 task strategy and uses JSON Object even when Kimi supports JSON Schema", async () => {
     await kimiProvider().generateStructured({ prompt: "M7_DISCOVERY_REQUEST", structuredOutput: { strategy: "JSON_OBJECT", preferJsonSchema: true, schemaName: "ignored_for_this_task" } }, materialDistillationDiscoveryGenerationSchema);
     expect(lastRequestBody).toMatchObject({ response_format: { type: "json_object" } });
+    await kimiProvider().generateStructured({ prompt: "M7_COPYWRITING_REQUEST", structuredOutput: { strategy: "JSON_OBJECT", preferJsonSchema: true, schemaName: "ignored_for_this_task" } }, materialDistillationCopywritingGenerationSchema);
+    expect(lastRequestBody).toMatchObject({ response_format: { type: "json_object" } });
   });
 
   it("keeps the independent copywriting contract separate", () => {
-    expect(materialDistillationCopywritingGenerationSchema.safeParse({ copywriting: null }).success).toBe(true);
-    expect(materialDistillationDiscoveryGenerationSchema.safeParse({ copywriting: null }).success).toBe(false);
+    expect(materialDistillationCopywritingGenerationSchema.safeParse({ sections: [] }).success).toBe(true);
+    expect(materialDistillationDiscoveryGenerationSchema.safeParse({ sections: [] }).success).toBe(false);
   });
 
   it("keeps existing Kimi structured calls on JSON mode unless they opt in", async () => {
