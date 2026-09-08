@@ -120,6 +120,8 @@ describe("benchmark creator profile read model", () => {
     expect(source).toContain("<RepresentativeContent");
     expect(source).toContain("<StudyHistory");
     expect(source).toContain('study.kind === "PLAYBOOKS" && study.status === "FAILED"');
+    for (const text of ["benchmark-research-workspace", "搜索代表内容", "为什么选这些？", "清空选择", "实验性内容模式研究", "查看更早的", "benchmark-account-works"]) expect(source).toContain(text);
+    expect(source).toContain("studies.slice(0, 3)");
   });
 
   it("keeps the creator page usable when every optional research area is empty", async () => {
