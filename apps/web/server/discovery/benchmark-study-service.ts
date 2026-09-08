@@ -3,14 +3,17 @@ import "server-only";
 import { db, type Prisma } from "@content-center/db";
 import {
   benchmarkAnalysisOutputSchema,
+  benchmarkCreatorProfileInputSchema,
+  benchmarkCreatorProfileOutputSchema,
   benchmarkPlaybookInputSchema,
   benchmarkPlaybookOutputSchema,
   materialAnalysisOutputSchema,
   materialDistillationGenerationSchema,
   type BenchmarkAnalysisOutput,
+  type BenchmarkCreatorProfileOutput,
   type BenchmarkPlaybookOutput,
 } from "@content-center/providers";
-import { enqueueBenchmarkPlaybookStudy, enqueueBenchmarkStudy } from "@content-center/worker/queue";
+import { enqueueBenchmarkCreatorProfileStudy, enqueueBenchmarkPlaybookStudy, enqueueBenchmarkStudy } from "@content-center/worker/queue";
 import { z } from "zod";
 
 const sampleId = z.string().trim().min(1).max(200);
@@ -22,6 +25,12 @@ export const createBenchmarkStudySchema = z.object({
 
 export const createBenchmarkPlaybookStudySchema = z.object({
   sampleIds: z.array(sampleId).min(3).max(10),
+}).strict().superRefine((value, context) => {
+  if (new Set(value.sampleIds).size !== value.sampleIds.length) context.addIssue({ code: "custom", path: ["sampleIds"], message: "代表内容不能重复。" });
+});
+
+export const createBenchmarkCreatorProfileStudySchema = z.object({
+  sampleIds: z.array(sampleId).min(5).max(10),
 }).strict().superRefine((value, context) => {
   if (new Set(value.sampleIds).size !== value.sampleIds.length) context.addIssue({ code: "custom", path: ["sampleIds"], message: "代表内容不能重复。" });
 });
@@ -68,8 +77,8 @@ export type BenchmarkStudyDTO = {
   status: "PROCESSING" | "COMPLETED" | "FAILED";
   sampleCount: number;
   insufficientSamples: boolean;
-  kind: "ACCOUNT_RESEARCH" | "PLAYBOOKS";
-  output: BenchmarkAnalysisOutput | BenchmarkPlaybookOutput | null;
+  kind: "ACCOUNT_RESEARCH" | "PLAYBOOKS" | "CREATOR_PROFILE";
+  output: BenchmarkAnalysisOutput | BenchmarkPlaybookOutput | BenchmarkCreatorProfileOutput | null;
   aiRunId: string | null;
   errorCode: string | null;
   errorMessage: string | null;
@@ -83,6 +92,10 @@ function json(value: unknown): Prisma.InputJsonValue {
 }
 
 function storedStudy(value: Prisma.JsonValue | null) {
+  const creatorProfile = benchmarkCreatorProfileOutputSchema.safeParse(value);
+  if (creatorProfile.success) return { kind: "CREATOR_PROFILE" as const, output: creatorProfile.data, locks: creatorProfile.data.inputs };
+  const creatorProfileInput = benchmarkCreatorProfileInputSchema.safeParse(value);
+  if (creatorProfileInput.success) return { kind: "CREATOR_PROFILE" as const, output: null, locks: creatorProfileInput.data.distillations };
   const playbooks = benchmarkPlaybookOutputSchema.safeParse(value);
   if (playbooks.success) return { kind: "PLAYBOOKS" as const, output: playbooks.data, locks: playbooks.data.inputs };
   const playbookInput = benchmarkPlaybookInputSchema.safeParse(value);
@@ -95,6 +108,17 @@ function key(platform: string, externalId: string) {
   return `${platform}:${externalId}`;
 }
 
+function tagsFromTexts(texts: string[]) {
+  const counts = new Map<string, number>();
+  for (const text of texts) {
+    for (const match of text.matchAll(/#([\p{L}\p{N}_-]{2,20})/gu)) {
+      const tag = match[1];
+      if (tag) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "zh-CN")).slice(0, 10).map(([tag]) => tag);
+}
+
 function traceableDistillation(value: { version: number; schemaVersion: string; output: Prisma.JsonValue | null }) {
   if (!Number.isInteger(value.version) || value.version < 1 || value.schemaVersion !== "material-distillation-v2") return null;
   const parsed = materialDistillationGenerationSchema.safeParse(value.output);
@@ -104,7 +128,7 @@ function traceableDistillation(value: { version: number; schemaVersion: string; 
 }
 
 async function account(workspaceId: string, benchmarkAccountId: string) {
-  const row = await db.benchmarkAccount.findFirst({ where: { id: benchmarkAccountId, workspaceId, enabled: true }, select: { id: true, name: true, platform: true } });
+  const row = await db.benchmarkAccount.findFirst({ where: { id: benchmarkAccountId, workspaceId, enabled: true }, select: { id: true, name: true, platform: true, bio: true } });
   if (!row) throw new BenchmarkStudyError("BENCHMARK_NOT_FOUND", "对标账号不存在。");
   return row;
 }
@@ -314,6 +338,71 @@ export async function createBenchmarkPlaybookStudy(input: { workspaceId: string;
   } catch {
     await db.benchmarkStudy.update({ where: { id: created.id }, data: { status: "FAILED", errorCode: "BENCHMARK_QUEUE_UNAVAILABLE", errorMessage: "组合打法研究暂时无法开始。" } });
     throw new BenchmarkStudyError("BENCHMARK_QUEUE_UNAVAILABLE", "组合打法研究暂时无法开始。");
+  }
+  return getBenchmarkStudy({ workspaceId: input.workspaceId, benchmarkAccountId: input.benchmarkAccountId, studyId: created.id });
+}
+
+export async function createBenchmarkCreatorProfileStudy(input: { workspaceId: string; benchmarkAccountId: string; userId: string; sampleIds: string[] }) {
+  await assertStudyWriter(input.workspaceId, input.userId);
+  const parsed = createBenchmarkCreatorProfileStudySchema.safeParse({ sampleIds: input.sampleIds });
+  if (!parsed.success) throw new BenchmarkStudyError("BENCHMARK_INVALID_SAMPLES", "请选择 5–10 条不重复的代表内容。");
+  const benchmark = await account(input.workspaceId, input.benchmarkAccountId);
+  let created: { id: string; maxAttempts: number };
+  try {
+    created = await db.$transaction(async (tx) => {
+      const processing = await tx.benchmarkStudy.findFirst({ where: { workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id, status: "PROCESSING" }, select: { id: true } });
+      if (processing) throw new BenchmarkStudyError("BENCHMARK_STUDY_IN_PROGRESS", "这个账号已有一项研究正在进行，请稍候。");
+      const snapshots = await tx.benchmarkContentSnapshot.findMany({ where: { id: { in: parsed.data.sampleIds }, workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id }, select: { id: true, platform: true, externalId: true, title: true } });
+      if (snapshots.length !== parsed.data.sampleIds.length) throw new BenchmarkStudyError("BENCHMARK_INVALID_SAMPLES", "代表内容已变化，请刷新后重新选择。");
+      const sourceItems = await tx.sourceItem.findMany({ where: { workspaceId: input.workspaceId, OR: snapshots.map((snapshot) => ({ sourcePlatform: snapshot.platform, externalId: snapshot.externalId })) }, select: { id: true, sourcePlatform: true, externalId: true, transcript: { select: { fullText: true, updatedAt: true } } } });
+      const sourceMap = new Map(sourceItems.map((source) => [key(source.sourcePlatform, source.externalId ?? ""), source]));
+      const candidates = snapshots.map((snapshot) => ({ snapshot, source: sourceMap.get(key(snapshot.platform, snapshot.externalId)) })).filter((item): item is { snapshot: typeof snapshots[number]; source: typeof sourceItems[number] } => Boolean(item.source));
+      if (candidates.length !== snapshots.length) throw new BenchmarkStudyError("BENCHMARK_SAMPLE_NOT_READY", "有代表内容还没有收录，请先收录后再生成账号画像。");
+      if (candidates.some(({ source }) => !source.transcript?.fullText.trim())) throw new BenchmarkStudyError("BENCHMARK_DISTILLATION_NOT_READY", "先选择至少 5 条已经完成精华提炼的代表内容。");
+      const sourceItemIds = candidates.map(({ source }) => source.id);
+      const [analyses, distillations, completedStudies] = await Promise.all([
+        tx.materialAnalysis.findMany({ where: { workspaceId: input.workspaceId, sourceItemId: { in: sourceItemIds }, status: "COMPLETED" }, orderBy: { version: "desc" }, select: { id: true, sourceItemId: true, version: true, understanding: true } }),
+        tx.materialDistillation.findMany({ where: { workspaceId: input.workspaceId, sourceItemId: { in: sourceItemIds }, status: "COMPLETED" }, orderBy: { version: "desc" }, select: { id: true, sourceItemId: true, version: true, schemaVersion: true, output: true, transcriptUpdatedAtAtDistillation: true } }),
+        tx.benchmarkStudy.findMany({ where: { workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id, status: "COMPLETED" }, orderBy: { version: "desc" }, select: { id: true, version: true, output: true } }),
+      ]);
+      const latestAnalysis = new Map<string, typeof analyses[number]>();
+      for (const analysis of analyses) {
+        const result = materialAnalysisOutputSchema.safeParse(analysis.understanding);
+        if (!latestAnalysis.has(analysis.sourceItemId) && result.success && "expression" in result.data) latestAnalysis.set(analysis.sourceItemId, analysis);
+      }
+      const latestDistillation = new Map<string, typeof distillations[number]>();
+      for (const distillation of distillations) {
+        const transcript = candidates.find(({ source }) => source.id === distillation.sourceItemId)?.source.transcript;
+        if (!latestDistillation.has(distillation.sourceItemId) && transcript && distillation.transcriptUpdatedAtAtDistillation.getTime() === transcript.updatedAt.getTime() && traceableDistillation(distillation)) latestDistillation.set(distillation.sourceItemId, distillation);
+      }
+      if (candidates.some(({ source }) => !latestDistillation.has(source.id))) throw new BenchmarkStudyError("BENCHMARK_DISTILLATION_NOT_READY", "先选择至少 5 条已经完成精华提炼的代表内容。");
+      const accountResearch = completedStudies.find(({ output }) => benchmarkAnalysisOutputSchema.safeParse(output).success) ?? null;
+      const previous = await tx.benchmarkStudy.findFirst({ where: { benchmarkAccountId: benchmark.id }, orderBy: { version: "desc" }, select: { version: true } });
+      const study = await tx.benchmarkStudy.create({ data: { workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id, createdById: input.userId, version: (previous?.version ?? 0) + 1, status: "PROCESSING", sampleCount: candidates.length, insufficientSamples: false } });
+      const samples = [];
+      for (const candidate of candidates) samples.push(await tx.benchmarkStudySample.create({ data: { studyId: study.id, sourceItemId: candidate.source.id, materialAnalysisId: latestAnalysis.get(candidate.source.id)?.id ?? null, snapshotId: candidate.snapshot.id } }));
+      const manifest = benchmarkCreatorProfileInputSchema.parse({
+        kind: "CREATOR_PROFILE_INPUT",
+        schemaVersion: "benchmark-creator-profile-v1",
+        account: { name: benchmark.name, platform: benchmark.platform, bio: benchmark.bio, tags: tagsFromTexts([benchmark.bio ?? "", ...snapshots.map(({ title }) => title)]) },
+        distillations: samples.map((sample) => { const distillation = latestDistillation.get(sample.sourceItemId)!; return { sampleId: sample.id, sourceItemId: sample.sourceItemId, materialDistillationId: distillation.id, materialDistillationVersion: distillation.version }; }),
+        accountResearch: accountResearch ? { studyId: accountResearch.id, version: accountResearch.version } : null,
+      });
+      await tx.benchmarkStudy.update({ where: { id: study.id }, data: { output: json(manifest) } });
+      await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "benchmark_creator_profile.created", resourceType: "benchmark_study", resourceId: study.id, metadata: json({ benchmarkAccountId: benchmark.id, sampleCount: candidates.length, materialDistillationIds: manifest.distillations.map(({ materialDistillationId }) => materialDistillationId), accountResearchStudyId: manifest.accountResearch?.studyId ?? null }) } });
+      return { id: study.id, maxAttempts: 3 };
+    }, { isolationLevel: "Serializable" });
+  } catch (error) {
+    if (error instanceof BenchmarkStudyError) throw error;
+    const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
+    if (code === "P2002" || code === "P2034") throw new BenchmarkStudyError("BENCHMARK_STUDY_IN_PROGRESS", "这个账号已有一项研究正在进行，请稍候。");
+    throw error;
+  }
+  try {
+    await enqueueBenchmarkCreatorProfileStudy({ studyId: created.id, workspaceId: input.workspaceId, requestedById: input.userId }, created.maxAttempts);
+  } catch {
+    await db.benchmarkStudy.update({ where: { id: created.id }, data: { status: "FAILED", errorCode: "BENCHMARK_QUEUE_UNAVAILABLE", errorMessage: "账号画像暂时无法开始。" } });
+    throw new BenchmarkStudyError("BENCHMARK_QUEUE_UNAVAILABLE", "账号画像暂时无法开始。");
   }
   return getBenchmarkStudy({ workspaceId: input.workspaceId, benchmarkAccountId: input.benchmarkAccountId, studyId: created.id });
 }

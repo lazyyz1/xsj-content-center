@@ -1,6 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { benchmarkCreatorProfileGenerationSchema } from "../benchmark-creator-profile";
 import { materialDistillationCopywritingGenerationSchema, materialDistillationDiscoveryGenerationSchema } from "../material-distillation";
 import { OpenAICompatibleLLMProvider } from "./provider";
 
@@ -35,6 +36,7 @@ beforeAll(async () => {
       if (prompt.includes("OLD_M7_ROOT")) return send(200, completion(JSON.stringify({ summary: { text: "old" }, insights: [] })));
       if (prompt.includes("M7_DISCOVERY_REQUEST")) return send(200, completion(JSON.stringify({ highlights: [] })));
       if (prompt.includes("M7_COPYWRITING_REQUEST")) return send(200, completion(JSON.stringify({ sections: [] })));
+      if (prompt.includes("M9_PROFILE_REQUEST")) return send(200, completion(JSON.stringify({ sections: [] })));
       if (prompt.includes("FENCED_STRUCTURED")) return send(200, completion("```json\n{\"ok\":true,\"title\":\"Fenced result\"}\n```"));
       if (prompt.includes("TIMEOUT")) return setTimeout(() => send(200, completion(JSON.stringify({ ok: true }))), 100);
       return send(200, completion(JSON.stringify({ ok: true, title: "Fixture result" })));
@@ -107,6 +109,11 @@ describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
     expect(lastRequestBody).toMatchObject({ response_format: { type: "json_object" } });
     await kimiProvider().generateStructured({ prompt: "M7_COPYWRITING_REQUEST", structuredOutput: { strategy: "JSON_OBJECT", preferJsonSchema: true, schemaName: "ignored_for_this_task" } }, materialDistillationCopywritingGenerationSchema);
     expect(lastRequestBody).toMatchObject({ response_format: { type: "json_object" } });
+  });
+
+  it("uses the M9 task JSON Object contract without changing the Kimi adapter", async () => {
+    await kimiProvider().generateStructured({ prompt: "M9_PROFILE_REQUEST", structuredOutput: { strategy: "JSON_OBJECT" } }, benchmarkCreatorProfileGenerationSchema);
+    expect(lastRequestBody).toMatchObject({ model: "kimi-k2.6", response_format: { type: "json_object" } });
   });
 
   it("keeps the independent copywriting contract separate", () => {

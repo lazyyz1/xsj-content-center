@@ -3,6 +3,7 @@ import { processContentIngestJob } from "./ingest";
 import { processMaterialAnalysisJob } from "./material-analysis";
 import { processBenchmarkStudyJob } from "./benchmark-analysis";
 import { processBenchmarkPlaybookJob } from "./benchmark-playbook";
+import { processBenchmarkCreatorProfileJob } from "./benchmark-creator-profile";
 import { processMaterialDistillationJob } from "./material-distillation";
 import { createRedisConnection } from "./redis-connection";
 import { processTranscribeSourceJob } from "./transcription";
@@ -28,6 +29,7 @@ export const CONTENT_INGEST = "CONTENT_INGEST";
 export const ANALYZE_MATERIAL = "ANALYZE_MATERIAL";
 export const ANALYZE_BENCHMARK = "ANALYZE_BENCHMARK";
 export const IDENTIFY_BENCHMARK_PLAYBOOKS = "IDENTIFY_BENCHMARK_PLAYBOOKS";
+export const GENERATE_BENCHMARK_CREATOR_PROFILE = "GENERATE_BENCHMARK_CREATOR_PROFILE";
 export const DISTILL_MATERIAL = "DISTILL_MATERIAL";
 
 export type ContentIngestPayload = {
@@ -68,7 +70,7 @@ export function createContentIngestQueue() {
   return new Queue<ContentIngestJobPayload>(CONTENT_INGEST_QUEUE, { connection: createRedisConnection() });
 }
 
-async function enqueueOnContentQueue(name: typeof CONTENT_INGEST | typeof ANALYZE_MATERIAL | typeof ANALYZE_BENCHMARK | typeof IDENTIFY_BENCHMARK_PLAYBOOKS | typeof DISTILL_MATERIAL, payload: ContentIngestJobPayload, maxAttempts: number) {
+async function enqueueOnContentQueue(name: typeof CONTENT_INGEST | typeof ANALYZE_MATERIAL | typeof ANALYZE_BENCHMARK | typeof IDENTIFY_BENCHMARK_PLAYBOOKS | typeof GENERATE_BENCHMARK_CREATOR_PROFILE | typeof DISTILL_MATERIAL, payload: ContentIngestJobPayload, maxAttempts: number) {
   const queue = createContentIngestQueue();
   try {
     const payloadId = "jobId" in payload ? payload.jobId : payload.studyId;
@@ -96,6 +98,10 @@ export async function enqueueBenchmarkPlaybookStudy(payload: BenchmarkStudyPaylo
   return enqueueOnContentQueue(IDENTIFY_BENCHMARK_PLAYBOOKS, payload, maxAttempts);
 }
 
+export async function enqueueBenchmarkCreatorProfileStudy(payload: BenchmarkStudyPayload, maxAttempts = 3) {
+  return enqueueOnContentQueue(GENERATE_BENCHMARK_CREATOR_PROFILE, payload, maxAttempts);
+}
+
 export async function enqueueMaterialDistillation(payload: ContentIngestPayload, maxAttempts = 3) {
   return enqueueOnContentQueue(DISTILL_MATERIAL, payload, maxAttempts);
 }
@@ -112,6 +118,7 @@ export function createContentIngestWorker() {
       if (job.name === ANALYZE_MATERIAL) return processMaterialAnalysisJob(job as Job<ContentIngestPayload>);
       if (job.name === ANALYZE_BENCHMARK) return processBenchmarkStudyJob(job as Job<BenchmarkStudyPayload>);
       if (job.name === IDENTIFY_BENCHMARK_PLAYBOOKS) return processBenchmarkPlaybookJob(job as Job<BenchmarkStudyPayload>);
+      if (job.name === GENERATE_BENCHMARK_CREATOR_PROFILE) return processBenchmarkCreatorProfileJob(job as Job<BenchmarkStudyPayload>);
       if (job.name === DISTILL_MATERIAL) return processMaterialDistillationJob(job as Job<ContentIngestPayload>);
       throw new UnrecoverableError(`Unsupported job: ${job.name}`);
     },

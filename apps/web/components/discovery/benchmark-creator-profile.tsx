@@ -1,8 +1,8 @@
 /* finesse · register=product · shell=floating-research-canvas · palette=cool-slate-cobalt · density=7 */
 "use client";
 
-import { Badge, Card } from "@content-center/ui";
-import { BookmarkCheck, ChartNoAxesCombined, ChevronDown, ChevronRight, Clapperboard, ExternalLink, FileSearch, FileText, Quote, Sparkles, Video, X } from "lucide-react";
+import { Badge, Button, Card } from "@content-center/ui";
+import { BookmarkCheck, ChartNoAxesCombined, ChevronDown, ChevronRight, Clapperboard, ExternalLink, FileSearch, FileText, Loader2, Quote, Sparkles, Video, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { BenchmarkCreatorDetailDTO } from "@/server/discovery/benchmark-creator-read-model";
@@ -14,6 +14,19 @@ type Source = BenchmarkCreatorDetailDTO["representativeSources"][number];
 const platformLabel: Record<string, string> = { DOUYIN: "抖音", XIAOHONGSHU: "小红书" };
 const qualityLabel: Record<Highlight["quality"], string> = { WORTH_KEEPING: "值得留下", OBSERVE: "先观察", CASE_ONLY: "案例参考", DO_NOT_KEEP: "暂不沉淀" };
 const methodStatus: Record<BenchmarkCreatorDetailDTO["savedMethods"][number]["status"], string> = { SAVED: "已收藏", TRIAL: "试用中", CORE: "常用", DISABLED: "已停用" };
+const creatorProfileLabel = {
+  POSITIONING: "主要讲什么",
+  AUDIENCE: "主要面向谁",
+  THEME: "高频主题",
+  TOPIC_PATTERN: "选题特点",
+  VIDEO_STYLE: "内容特色",
+  EVIDENCE_STYLE: "如何建立说服力",
+  ATTENTION_TRUST: "关注与信任特征",
+  RECURRING_VIEWPOINT: "反复出现的观点",
+  METHOD_TENDENCY: "目前观察到的内容方法",
+  LEARN: "我们可以学什么",
+  AVOID: "哪些不要照搬",
+} as const;
 
 function Empty({ children, compact = false }: { children: string; compact?: boolean }) {
   return <div className={`benchmark-empty ${compact ? "benchmark-empty-compact" : ""}`}>{children}</div>;
@@ -103,7 +116,21 @@ function AccountResearchSummary({ profile }: { profile: BenchmarkCreatorDetailDT
   return <div className="grid gap-4 md:grid-cols-2">{profile.accountResearch.groups.map((group) => <section key={group.title}><h3 className="font-medium">{group.title}</h3><div className="mt-2 space-y-2">{group.items.slice(0, 3).map((item) => <article key={`${group.title}-${item.name}`} className="rounded-xl bg-white/50 p-3"><p className="text-sm font-medium">{item.name}</p><p className="mt-1 text-sm leading-6 text-[var(--text-secondary)]">{item.summary}</p>{item.sources.length ? <div className="mt-2 flex flex-wrap gap-2">{item.sources.map((source) => <Link key={source.id} href={`/library/${source.id}`} className="text-xs text-[var(--accent)]">{source.title}</Link>)}</div> : null}</article>)}</div></section>)}</div>;
 }
 
-export function BenchmarkCreatorProfile({ profile, onShowContent }: { profile: BenchmarkCreatorDetailDTO; onShowContent: () => void }) {
+function AICreatorProfile({ profile, selectedCount, canGenerate, busy, onShowResearch, onGenerate }: { profile: BenchmarkCreatorDetailDTO; selectedCount: number; canGenerate: boolean; busy: boolean; onShowResearch: () => void; onGenerate: () => void }) {
+  const result = profile.creatorProfile;
+  const priority = ["POSITIONING", "AUDIENCE", "THEME", "TOPIC_PATTERN", "VIDEO_STYLE", "EVIDENCE_STYLE", "ATTENTION_TRUST", "RECURRING_VIEWPOINT", "METHOD_TENDENCY", "LEARN", "AVOID"] as const;
+  const ordered = [...(result?.sections ?? [])].sort((left, right) => priority.indexOf(left.code) - priority.indexOf(right.code));
+  const previews = ordered.slice(0, 6);
+  const more = ordered.slice(6);
+  const selectionReady = selectedCount >= 5 && selectedCount <= 10 && canGenerate;
+  const action = selectionReady ? <Button variant="secondary" disabled={!canGenerate || busy} onClick={onGenerate}>{busy ? <Loader2 size={14} className="animate-spin" /> : null}{result ? "更新画像" : "生成账号画像"}</Button> : <Button variant="secondary" onClick={onShowResearch}>选择代表内容</Button>;
+  return <section className="benchmark-section benchmark-glass" data-testid="ai-creator-profile"><PreviewHeading title="AI 账号画像" description="根据你选择的代表内容，整理这个博主反复出现的内容特点。" action={action} />
+    {!selectionReady ? <p className="mt-3 text-xs text-[var(--text-secondary)]">先去研究页选择至少 5 条已经完成精华提炼的代表内容。</p> : null}
+    {result ? <><div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{previews.map((section) => <article key={section.code} className="rounded-2xl border border-white/70 bg-white/60 p-4"><p className="text-sm font-semibold">{creatorProfileLabel[section.code]}</p><p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{section.text}</p>{section.sources.length ? <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1">{section.sources.slice(0, 2).map((source) => <Link key={source.id} href={`/library/${source.id}`} className="text-xs text-[var(--accent)]">{source.title}</Link>)}</div> : null}</article>)}</div>{more.length ? <details className="mt-3 rounded-2xl border border-white/70 bg-white/45 p-4"><summary className="cursor-pointer text-sm font-medium text-[var(--accent)]">查看更多画像观察</summary><div className="mt-3 grid gap-3 md:grid-cols-2">{more.map((section) => <article key={section.code}><p className="text-sm font-semibold">{creatorProfileLabel[section.code]}</p><p className="mt-1 text-sm leading-6 text-[var(--text-secondary)]">{section.text}</p></article>)}</div></details> : null}</> : <div className="mt-3"><Empty compact>还没有生成账号画像。选择 5–10 条代表内容后，可以在这里形成有来源的账号观察。</Empty></div>}
+  </section>;
+}
+
+export function BenchmarkCreatorProfile({ profile, onShowContent, selectedProfileCount, canGenerateProfile, profileBusy, onShowResearch, onGenerateProfile }: { profile: BenchmarkCreatorDetailDTO; onShowContent: () => void; selectedProfileCount: number; canGenerateProfile: boolean; profileBusy: boolean; onShowResearch: () => void; onGenerateProfile: () => void }) {
   const [selected, setSelected] = useState<Highlight | null>(null);
   const selectedSource = selected ? profile.representativeSources.find(({ id }) => id === selected.sourceItemId) ?? null : null;
   const previews = profile.representativeSources.slice(0, 4);
@@ -112,6 +139,8 @@ export function BenchmarkCreatorProfile({ profile, onShowContent }: { profile: B
     <section className="benchmark-section benchmark-glass"><PreviewHeading title="代表内容" description="精选这个博主的代表内容，快速了解内容风格和核心主题。" action={profile.representativeSources.length > 4 ? <button type="button" onClick={onShowContent} className="benchmark-text-action">查看全部<ChevronRight size={16} /></button> : null} />{previews.length ? <div className="benchmark-preview-grid">{previews.map((source) => <SourcePreviewCard key={source.id} source={source} />)}</div> : <div className="mt-4"><Empty compact>还没有收录这个博主的代表内容。</Empty></div>}</section>
 
     <section className="benchmark-section benchmark-glass"><PreviewHeading title="观点与精华" description="基于已研究内容，提炼值得关注的观点与可复用经验。" />{highlights.length ? <div className="benchmark-highlight-grid">{highlights.map((highlight, index) => <button key={`${highlight.sourceItemId}-${highlight.title}-${index}`} type="button" className="benchmark-highlight-card" data-selected={selected === highlight ? "true" : "false"} onClick={() => setSelected(highlight)}><h3>{highlight.title}</h3><p>{highlight.explanation}</p><div className="benchmark-highlight-meta"><span className="line-clamp-1">{highlight.sourceTitle}</span><span className="benchmark-quality">{qualityLabel[highlight.quality]}</span></div></button>)}</div> : <div className="mt-4"><Empty compact>这些内容还没有完成精华提炼。</Empty></div>}</section>
+
+    <AICreatorProfile profile={profile} selectedCount={selectedProfileCount} canGenerate={canGenerateProfile} busy={profileBusy} onShowResearch={onShowResearch} onGenerate={onGenerateProfile} />
 
     {profile.copywriting.length ? <section className="benchmark-section benchmark-glass"><PreviewHeading title="视频怎么写" description="只展示已经完成的文案拆解，不自动补齐。" /><div className="mt-3 grid gap-3 md:grid-cols-2">{profile.copywriting.slice(0, 2).map((item) => <article key={item.sourceItemId} className="benchmark-copywriting-card"><FileText size={18} /><div className="min-w-0"><h3>{item.sourceTitle}</h3><p>{item.core}</p><Link href={`/library/${item.sourceItemId}`}>查看文案拆解</Link></div></article>)}</div></section> : null}
 

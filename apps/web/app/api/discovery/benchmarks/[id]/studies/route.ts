@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
 import {
   BenchmarkStudyError,
+  createBenchmarkCreatorProfileStudy,
+  createBenchmarkCreatorProfileStudySchema,
   createBenchmarkPlaybookStudy,
   createBenchmarkPlaybookStudySchema,
   createBenchmarkStudy,
@@ -31,13 +33,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!context) return apiError("UNAUTHORIZED", 401);
   if (context.role === "VIEWER") return apiError("FORBIDDEN", 403, "当前权限不能发起账号研究。");
   const body = await request.json().catch(() => null) as { kind?: unknown; sampleIds?: unknown; snapshotIds?: unknown; contentSnapshotIds?: unknown } | null;
+  const creatorProfile = body?.kind === "CREATOR_PROFILE";
   const playbooks = body?.kind === "PLAYBOOKS";
-  const schema = playbooks ? createBenchmarkPlaybookStudySchema : createBenchmarkStudySchema;
+  const schema = creatorProfile ? createBenchmarkCreatorProfileStudySchema : playbooks ? createBenchmarkPlaybookStudySchema : createBenchmarkStudySchema;
   const parsed = schema.safeParse({ sampleIds: body?.sampleIds ?? body?.snapshotIds ?? body?.contentSnapshotIds });
-  if (!parsed.success) return apiError("BENCHMARK_INVALID_SAMPLES", 400, playbooks ? "请选择 3–10 条不重复的代表内容。" : "请选择 1–10 条不重复的代表内容。");
+  if (!parsed.success) return apiError("BENCHMARK_INVALID_SAMPLES", 400, creatorProfile ? "请选择 5–10 条不重复的代表内容。" : playbooks ? "请选择 3–10 条不重复的代表内容。" : "请选择 1–10 条不重复的代表内容。");
   try {
     const { id } = await params;
-    const study = playbooks
+    const study = creatorProfile
+      ? await createBenchmarkCreatorProfileStudy({ workspaceId: context.workspace.id, benchmarkAccountId: id, userId: context.session.user.id, sampleIds: parsed.data.sampleIds })
+      : playbooks
       ? await createBenchmarkPlaybookStudy({ workspaceId: context.workspace.id, benchmarkAccountId: id, userId: context.session.user.id, sampleIds: parsed.data.sampleIds })
       : await createBenchmarkStudy({ workspaceId: context.workspace.id, benchmarkAccountId: id, userId: context.session.user.id, sampleIds: parsed.data.sampleIds });
     return NextResponse.json(study, { status: 202 });

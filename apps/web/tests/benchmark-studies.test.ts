@@ -3,9 +3,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 const enqueueBenchmarkStudy = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "queued" }));
 const enqueueBenchmarkPlaybookStudy = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "queued-playbooks" }));
-vi.mock("@content-center/worker/queue", () => ({ enqueueBenchmarkStudy, enqueueBenchmarkPlaybookStudy }));
+const enqueueBenchmarkCreatorProfileStudy = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "queued-profile" }));
+vi.mock("@content-center/worker/queue", () => ({ enqueueBenchmarkStudy, enqueueBenchmarkPlaybookStudy, enqueueBenchmarkCreatorProfileStudy }));
 import { db } from "@content-center/db";
-import { createBenchmarkPlaybookStudy, createBenchmarkPlaybookStudySchema, createBenchmarkStudy, createBenchmarkStudySchema, listBenchmarkCandidates, listBenchmarkStudies } from "../server/discovery/benchmark-study-service";
+import { benchmarkCreatorProfileInputSchema, benchmarkCreatorProfileOutputSchema } from "@content-center/providers";
+import { createBenchmarkCreatorProfileStudy, createBenchmarkCreatorProfileStudySchema, createBenchmarkPlaybookStudy, createBenchmarkPlaybookStudySchema, createBenchmarkStudy, createBenchmarkStudySchema, listBenchmarkCandidates, listBenchmarkStudies } from "../server/discovery/benchmark-study-service";
 import { createMethodFromBenchmarkStudy, getMethod } from "../server/methods/service";
 
 function understanding(quote: string) {
@@ -43,6 +45,8 @@ describe("benchmark study request boundary", () => {
     expect(createBenchmarkStudySchema.safeParse({ sampleIds: ["sample-1", "sample-1"] }).success).toBe(false);
     expect(createBenchmarkPlaybookStudySchema.safeParse({ sampleIds: ["sample-1", "sample-2", "sample-3"] }).success).toBe(true);
     expect(createBenchmarkPlaybookStudySchema.safeParse({ sampleIds: ["sample-1", "sample-2"] }).success).toBe(false);
+    expect(createBenchmarkCreatorProfileStudySchema.safeParse({ sampleIds: Array.from({ length: 5 }, (_, index) => `sample-${index}`) }).success).toBe(true);
+    expect(createBenchmarkCreatorProfileStudySchema.safeParse({ sampleIds: Array.from({ length: 4 }, (_, index) => `sample-${index}`) }).success).toBe(false);
   });
 });
 
@@ -171,5 +175,24 @@ describe("benchmark study persistence and provenance", () => {
     await expect(listBenchmarkStudies({ workspaceId, benchmarkAccountId: benchmarkId })).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: study.id })]));
     await db.sourceItem.update({ where: { id: m8OnlySourceId }, data: { status: "READY" } });
     expect(enqueueBenchmarkPlaybookStudy).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates versioned creator profiles from five locked M7 results without depending on M8", async () => {
+    await db.benchmarkStudy.updateMany({ where: { workspaceId, status: "PROCESSING" }, data: { status: "FAILED", errorCode: "FIXTURE_STOP", errorMessage: "测试结束。" } });
+    const m4 = (await listBenchmarkStudies({ workspaceId, benchmarkAccountId: benchmarkId })).find((study) => study.kind === "ACCOUNT_RESEARCH" && study.status === "COMPLETED");
+    await expect(createBenchmarkCreatorProfileStudy({ workspaceId, benchmarkAccountId: benchmarkId, userId: ownerId, sampleIds: [snapshotIds[0]!, snapshotIds[1]!, snapshotIds[2]!, snapshotIds[3]!, snapshotIds[6]!] })).rejects.toMatchObject({ code: "BENCHMARK_INVALID_SAMPLES" });
+    const first = await createBenchmarkCreatorProfileStudy({ workspaceId, benchmarkAccountId: benchmarkId, userId: ownerId, sampleIds: snapshotIds.slice(0, 5) });
+    expect(first).toMatchObject({ kind: "CREATOR_PROFILE", version: 4, sampleCount: 5, status: "PROCESSING", samples: expect.arrayContaining([expect.objectContaining({ sourceItemId: sourceIds[0], materialDistillationVersion: 2 }), expect.objectContaining({ sourceItemId: sourceIds[1], materialDistillationVersion: 1 })]) });
+    const stored = await db.benchmarkStudy.findUniqueOrThrow({ where: { id: first.id }, select: { output: true } });
+    const manifest = benchmarkCreatorProfileInputSchema.parse(stored.output);
+    expect(manifest.accountResearch).toEqual(m4 ? { studyId: m4.id, version: m4.version } : null);
+    expect(JSON.stringify(manifest)).not.toContain("PLAYBOOKS");
+    const completed = benchmarkCreatorProfileOutputSchema.parse({ kind: "CREATOR_PROFILE", schemaVersion: "benchmark-creator-profile-v1", message: "Fixture profile", account: manifest.account, inputs: manifest.distillations, accountResearch: manifest.accountResearch, sections: [] });
+    await db.benchmarkStudy.update({ where: { id: first.id }, data: { status: "COMPLETED", output: completed } });
+    const second = await createBenchmarkCreatorProfileStudy({ workspaceId, benchmarkAccountId: benchmarkId, userId: ownerId, sampleIds: snapshotIds.slice(0, 5) });
+    expect(second).toMatchObject({ kind: "CREATOR_PROFILE", version: 5, status: "PROCESSING" });
+    const history = await listBenchmarkStudies({ workspaceId, benchmarkAccountId: benchmarkId });
+    expect(history.find(({ id }) => id === first.id)).toMatchObject({ kind: "CREATOR_PROFILE", status: "COMPLETED", output: { message: "Fixture profile" } });
+    expect(enqueueBenchmarkCreatorProfileStudy).toHaveBeenCalledTimes(2);
   });
 });

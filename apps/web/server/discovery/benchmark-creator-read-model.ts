@@ -1,7 +1,7 @@
 import "server-only";
 
 import { db } from "@content-center/db";
-import { benchmarkAnalysisOutputSchema, benchmarkPlaybookOutputSchema, materialDistillationGenerationSchema } from "@content-center/providers";
+import { benchmarkAnalysisOutputSchema, benchmarkCreatorProfileOutputSchema, benchmarkPlaybookOutputSchema, materialDistillationGenerationSchema, type BenchmarkCreatorProfileSectionCode } from "@content-center/providers";
 import { listBenchmarkStudies } from "./benchmark-study-service";
 
 const key = (platform: string, externalId: string) => `${platform}:${externalId}`;
@@ -14,6 +14,7 @@ export type BenchmarkCreatorDetailDTO = {
   copywriting: Array<{ sourceItemId: string; sourceTitle: string; core: string; opening: string; progression: string[]; reusable: string[]; avoid: string[] }>;
   accountResearch: null | { sampleCount: number; groups: Array<{ title: string; items: Array<{ name: string; summary: string; sources: Array<{ id: string; title: string }> }> }> };
   playbooks: Array<{ name: string; maturity: "OBSERVE" | "STABLE"; elements: string[]; flow: string; useCase: string; sources: Array<{ id: string; title: string }> }>;
+  creatorProfile: null | { studyId: string; version: number; createdAt: string; message: string; sections: Array<{ code: BenchmarkCreatorProfileSectionCode; text: string; sources: Array<{ id: string; title: string }> }> };
   savedMethods: Array<{ id: string; title: string; status: "SAVED" | "TRIAL" | "CORE" | "DISABLED" }>;
 };
 
@@ -115,7 +116,7 @@ export async function getBenchmarkCreatorDetail(input: { workspaceId: string; be
     ["论据与说服", parsedResearch.data.persuasionMethods], ["表达特点", parsedResearch.data.expressionHabits], ["常见收尾", parsedResearch.data.endings],
   ].flatMap(([title, findings]) => Array.isArray(findings) && findings.length ? [{ title: title as string, items: findings.slice(0, 4).map((finding) => ({ name: finding.name, summary: finding.summary, sources: finding.occurrenceSampleIds.flatMap((sampleId) => { const sample = research?.samples.find(({ id }) => id === sampleId); return sample ? [{ id: sample.sourceItemId, title: sample.title }] : []; }) })) }] : []) : [];
 
-  const playbookStudy = completedStudies.find((study) => study.kind === "PLAYBOOKS" && study.output && "kind" in study.output && study.output.playbooks.length > 0);
+  const playbookStudy = completedStudies.find((study) => study.kind === "PLAYBOOKS" && study.output && "kind" in study.output && study.output.kind === "PLAYBOOKS" && study.output.playbooks.length > 0);
   const parsedPlaybooks = playbookStudy ? benchmarkPlaybookOutputSchema.safeParse(playbookStudy.output) : null;
   const playbooks = parsedPlaybooks?.success ? parsedPlaybooks.data.playbooks.map((playbook) => ({
     name: playbook.name,
@@ -125,6 +126,23 @@ export async function getBenchmarkCreatorDetail(input: { workspaceId: string; be
     useCase: playbook.useCase,
     sources: playbook.supportSampleIds.flatMap((sampleId) => { const sample = playbookStudy?.samples.find(({ id }) => id === sampleId); return sample ? [{ id: sample.sourceItemId, title: sample.title }] : []; }),
   })) : [];
+
+  const creatorProfileStudy = completedStudies.find((study) => study.kind === "CREATOR_PROFILE" && study.output && "kind" in study.output && study.output.kind === "CREATOR_PROFILE");
+  const parsedCreatorProfile = creatorProfileStudy ? benchmarkCreatorProfileOutputSchema.safeParse(creatorProfileStudy.output) : null;
+  const creatorProfile = parsedCreatorProfile?.success && creatorProfileStudy ? {
+    studyId: creatorProfileStudy.id,
+    version: creatorProfileStudy.version,
+    createdAt: creatorProfileStudy.createdAt,
+    message: parsedCreatorProfile.data.message,
+    sections: parsedCreatorProfile.data.sections.map((section) => ({
+      code: section.code,
+      text: section.text,
+      sources: [...new Set(section.evidence.map(({ sourceItemId }) => sourceItemId))].flatMap((sourceItemId) => {
+        const sample = creatorProfileStudy.samples.find((item) => item.sourceItemId === sourceItemId);
+        return sample ? [{ id: sample.sourceItemId, title: sample.title }] : [];
+      }),
+    })),
+  } : null;
 
   const savedMethods = methodRows.flatMap((method) => {
     const current = method.versions[0];
@@ -142,6 +160,7 @@ export async function getBenchmarkCreatorDetail(input: { workspaceId: string; be
     copywriting,
     accountResearch: parsedResearch?.success && research ? { sampleCount: research.sampleCount, groups: researchGroups } : null,
     playbooks,
+    creatorProfile,
     savedMethods,
   };
 }
