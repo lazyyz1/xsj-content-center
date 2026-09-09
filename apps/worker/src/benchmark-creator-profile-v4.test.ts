@@ -4,6 +4,7 @@ import {
   benchmarkCreatorProfileGenerationV4Schema,
   benchmarkCreatorProfileInputV4Schema,
   benchmarkCreatorProfileOutputV4Instruction,
+  buildDeterministicCreatorProfileSummary,
   type BenchmarkCreatorProfileGenerationV4,
 } from "@content-center/providers";
 import { normalizeBenchmarkCreatorProfileV4Output, type CreatorProfileAtom } from "./benchmark-creator-profile";
@@ -12,15 +13,33 @@ function fixture() {
   const inputs = Array.from({ length: 5 }, (_, index) => ({ sampleId: `s${index + 1}`, sourceItemId: `source-${index + 1}`, materialDistillationId: `m7-${index + 1}`, materialDistillationVersion: index + 1 }));
   const atomTexts = ["开头直接给出具体成交数字和学生成绩", "中间才补充转化率作为说明", "客户案例用于证明观点", "直播结果开场后解释原因", "个人现场经历和行业观点"];
   const atoms: CreatorProfileAtom[] = inputs.map((input, index) => ({ ...input, ref: `E00${index + 1}`, itemKind: "HIGHLIGHT", itemKey: "0", title: `精华 ${index + 1}`, text: atomTexts[index]!, type: "method", quality: "OBSERVE", sourceRefs: ["T001"], evidence: [{ ref: "T001", text: atomTexts[index]! }] }));
-  const manifest = benchmarkCreatorProfileInputV4Schema.parse({ kind: "CREATOR_PROFILE_INPUT", schemaVersion: "benchmark-creator-profile-v4", account: { name: "真实博主", platform: "DOUYIN", bio: "面向教培经营者", tags: ["教培运营"] }, distillations: inputs, accountResearch: null, priorProfileVersion: 9 });
+  const manifest = benchmarkCreatorProfileInputV4Schema.parse({ kind: "CREATOR_PROFILE_INPUT", schemaVersion: "benchmark-creator-profile-v4", account: { name: "真实博主", platform: "DOUYIN", bio: "面向教培机构老板和校区管理者", tags: ["教培运营"] }, distillations: inputs, accountResearch: null, priorProfileVersion: 9 });
   return { inputs, atoms, manifest };
 }
 
 const signal = (code: string, evidenceRefs: string[]) => ({ code, evidenceRefs });
 const video = (index: number, primaryTopic: string, topicSignals: unknown[] = [], styleSignals: unknown[] = []) => ({ sampleRef: `V00${index}`, primaryTopic, topicSignals, styleSignals });
-const generation = (videos: unknown[], profile: unknown = null): BenchmarkCreatorProfileGenerationV4 => benchmarkCreatorProfileGenerationV4Schema.parse({ profile, videos });
+const generation = (videos: unknown[]): BenchmarkCreatorProfileGenerationV4 => benchmarkCreatorProfileGenerationV4Schema.parse({ videos });
 
 describe("benchmark creator profile V4 deterministic signals", () => {
+  it("derives a conservative PROFILE from explicit metadata and current topics", () => {
+    const data = fixture();
+    const summary = buildDeterministicCreatorProfileSummary(data.manifest.account, ["短视频招生", "招生转化", "定价策略", "行业观点", "直播执行"]);
+    expect(summary).toEqual({ status: "CLEAR", text: "从当前研究内容看，这个账号主要面向教培机构老板和校区管理者，内容主要涉及招生、成交、定价、行业观点和执行等教培经营问题。" });
+    for (const term of ["全链路服务商", "赋能者", "竞争壁垒", "增长飞轮", "护城河"]) expect(summary?.text).not.toContain(term);
+  });
+
+  it("does not guess an audience from unclear metadata and never marks one video CLEAR", () => {
+    const unclear = { name: "普通账号", platform: "DOUYIN", bio: "分享日常内容", tags: [] };
+    expect(buildDeterministicCreatorProfileSummary(unclear, ["行业观点", "直播执行"])?.text).toBe("从当前研究内容看，这个账号主要讨论行业观点和执行等内容。");
+    expect(buildDeterministicCreatorProfileSummary(unclear, ["行业观点", "直播执行"])?.status).toBe("OBSERVE");
+    expect(buildDeterministicCreatorProfileSummary(fixture().manifest.account, ["短视频招生"])?.status).toBe("OBSERVE");
+  });
+
+  it("does not accept a model-generated PROFILE in the V4 contract", () => {
+    expect(benchmarkCreatorProfileGenerationV4Schema.safeParse({ profile: { text: "AI 标签" }, videos: [] }).success).toBe(false);
+  });
+
   it("keeps NUMBER_RESULT only for the video classified as using it as an entry", () => {
     const data = fixture();
     const output = normalizeBenchmarkCreatorProfileV4Output(generation([
@@ -110,7 +129,7 @@ describe("benchmark creator profile V4 deterministic signals", () => {
 
   it("never generates RECURRING_VIEWPOINT and does not use PROFILE to support signals", () => {
     const data = fixture();
-    const output = normalizeBenchmarkCreatorProfileV4Output(generation([video(1, "招生"), video(2, "成交"), video(3, "案例"), video(4, "直播"), video(5, "行业观点")], { status: "CLEAR", text: "从当前研究内容看，这是面向教培经营者的实战内容账号。", evidenceRefs: ["E001", "E002", "E003"] }), data.atoms, data.manifest);
+    const output = normalizeBenchmarkCreatorProfileV4Output(generation([video(1, "招生"), video(2, "成交"), video(3, "案例"), video(4, "直播"), video(5, "行业观点")]), data.atoms, data.manifest);
     expect(output.cards.find(({ code }) => code === "PROFILE")?.status).toBe("CLEAR");
     expect(output.cards.some(({ code }) => code === "RECURRING_VIEWPOINT")).toBe(false);
     expect(output.cards.some(({ code }) => code === "TOPIC_STYLE" || code === "CONTENT_STYLE")).toBe(false);

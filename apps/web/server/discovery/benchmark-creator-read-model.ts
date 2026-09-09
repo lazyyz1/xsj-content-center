@@ -1,7 +1,7 @@
 import "server-only";
 
 import { db } from "@content-center/db";
-import { benchmarkAnalysisOutputSchema, benchmarkCreatorProfileOutputSchema, benchmarkCreatorProfileOutputV2Schema, benchmarkCreatorProfileOutputV3Schema, benchmarkCreatorProfileOutputV4Schema, benchmarkPlaybookOutputSchema, materialDistillationGenerationSchema, type BenchmarkCreatorProfileCardCode, type BenchmarkCreatorProfileSectionCode } from "@content-center/providers";
+import { benchmarkAnalysisOutputSchema, benchmarkCreatorProfileOutputSchema, benchmarkCreatorProfileOutputV2Schema, benchmarkCreatorProfileOutputV3Schema, benchmarkCreatorProfileOutputV4Schema, benchmarkPlaybookOutputSchema, buildDeterministicCreatorProfileSummary, materialDistillationGenerationSchema, type BenchmarkCreatorProfileCardCode, type BenchmarkCreatorProfileSectionCode } from "@content-center/providers";
 import { listBenchmarkStudies } from "./benchmark-study-service";
 
 const key = (platform: string, externalId: string) => `${platform}:${externalId}`;
@@ -132,7 +132,9 @@ export async function getBenchmarkCreatorDetail(input: { workspaceId: string; be
   const parsedCreatorProfileV3 = creatorProfileStudy && !parsedCreatorProfileV4?.success ? benchmarkCreatorProfileOutputV3Schema.safeParse(creatorProfileStudy.output) : null;
   const parsedCreatorProfileV2 = creatorProfileStudy && !parsedCreatorProfileV4?.success && !parsedCreatorProfileV3?.success ? benchmarkCreatorProfileOutputV2Schema.safeParse(creatorProfileStudy.output) : null;
   const parsedCreatorProfileV1 = creatorProfileStudy && !parsedCreatorProfileV4?.success && !parsedCreatorProfileV3?.success && !parsedCreatorProfileV2?.success ? benchmarkCreatorProfileOutputSchema.safeParse(creatorProfileStudy.output) : null;
-  const claimProfile = parsedCreatorProfileV4?.success ? parsedCreatorProfileV4.data : parsedCreatorProfileV3?.success ? parsedCreatorProfileV3.data : null;
+  const v4Profile = parsedCreatorProfileV4?.success ? buildDeterministicCreatorProfileSummary(parsedCreatorProfileV4.data.account, parsedCreatorProfileV4.data.videoSignals.map(({ primaryTopic }) => primaryTopic)) : null;
+  const v4Cards = parsedCreatorProfileV4?.success && v4Profile && !parsedCreatorProfileV4.data.cards.some(({ code }) => code === "PROFILE") ? [{ code: "PROFILE" as const, status: v4Profile.status, claims: [{ text: v4Profile.text, evidence: parsedCreatorProfileV4.data.videoSignals.flatMap((video) => [...video.topicSignals, ...video.styleSignals].flatMap(({ evidence }) => evidence)) }] }, ...parsedCreatorProfileV4.data.cards] : parsedCreatorProfileV4?.success ? parsedCreatorProfileV4.data.cards : null;
+  const claimProfile = parsedCreatorProfileV4?.success ? { message: parsedCreatorProfileV4.data.message, cards: v4Cards ?? [] } : parsedCreatorProfileV3?.success ? parsedCreatorProfileV3.data : null;
   const parsedProfile = claimProfile
     ? { message: claimProfile.message, sections: claimProfile.cards.map((card) => ({ code: card.code, status: card.status, text: card.claims.map(({ text }) => `• ${text}`).join("\n"), evidence: card.claims.flatMap(({ evidence }) => evidence) })) }
     : parsedCreatorProfileV2?.success ? { message: parsedCreatorProfileV2.data.message, sections: parsedCreatorProfileV2.data.cards }

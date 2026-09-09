@@ -36,7 +36,7 @@ beforeAll(async () => {
       if (prompt.includes("OLD_M7_ROOT")) return send(200, completion(JSON.stringify({ summary: { text: "old" }, insights: [] })));
       if (prompt.includes("M7_DISCOVERY_REQUEST")) return send(200, completion(JSON.stringify({ highlights: [] })));
       if (prompt.includes("M7_COPYWRITING_REQUEST")) return send(200, completion(JSON.stringify({ sections: [] })));
-      if (prompt.includes("M9_PROFILE_REQUEST")) return send(200, completion(JSON.stringify({ profile: null, videos: [] })));
+      if (prompt.includes("M9_PROFILE_REQUEST")) return send(200, completion(JSON.stringify({ videos: [] })));
       if (prompt.includes("FENCED_STRUCTURED")) return send(200, completion("```json\n{\"ok\":true,\"title\":\"Fenced result\"}\n```"));
       if (prompt.includes("TIMEOUT")) return setTimeout(() => send(200, completion(JSON.stringify({ ok: true }))), 100);
       return send(200, completion(JSON.stringify({ ok: true, title: "Fixture result" })));

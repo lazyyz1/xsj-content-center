@@ -18,10 +18,10 @@ import {
   benchmarkCreatorProfileOutputV2Schema,
   benchmarkCreatorProfileOutputV3Schema,
   benchmarkCreatorProfileOutputV4Schema,
+  buildDeterministicCreatorProfileSummary,
   benchmarkCreatorProfileCardCandidateSchema,
   benchmarkCreatorProfileCardCandidateV3Schema,
   benchmarkCreatorProfileClaimCandidateSchema,
-  benchmarkCreatorProfileProfileCandidateSchema,
   benchmarkCreatorProfileSignalCandidateSchema,
   benchmarkCreatorProfileStyleSignalSchema,
   benchmarkCreatorProfileTopicSignalSchema,
@@ -540,14 +540,10 @@ export function normalizeBenchmarkCreatorProfileV4Result(input: BenchmarkCreator
     return { evidence, evidenceRefs: evidence.map(({ evidenceRef }) => evidenceRef) };
   };
 
-  const profile = benchmarkCreatorProfileProfileCandidateSchema.safeParse(input.profile);
-  if (profile.success) {
-    const profileAtoms = profile.data.evidenceRefs.flatMap((ref) => atomMap.get(ref) ?? []);
-    const sourceCount = new Set(profileAtoms.map(({ sourceItemId }) => sourceItemId)).size;
-    if (sourceCount >= 1 && v3ClaimLanguageGate("PROFILE", profile.data.text, profileAtoms) && !/全链路服务商/u.test(profile.data.text)) {
-      const status = claimStatus(profile.data.status, sourceCount);
-      cards.push({ code: "PROFILE", status, claims: [{ id: nextId(), text: profile.data.text, evidenceRefs: profileAtoms.map(({ ref }) => ref), evidence: evidenceFromAtoms(profileAtoms), derivedFrom: [] }] });
-    }
+  const allAtoms = [...new Map(atoms.map((atom) => [atom.ref, atom])).values()];
+  const profile = buildDeterministicCreatorProfileSummary(manifest.account, videos.map(({ primaryTopic }) => primaryTopic));
+  if (profile) {
+    cards.push({ code: "PROFILE", status: profile.status, claims: [{ id: nextId(), text: profile.text, evidenceRefs: allAtoms.map(({ ref }) => ref), evidence: evidenceFromAtoms(allAtoms), derivedFrom: [] }] });
   }
 
   const topicCounts = new Map<string, { label: string; count: number }>();
@@ -557,7 +553,6 @@ export function normalizeBenchmarkCreatorProfileV4Result(input: BenchmarkCreator
     topicCounts.set(key, { label: current?.label ?? label, count: (current?.count ?? 0) + 1 });
   }
   const distribution = [...topicCounts.values()].sort((left, right) => right.count - left.count || left.label.localeCompare(right.label, "zh-CN"));
-  const allAtoms = [...new Map(atoms.map((atom) => [atom.ref, atom])).values()];
   const mixStatus = (distribution[0]?.count ?? 0) >= 3 ? "CLEAR" as const : "OBSERVE" as const;
   const mixText = (distribution[0]?.count ?? 0) >= 2 ? `当前分析的 ${videos.length} 条里：${distribution.map(({ label, count }) => `${count} 条主要围绕“${label}”`).join("；")}。` : "当前这批代表内容主题比较分散，还不足以判断明显的内容比例。";
   cards.push({ code: "CONTENT_MIX", status: mixStatus, claims: [{ id: nextId(), text: mixText, evidenceRefs: allAtoms.map(({ ref }) => ref), evidence: evidenceFromAtoms(allAtoms), derivedFrom: [] }] });
