@@ -40,6 +40,23 @@ function modelAudit(runtime: LLMRuntime) {
   };
 }
 
+function safeFailureDetails(error: LLMError) {
+  const details = error.details;
+  return {
+    ...(details.httpStatus !== undefined ? { httpStatus: details.httpStatus } : {}),
+    ...(details.providerRequestId ? { providerRequestId: details.providerRequestId } : {}),
+    ...(details.actualModel ? { actualModel: details.actualModel } : {}),
+    ...(details.finishReason ? { finishReason: details.finishReason } : {}),
+    ...(details.returnedRootKeys ? { returnedRootKeys: details.returnedRootKeys } : {}),
+    ...(details.returnedFirstLevelObjectKeys ? { returnedFirstLevelObjectKeys: details.returnedFirstLevelObjectKeys } : {}),
+    ...(details.validationIssues ? { validationIssues: details.validationIssues } : {}),
+    ...(details.rawCandidateCount !== undefined ? { rawCandidateCount: details.rawCandidateCount } : {}),
+    ...(details.validCandidateCount !== undefined ? { validCandidateCount: details.validCandidateCount } : {}),
+    ...(details.droppedCandidateCount !== undefined ? { droppedCandidateCount: details.droppedCandidateCount } : {}),
+    ...(details.truncatedToFive !== undefined ? { truncatedToFive: details.truncatedToFive } : {}),
+  };
+}
+
 function runMetadata(metadata: unknown, runtime: LLMRuntime) {
   const source = metadata && typeof metadata === "object" && !Array.isArray(metadata)
     ? metadata as Record<string, unknown>
@@ -85,10 +102,11 @@ export async function executeStructuredAIRun<T>(input: {
     return { id: run.id, action: input.action, status: "SUCCEEDED" as const, output: result.data.value, contextTruncated: input.contextTruncated, provider: runtime.providerName, model: result.data.model, usage };
   } catch (error) {
     const failure = publicError(error, runtime);
+    const failureDetails = safeFailureDetails(failure);
     const latencyMs = Date.now() - requestStartedAt;
     await db.$transaction([
-      db.aIRun.update({ where: { id: run.id }, data: { status: "FAILED", errorCode: failure.code, errorMessage: failure.message, finishedAt: new Date() } }),
-      db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: runtime.providerName, operation: input.operation, requestId: run.id, success: false, units: 1, cost: null, metadata: json({ airRunId: run.id, errorCode: failure.code, promptVersion: input.promptVersion, latencyMs, ...auditModel, ...input.auditMetadata }) } }),
+      db.aIRun.update({ where: { id: run.id }, data: { status: "FAILED", errorCode: failure.code, errorMessage: failure.message, providerRequestId: failure.details.providerRequestId, metadata: json({ ...runMetadata(input.metadata, runtime), failureDetails }), finishedAt: new Date() } }),
+      db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: runtime.providerName, operation: input.operation, requestId: run.id, providerRequestId: failure.details.providerRequestId, success: false, units: 1, cost: null, metadata: json({ airRunId: run.id, errorCode: failure.code, promptVersion: input.promptVersion, latencyMs, failureDetails, ...auditModel, ...input.auditMetadata }) } }),
       db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_failed", resourceType: "ai_run", resourceId: run.id, metadata: json({ ...(input.projectId ? { projectId: input.projectId } : {}), errorCode: failure.code, ...safeAuditMetadata }) } }),
     ]);
     throw failure;

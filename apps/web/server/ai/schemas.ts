@@ -49,7 +49,12 @@ export const studioQuickActionSections: Record<StudioQuickAction, Array<"AUDIENC
 export const STUDIO_FACT_STATES = ["CONFIRMED_OWN_FACT", "EXTERNAL_FACT", "HYPOTHETICAL", "CREATIVE_EXPRESSION", "UNVERIFIED_JUDGMENT"] as const;
 export type StudioFactState = (typeof STUDIO_FACT_STATES)[number];
 const studioFactStateSchema = z.enum(STUDIO_FACT_STATES);
-const quickSuggestionSchema = z.object({ title: z.string().trim().min(1).max(200), text: z.string().trim().min(1).max(20_000), factState: studioFactStateSchema.optional() }).strict();
+const quickTextSuggestionSchema = z.object({ title: z.string().trim().min(1).max(200), text: z.string().trim().min(1).max(20_000) }).strict();
+const quickSuggestionSchema = quickTextSuggestionSchema.extend({ factState: studioFactStateSchema.optional() }).strict();
+export const rewriteOpeningProviderSchema = z.object({
+  summary: z.string().trim().min(1).max(2_000),
+  suggestions: z.array(quickTextSuggestionSchema).min(2).max(5),
+}).strict();
 const quickRiskSchema = z.object({ text: z.string().trim().min(1).max(2_000), handling: z.string().trim().min(1).max(2_000) }).strict();
 export const studioQuickActionOutputSchema = z.object({
   original: z.string().max(1_000_000),

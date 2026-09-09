@@ -5,10 +5,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { db } from "@content-center/db";
-import { MockLLMProvider } from "@content-center/providers";
+import { LLMError, MockLLMProvider } from "@content-center/providers";
 import { applyAIResult, runAIAction } from "../server/ai/ai-run-service";
 import { ProjectContextBuilder } from "../server/ai/project-context";
-import { STUDIO_QUICK_ACTIONS, studioQuickActionSections } from "../server/ai/schemas";
+import { rewriteOpeningProviderSchema, STUDIO_QUICK_ACTIONS, studioQuickActionSections } from "../server/ai/schemas";
 import { defaultContentMethodMinimumItems, defaultContentMethodSectionCodes } from "../server/default-content-method/schemas";
 import { getCreatorMethodsOverview } from "../server/creator-methods/service";
 import { getCreationFeedbackContext } from "../server/creation-feedback/service";
@@ -35,6 +35,7 @@ describe("published workspace default method in Studio", () => {
       prompts.push(input.prompt);
       if (input.prompt.includes("Action: GENERATE_MOTHER_CONTENT")) return { recommendedAngle: "真实问题", alternativeAngles: ["另一个角度"], recommendedTitle: "默认方法生成稿", alternativeTitles: ["问题标题", "场景标题"], openingHook: "新的开头", outline: ["开头", "正文"], body: "新的开头\n\n新的正文", evidenceIds: [], sourceItemIds: [] };
       const action = STUDIO_QUICK_ACTIONS.find((value) => input.prompt.includes(`【本次任务】${value}`));
+      if (action === "REWRITE_OPENING") return { summary: "已调整开头", suggestions: [{ title: "建议一", text: "建议使用这个安全表达。" }, { title: "建议二", text: "可以换成另一种安全表达。" }] };
       const replacementActions = ["REWRITE_BODY", "HUMANIZE_TEXT", "SHORTEN_TEXT", "ALTERNATIVE_EXPRESSION", "DEFAULT_METHOD_OPTIMIZE"];
       return { original: "模型不得决定原文", summary: `${action} 已形成建议`, suggestions: action === "FACT_CHECK" || replacementActions.includes(action ?? "") ? [] : [{ title: "建议一", text: "建议使用这个安全表达。" }, { title: "建议二", text: "可以换成另一种安全表达。" }], replacement: replacementActions.includes(action ?? "") ? "新的开头\n\n按默认方法优化后的正文" : null, risks: action === "FACT_CHECK" ? [{ text: "有一项事实需要确认", handling: "核对内部来源后再保留" }] : [] };
     }),
@@ -102,6 +103,7 @@ describe("published workspace default method in Studio", () => {
     quickV1RunId = run.id;
     expect(run.canApply).toBe(true);
     expect(run.output.suggestions).toHaveLength(2);
+    expect(run.output).toMatchObject({ original: mother.body.split("\n")[0], summary: "已调整开头", replacement: null, replacementFactState: null, risks: [], suggestions: expect.arrayContaining([expect.objectContaining({ factState: "CREATIVE_EXPRESSION" })]), factSafety: { removedSuggestions: 0, blockedReplacement: false } });
     expect((await db.motherContent.findUniqueOrThrow({ where: { projectId } })).body).toBe(mother.body);
     const stored = await db.aIRun.findUniqueOrThrow({ where: { id: run.id } });
     expect(stored.metadata).toMatchObject({ kind: "STUDIO_QUICK_ACTION", studioAction: "REWRITE_OPENING", defaultMethodVersionId: defaultV1Id, defaultMethodSections: "AUDIENCE,OPENING,BOUNDARY" });
@@ -111,6 +113,29 @@ describe("published workspace default method in Studio", () => {
     expect(prompts.at(-1)).toContain("【用户明确要求】不要固定一种结构");
     expect(prompts.at(-1)).toContain("AUDIENCE");
     expect(prompts.at(-1)).not.toContain("TOPIC 可执行建议");
+    expect(prompts.at(-1)).toContain('Return exactly {"summary":string,"suggestions":[{"title":string,"text":string}]}');
+    expect(prompts.at(-1)).not.toContain('"original":string');
+  });
+
+  it("uses a strict opening-only provider contract", () => {
+    expect(rewriteOpeningProviderSchema.safeParse({ summary: "已调整开头", suggestions: [{ title: "方向1", text: "开头一" }, { title: "方向2", text: "开头二" }] }).success).toBe(true);
+    expect(rewriteOpeningProviderSchema.safeParse({ summary: "已调整开头", suggestions: [{ title: "方向1", text: "开头一" }] }).success).toBe(false);
+    expect(rewriteOpeningProviderSchema.safeParse({ summary: "已调整开头", suggestions: [{ title: "方向1", text: "开头一", factState: "CREATIVE_EXPRESSION" }, { title: "方向2", text: "开头二" }] }).success).toBe(false);
+    expect(rewriteOpeningProviderSchema.safeParse({ summary: "已调整开头", suggestions: [{ title: "", text: "开头一" }, { title: "方向2", text: "开头二" }] }).success).toBe(false);
+  });
+
+  it("persists only safe structured-output failure diagnostics", async () => {
+    const sensitiveMarker = "RAW_MODEL_CONTENT_MUST_NOT_BE_STORED";
+    const details = { providerRequestId: "fixture-failed-request", actualModel: "kimi-k2.6", finishReason: "stop", returnedRootKeys: ["openings"], returnedFirstLevelObjectKeys: { openings: ["copy", "name"] }, validationIssues: [{ path: "suggestions", code: "invalid_type", expected: "array", receivedType: "undefined" }], rawContent: sensitiveMarker };
+    const failingRuntime = { ...runtime, provider: new MockLLMProvider(() => { throw new LLMError("LLM_INVALID_RESPONSE", "AI 模型返回的数据结构不符合要求。", false, details); }) };
+    await expect(runStudioQuickAction({ workspaceId, userId, projectId, studioAction: "REWRITE_OPENING" }, { runtime: failingRuntime })).rejects.toMatchObject({ code: "LLM_INVALID_RESPONSE" });
+    const failed = await db.aIRun.findFirstOrThrow({ where: { projectId, status: "FAILED" }, orderBy: { createdAt: "desc" } });
+    const usage = await db.apiUsage.findFirstOrThrow({ where: { requestId: failed.id } });
+    expect(failed.providerRequestId).toBe("fixture-failed-request");
+    expect(failed.metadata).toMatchObject({ failureDetails: { providerRequestId: "fixture-failed-request", actualModel: "kimi-k2.6", finishReason: "stop", returnedRootKeys: ["openings"], returnedFirstLevelObjectKeys: { openings: ["copy", "name"] }, validationIssues: [expect.objectContaining({ path: "suggestions", receivedType: "undefined" })] } });
+    expect(usage.providerRequestId).toBe("fixture-failed-request");
+    expect(usage.metadata).toMatchObject({ failureDetails: { returnedRootKeys: ["openings"], validationIssues: [expect.objectContaining({ path: "suggestions" })] } });
+    expect(JSON.stringify({ run: failed, usage })).not.toContain(sensitiveMarker);
   });
 
   it("keeps topic and fact checks as previews and does not silently overwrite the draft", async () => {

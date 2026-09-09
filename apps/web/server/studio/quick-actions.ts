@@ -4,7 +4,7 @@ import { db, type Prisma } from "@content-center/db";
 import { generationQualityContract } from "@content-center/providers";
 import { executeStructuredAIRun } from "../ai/ai-run-service";
 import { ProjectContextBuilder } from "../ai/project-context";
-import { studioQuickActionOutputSchema, studioQuickActionSchema, studioQuickActionSections, type StudioQuickAction } from "../ai/schemas";
+import { rewriteOpeningProviderSchema, studioQuickActionOutputSchema, studioQuickActionSchema, studioQuickActionSections, type StudioQuickAction } from "../ai/schemas";
 import type { LLMRuntime } from "../ai/llm-runtime";
 import { buildDraftWarnings } from "../ai/draft-warnings";
 import { saveMotherContent } from "../mother-content-service";
@@ -35,6 +35,8 @@ The employee may override soft structure advice, but never fact, privacy, attrib
 Never promise enrollment, revenue, conversion, traffic, a viral result, payback, a minimum result, or that performance cannot get worse. External facts remain external. Unverified judgments must use language such as “可以先检查”, “可能”, “建议”, or “待验证”, never “已经证明”, “保证”, “必然”, or “本质就是”.
 Facts decide whether a claim can be presented as ours; they must not collapse the available topic space. When evidence is missing, prefer a viewpoint, explicit hypothesis, or a clearly labeled evidence-needed idea.
 Use only the task-relevant default-method sections supplied in context. Do not infer or load omitted sections. Return suggestions first; never silently overwrite the draft.`;
+const fullOutputShape = '{"original":string,"summary":string,"suggestions":[{"title":string,"text":string}],"replacement":string|null,"risks":[{"text":string,"handling":string}]}';
+const openingOutputShape = '{"summary":string,"suggestions":[{"title":string,"text":string}]}';
 
 function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
 function object(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
@@ -60,7 +62,7 @@ export async function runStudioQuickAction(input: { workspaceId: string; userId:
   const selection = target(input.studioAction, project.motherContent?.body ?? "", fallback);
   const ownFactTexts = built.ownFacts.map(({ text }) => text);
   const hasActionEvidence = input.studioAction === "ADD_CASE" ? built.hasOwnCaseOrData : built.hasOwnEvidence;
-  const prompt = `【本次任务】${input.studioAction}\n【用户明确要求】${input.instruction?.trim() || "无额外要求"}\n【统一创作上下文】\n${JSON.stringify(built.context)}\n\n${instructions[input.studioAction]}\nReturn exactly {"original":string,"summary":string,"suggestions":[{"title":string,"text":string}],"replacement":string|null,"risks":[{"text":string,"handling":string}]}. Do not return markdown or analysis.`;
+  const prompt = `【本次任务】${input.studioAction}\n【用户明确要求】${input.instruction?.trim() || "无额外要求"}\n【统一创作上下文】\n${JSON.stringify(built.context)}\n\n${instructions[input.studioAction]}\nReturn exactly ${input.studioAction === "REWRITE_OPENING" ? openingOutputShape : fullOutputShape}. Do not return markdown or analysis.`;
   const defaultAudit = { defaultMethodAssetId: built.defaultMethod.assetId, defaultMethodVersionId: built.defaultMethod.versionId, defaultMethodVersion: built.defaultMethod.version, defaultMethodSections: studioQuickActionSections[input.studioAction].join(",") };
   const run = await executeStructuredAIRun({
     workspaceId: input.workspaceId,
@@ -75,6 +77,11 @@ export async function runStudioQuickAction(input: { workspaceId: string; userId:
     contextTruncated: built.contextTruncated,
     onRunCreated: (aiRunId) => recordGenerationMethodUsages({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, aiRunId, selectedMethodVersionIds: built.selectedMethods.map(({ methodVersionId }) => methodVersionId), defaultMethodVersionId: built.defaultMethod?.versionId }).then(() => undefined),
     generate: async (provider) => {
+      if (input.studioAction === "REWRITE_OPENING") {
+        const generated = await provider.generateStructured({ systemPrompt: `${quickSystemPrompt}\n${generationQualityContract}`, prompt }, rewriteOpeningProviderSchema);
+        const value = { original: selection.original, summary: generated.data.value.summary, suggestions: generated.data.value.suggestions, replacement: null, replacementFactState: null, risks: [] };
+        return { ...generated, data: { ...generated.data, value: sanitizeStudioQuickActionOutput(input.studioAction, value, ownFactTexts, hasActionEvidence) } };
+      }
       const generated = await provider.generateStructured({ systemPrompt: `${quickSystemPrompt}\n${generationQualityContract}`, prompt }, studioQuickActionOutputSchema);
       const value = generated.data.value;
       return { ...generated, data: { ...generated.data, value: sanitizeStudioQuickActionOutput(input.studioAction, { ...value, original: selection.original }, ownFactTexts, hasActionEvidence) } };
