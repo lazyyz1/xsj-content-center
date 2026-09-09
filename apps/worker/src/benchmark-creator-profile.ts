@@ -5,18 +5,27 @@ import {
   benchmarkCreatorProfileGenerationSchema,
   benchmarkCreatorProfileGenerationV2Schema,
   benchmarkCreatorProfileGenerationV3Schema,
+  benchmarkCreatorProfileGenerationV4Schema,
   benchmarkCreatorProfileInputSchema,
   benchmarkCreatorProfileInputV2Schema,
   benchmarkCreatorProfileInputV3Schema,
+  benchmarkCreatorProfileInputV4Schema,
   benchmarkCreatorProfileOutputInstruction,
   benchmarkCreatorProfileOutputV2Instruction,
   benchmarkCreatorProfileOutputV3Instruction,
+  benchmarkCreatorProfileOutputV4Instruction,
   benchmarkCreatorProfileOutputSchema,
   benchmarkCreatorProfileOutputV2Schema,
   benchmarkCreatorProfileOutputV3Schema,
+  benchmarkCreatorProfileOutputV4Schema,
   benchmarkCreatorProfileCardCandidateSchema,
   benchmarkCreatorProfileCardCandidateV3Schema,
   benchmarkCreatorProfileClaimCandidateSchema,
+  benchmarkCreatorProfileProfileCandidateSchema,
+  benchmarkCreatorProfileSignalCandidateSchema,
+  benchmarkCreatorProfileStyleSignalSchema,
+  benchmarkCreatorProfileTopicSignalSchema,
+  benchmarkCreatorProfileVideoCandidateSchema,
   benchmarkCreatorProfileSectionCandidateSchema,
   benchmarkCreatorProfileSystemBoundary,
   buildTranscriptSourceIndex,
@@ -25,14 +34,19 @@ import {
   type BenchmarkCreatorProfileGeneration,
   type BenchmarkCreatorProfileGenerationV2,
   type BenchmarkCreatorProfileGenerationV3,
+  type BenchmarkCreatorProfileGenerationV4,
   type BenchmarkCreatorProfileInput,
   type BenchmarkCreatorProfileInputV2,
   type BenchmarkCreatorProfileInputV3,
+  type BenchmarkCreatorProfileInputV4,
   type BenchmarkCreatorProfileOutput,
   type BenchmarkCreatorProfileOutputV2,
   type BenchmarkCreatorProfileOutputV3,
+  type BenchmarkCreatorProfileOutputV4,
   type BenchmarkCreatorProfileCardCandidate,
   type BenchmarkCreatorProfileClaimCandidate,
+  type BenchmarkCreatorProfileStyleSignal,
+  type BenchmarkCreatorProfileTopicSignal,
   type BenchmarkCreatorProfileSectionCandidate,
   type MaterialDistillationOutput,
   type TranscriptSourceIndex,
@@ -434,6 +448,151 @@ export function normalizeBenchmarkCreatorProfileV3Output(input: BenchmarkCreator
   return normalizeBenchmarkCreatorProfileV3Result(input, atoms, manifest).output;
 }
 
+const topicSignalOrder: BenchmarkCreatorProfileTopicSignal[] = ["SPECIFIC_PROBLEM", "NUMBER_RESULT", "SURPRISING_CONTRAST", "CASE_ENTRY", "AUDIENCE_SCENARIO"];
+const styleSignalOrder: BenchmarkCreatorProfileStyleSignal[] = ["CASE_DATA_EVIDENCE", "RESULT_THEN_EXPLAIN", "PROBLEM_REASON_ACTION", "STEP_BY_STEP", "BEFORE_AFTER_COMPARE", "QUESTION_DRIVEN", "EXPERIENCE_STORY"];
+const topicSignalText: Record<BenchmarkCreatorProfileTopicSignal, string> = {
+  SPECIFIC_PROBLEM: "当前研究的视频里，已经多次出现从一个具体问题直接切入的选题方式。",
+  NUMBER_RESULT: "当前研究的视频里，已经多次出现用具体数字或结果直接切入的方式。",
+  SURPRISING_CONTRAST: "当前研究的视频里，已经多次从反常识或意外现象切入。",
+  CASE_ENTRY: "当前研究的视频里，已经多次从一个具体案例或故事切入。",
+  AUDIENCE_SCENARIO: "当前研究的视频里，已经多次从明确人群和真实场景切入。",
+};
+const styleSignalText: Record<BenchmarkCreatorProfileStyleSignal, string> = {
+  CASE_DATA_EVIDENCE: "经常用案例或数据把观点讲具体。",
+  RESULT_THEN_EXPLAIN: "比较常见的是先给出结果，再解释为什么。",
+  PROBLEM_REASON_ACTION: "比较常见的是按问题、原因、做法往下讲。",
+  STEP_BY_STEP: "经常把方法拆成清楚的步骤来讲。",
+  BEFORE_AFTER_COMPARE: "当前样本中多次用前后变化或对比说明问题。",
+  QUESTION_DRIVEN: "当前样本中多次使用提问或反问推进内容。",
+  EXPERIENCE_STORY: "当前样本中多次用个人经历或现场故事来讲。",
+};
+const learnSignalText: Partial<Record<BenchmarkCreatorProfileTopicSignal | BenchmarkCreatorProfileStyleSignal, string>> = {
+  SPECIFIC_PROBLEM: "可以学他从具体问题切入的方式。我们拍的时候，也优先选员工、客户或经营现场正在发生的真实问题。",
+  NUMBER_RESULT: "可以学用结果或数字把问题讲具体，但必须使用我们自己确认过的真实数据。",
+  SURPRISING_CONTRAST: "可以从一个真实的反常识现象切入，但不要为了吸引注意夸大事实。",
+  CASE_ENTRY: "可以从一个具体案例进入主题，但必须换成我们自己确认过的案例。",
+  AUDIENCE_SCENARIO: "可以先说清楚内容面向谁、发生在什么场景，再进入具体问题。",
+  CASE_DATA_EVIDENCE: "讲观点时可以补我们自己的真实案例或数据，让员工和客户更容易理解。",
+  RESULT_THEN_EXPLAIN: "可以先把结果或结论说清楚，再解释原因和做法。",
+  PROBLEM_REASON_ACTION: "可以按“问题 → 原因 → 做法”组织内容，让员工更容易跟下来。",
+  STEP_BY_STEP: "方法类内容可以拆成清楚的步骤，不要一次塞太多观点。",
+  BEFORE_AFTER_COMPARE: "可以用真实的前后变化说明问题，但要保留条件和边界。",
+  QUESTION_DRIVEN: "可以用一个真实问题带着观众往下看，但不要只靠标题提问。",
+  EXPERIENCE_STORY: "可以用自己的经历或现场故事帮助理解，不搬用对方的经历。",
+};
+
+function normalizedTopic(value: string) {
+  return value.normalize("NFKC").trim().replace(/\s+/gu, "").toLocaleLowerCase("zh-CN");
+}
+
+export function normalizeBenchmarkCreatorProfileV4Result(input: BenchmarkCreatorProfileGenerationV4, atoms: CreatorProfileAtom[], manifest: BenchmarkCreatorProfileInputV4) {
+  const atomMap = new Map(atoms.map((atom) => [atom.ref, atom]));
+  const expected = manifest.distillations.map((lock, index) => ({ ...lock, sampleRef: `V${String(index + 1).padStart(3, "0")}` }));
+  const expectedMap = new Map(expected.map((item) => [item.sampleRef, item]));
+  const videos: BenchmarkCreatorProfileOutputV4["videoSignals"] = [];
+  const seenVideos = new Set<string>();
+  let rawSignalCount = 0;
+  let validSignalCount = 0;
+
+  for (const candidate of input.videos) {
+    const parsed = benchmarkCreatorProfileVideoCandidateSchema.safeParse(candidate);
+    if (!parsed.success || seenVideos.has(parsed.data.sampleRef)) continue;
+    const lock = expectedMap.get(parsed.data.sampleRef);
+    if (!lock) continue;
+    seenVideos.add(parsed.data.sampleRef);
+    const allowedAtoms = atoms.filter(({ sampleId }) => sampleId === lock.sampleId);
+    const allowedRefs = new Set(allowedAtoms.map(({ ref }) => ref));
+    const parseSignals = (values: unknown[], kind: "TOPIC" | "STYLE") => {
+      rawSignalCount += values.length;
+      const seen = new Set<string>();
+      return values.flatMap((value) => {
+        const signal = benchmarkCreatorProfileSignalCandidateSchema.safeParse(value);
+        if (!signal.success || seen.has(signal.data.code)) return [];
+        const correctKind = kind === "TOPIC" ? benchmarkCreatorProfileTopicSignalSchema.safeParse(signal.data.code).success : benchmarkCreatorProfileStyleSignalSchema.safeParse(signal.data.code).success;
+        if (!correctKind || signal.data.evidenceRefs.some((ref) => !allowedRefs.has(ref))) return [];
+        const signalAtoms = signal.data.evidenceRefs.map((ref) => atomMap.get(ref)!).filter(Boolean);
+        if (!signalAtoms.length) return [];
+        seen.add(signal.data.code);
+        validSignalCount += 1;
+        return [{ code: signal.data.code, evidenceRefs: signalAtoms.map(({ ref }) => ref), evidence: evidenceFromAtoms(signalAtoms) }];
+      });
+    };
+    videos.push({ sampleRef: parsed.data.sampleRef, sampleId: lock.sampleId, sourceItemId: lock.sourceItemId, primaryTopic: parsed.data.primaryTopic.normalize("NFKC").trim(), topicSignals: parseSignals(parsed.data.topicSignals, "TOPIC"), styleSignals: parseSignals(parsed.data.styleSignals, "STYLE") });
+  }
+  if (videos.length !== expected.length) throw new LLMError("LLM_INVALID_RESPONSE", "AI 模型没有逐条完成当前视频分类。", false, { rawCandidateCount: input.videos.length, validCandidateCount: videos.length, droppedCandidateCount: input.videos.length - videos.length });
+  videos.sort((left, right) => left.sampleRef.localeCompare(right.sampleRef));
+
+  const aggregate = (kind: "TOPIC" | "STYLE", order: Array<BenchmarkCreatorProfileTopicSignal | BenchmarkCreatorProfileStyleSignal>) => order.flatMap((code) => {
+    const supportingVideos = videos.filter((video) => (kind === "TOPIC" ? video.topicSignals : video.styleSignals).some((signal) => signal.code === code));
+    return supportingVideos.length >= 2 ? [{ kind, code, supportingSampleRefs: supportingVideos.map(({ sampleRef }) => sampleRef), supportCount: supportingVideos.length }] : [];
+  }).sort((left, right) => right.supportCount - left.supportCount || order.indexOf(left.code) - order.indexOf(right.code));
+  const topicSignals = aggregate("TOPIC", topicSignalOrder);
+  const styleSignals = aggregate("STYLE", styleSignalOrder);
+  const aggregatedSignals = [...topicSignals, ...styleSignals];
+
+  let nextClaimId = 1;
+  const nextId = () => `C${String(nextClaimId++).padStart(3, "0")}`;
+  const cards: BenchmarkCreatorProfileOutputV4["cards"] = [];
+  const signalClaims = new Map<string, AcceptedClaim>();
+  const evidenceForSignal = (kind: "TOPIC" | "STYLE", code: string) => {
+    const stored = videos.flatMap((video) => (kind === "TOPIC" ? video.topicSignals : video.styleSignals).filter((signal) => signal.code === code));
+    const evidence = [...new Map(stored.flatMap((signal) => signal.evidence).map((item) => [item.evidenceRef, item])).values()];
+    return { evidence, evidenceRefs: evidence.map(({ evidenceRef }) => evidenceRef) };
+  };
+
+  const profile = benchmarkCreatorProfileProfileCandidateSchema.safeParse(input.profile);
+  if (profile.success) {
+    const profileAtoms = profile.data.evidenceRefs.flatMap((ref) => atomMap.get(ref) ?? []);
+    const sourceCount = new Set(profileAtoms.map(({ sourceItemId }) => sourceItemId)).size;
+    if (sourceCount >= 1 && v3ClaimLanguageGate("PROFILE", profile.data.text, profileAtoms) && !/全链路服务商/u.test(profile.data.text)) {
+      const status = claimStatus(profile.data.status, sourceCount);
+      cards.push({ code: "PROFILE", status, claims: [{ id: nextId(), text: profile.data.text, evidenceRefs: profileAtoms.map(({ ref }) => ref), evidence: evidenceFromAtoms(profileAtoms), derivedFrom: [] }] });
+    }
+  }
+
+  const topicCounts = new Map<string, { label: string; count: number }>();
+  for (const { primaryTopic: label } of videos) {
+    const key = normalizedTopic(label);
+    const current = topicCounts.get(key);
+    topicCounts.set(key, { label: current?.label ?? label, count: (current?.count ?? 0) + 1 });
+  }
+  const distribution = [...topicCounts.values()].sort((left, right) => right.count - left.count || left.label.localeCompare(right.label, "zh-CN"));
+  const allAtoms = [...new Map(atoms.map((atom) => [atom.ref, atom])).values()];
+  const mixStatus = (distribution[0]?.count ?? 0) >= 3 ? "CLEAR" as const : "OBSERVE" as const;
+  const mixText = (distribution[0]?.count ?? 0) >= 2 ? `当前分析的 ${videos.length} 条里：${distribution.map(({ label, count }) => `${count} 条主要围绕“${label}”`).join("；")}。` : "当前这批代表内容主题比较分散，还不足以判断明显的内容比例。";
+  cards.push({ code: "CONTENT_MIX", status: mixStatus, claims: [{ id: nextId(), text: mixText, evidenceRefs: allAtoms.map(({ ref }) => ref), evidence: evidenceFromAtoms(allAtoms), derivedFrom: [] }] });
+
+  const addSignalCard = (code: "TOPIC_STYLE" | "CONTENT_STYLE", signals: typeof aggregatedSignals, maximum: number) => {
+    const claims: AcceptedClaim[] = signals.slice(0, maximum).map((signal) => {
+      const grounded = evidenceForSignal(signal.kind, signal.code);
+      const accepted: AcceptedClaim = { id: nextId(), text: signal.kind === "TOPIC" ? topicSignalText[signal.code as BenchmarkCreatorProfileTopicSignal] : styleSignalText[signal.code as BenchmarkCreatorProfileStyleSignal], ...grounded, derivedFrom: [], status: signal.supportCount >= 3 ? "CLEAR" : "OBSERVE" };
+      signalClaims.set(signal.code, accepted);
+      return accepted;
+    });
+    if (claims.length) cards.push({ code, status: cardStatus(claims), claims: claims.map(({ status: _status, ...claim }) => claim) });
+  };
+  addSignalCard("TOPIC_STYLE", topicSignals, 5);
+  addSignalCard("CONTENT_STYLE", styleSignals, 3);
+
+  const learnClaims = [...signalClaims.entries()].map(([code, source]) => ({ code, source, text: learnSignalText[code as BenchmarkCreatorProfileTopicSignal | BenchmarkCreatorProfileStyleSignal] })).filter((item): item is typeof item & { text: string } => Boolean(item.text)).sort((left, right) => right.source.evidence.length - left.source.evidence.length || [...topicSignalOrder, ...styleSignalOrder].indexOf(left.code as BenchmarkCreatorProfileTopicSignal) - [...topicSignalOrder, ...styleSignalOrder].indexOf(right.code as BenchmarkCreatorProfileTopicSignal)).slice(0, 3).map(({ source, text }) => ({ id: nextId(), text, evidenceRefs: source.evidenceRefs, evidence: source.evidence, derivedFrom: [source.id], status: source.status }));
+  if (learnClaims.length) cards.push({ code: "LEARN", status: cardStatus(learnClaims), claims: learnClaims.map(({ status: _status, ...claim }) => claim) });
+
+  const externalFactAtoms = atoms.filter((atom) => /(客户|家长|学生|学校|成绩|分数|收入|单量|转化率|合作校|机构数量|校区数量|复旦|交大)/u.test(atomText(atom)));
+  if (externalFactAtoms.length) {
+    const externalSources = new Set(externalFactAtoms.map(({ sourceItemId }) => sourceItemId)).size;
+    const derivedFrom = [...signalClaims.values()].filter((claim) => claim.evidenceRefs.some((ref) => externalFactAtoms.some((atom) => atom.ref === ref))).map(({ id }) => id);
+    cards.push({ code: "AVOID", status: externalSources >= 2 ? "CLEAR" : "OBSERVE", claims: [{ id: nextId(), text: "可以学他使用具体证据的方式，但视频里的客户、学校、成绩和成交数字都属于对方，不能变成我们的事实。", evidenceRefs: externalFactAtoms.map(({ ref }) => ref), evidence: evidenceFromAtoms(externalFactAtoms), derivedFrom }] });
+  }
+
+  const orderedCards = profileCardOrder.flatMap((code) => cards.find((card) => card.code === code) ?? []);
+  const output = benchmarkCreatorProfileOutputV4Schema.parse({ kind: "CREATOR_PROFILE", schemaVersion: "benchmark-creator-profile-v4", message: `已根据当前 ${videos.length} 条代表内容的单视频信号形成 ${orderedCards.length} 张账号画像卡。`, account: manifest.account, inputs: manifest.distillations, accountResearch: manifest.accountResearch, priorProfileVersion: manifest.priorProfileVersion, videoSignals: videos, aggregatedSignals, cards: orderedCards });
+  return { output, diagnostics: { rawVideoCount: input.videos.length, validVideoCount: videos.length, rawSignalCount, validSignalCount, droppedSignalCount: rawSignalCount - validSignalCount, aggregatedSignalCount: aggregatedSignals.length } };
+}
+
+export function normalizeBenchmarkCreatorProfileV4Output(input: BenchmarkCreatorProfileGenerationV4, atoms: CreatorProfileAtom[], manifest: BenchmarkCreatorProfileInputV4): BenchmarkCreatorProfileOutputV4 {
+  return normalizeBenchmarkCreatorProfileV4Result(input, atoms, manifest).output;
+}
+
 function profileFailure(error: unknown) {
   if (error instanceof LLMError) return {
     code: error.code,
@@ -465,11 +624,12 @@ export async function processBenchmarkCreatorProfileJob(job: Job<BenchmarkStudyP
   });
   if (!record || record.benchmarkAccount.workspaceId !== record.workspaceId) throw new UnrecoverableError("Benchmark creator profile scope mismatch");
   if (record.status === "COMPLETED") return { status: "already-completed" as const, studyId: record.id };
+  const manifestV4 = benchmarkCreatorProfileInputV4Schema.safeParse(record.output);
   const manifestV3 = benchmarkCreatorProfileInputV3Schema.safeParse(record.output);
   const manifestV2 = benchmarkCreatorProfileInputV2Schema.safeParse(record.output);
   const manifestV1 = benchmarkCreatorProfileInputSchema.safeParse(record.output);
-  if (!manifestV3.success && !manifestV2.success && !manifestV1.success) throw new UnrecoverableError("Benchmark creator profile input is missing");
-  const manifest: BenchmarkCreatorProfileInput | BenchmarkCreatorProfileInputV2 | BenchmarkCreatorProfileInputV3 = manifestV3.success ? manifestV3.data : manifestV2.success ? manifestV2.data : manifestV1.success ? manifestV1.data : (() => { throw new UnrecoverableError("Benchmark creator profile input is missing"); })();
+  if (!manifestV4.success && !manifestV3.success && !manifestV2.success && !manifestV1.success) throw new UnrecoverableError("Benchmark creator profile input is missing");
+  const manifest: BenchmarkCreatorProfileInput | BenchmarkCreatorProfileInputV2 | BenchmarkCreatorProfileInputV3 | BenchmarkCreatorProfileInputV4 = manifestV4.success ? manifestV4.data : manifestV3.success ? manifestV3.data : manifestV2.success ? manifestV2.data : manifestV1.success ? manifestV1.data : (() => { throw new UnrecoverableError("Benchmark creator profile input is missing"); })();
   const distillations = await db.materialDistillation.findMany({ where: { workspaceId: record.workspaceId, id: { in: manifest.distillations.map(({ materialDistillationId }) => materialDistillationId) }, status: "COMPLETED" } });
   const rows = manifest.distillations.flatMap((locked) => {
     const distillation = distillations.find((item) => item.id === locked.materialDistillationId && item.sourceItemId === locked.sourceItemId && item.version === locked.materialDistillationVersion);
@@ -488,16 +648,16 @@ export async function processBenchmarkCreatorProfileJob(job: Job<BenchmarkStudyP
   const context = {
     action: "GENERATE_BENCHMARK_CREATOR_PROFILE",
     account: manifest.account,
-    videos: rows.map((row) => ({ sampleId: row.sampleId, title: row.title, materialDistillation: { id: row.materialDistillationId, version: row.materialDistillationVersion, items: atoms.filter(({ sampleId }) => sampleId === row.sampleId).map(({ ref, itemKind, itemKey, title, text, type, quality, sourceRefs, evidence }) => ({ ref, itemKind, itemKey, title, text, sourceRefs, evidence, ...(type ? { type } : {}), ...(quality ? { quality } : {}) })) } })),
-    accountResearch: parsedResearch?.success ? parsedResearch.data : null,
-    priorProfile: manifestV3.success ? manifestV3.data.priorProfile : manifestV2.success ? manifestV2.data.priorProfile : null,
-    cautions: [benchmarkCreatorProfileSystemBoundary, "M7 items are candidate observations. Account-level sections still require independent cross-video support."],
+    videos: rows.map((row, index) => ({ sampleRef: `V${String(index + 1).padStart(3, "0")}`, sampleId: row.sampleId, title: row.title, materialDistillation: { id: row.materialDistillationId, version: row.materialDistillationVersion, items: atoms.filter(({ sampleId }) => sampleId === row.sampleId).map(({ ref, itemKind, itemKey, title, text, type, quality, sourceRefs, evidence }) => ({ ref, itemKind, itemKey, title, text, sourceRefs, evidence, ...(type ? { type } : {}), ...(quality ? { quality } : {}) })) } })),
+    accountResearch: manifestV4.success ? null : parsedResearch?.success ? parsedResearch.data : null,
+    priorProfile: manifestV4.success ? null : manifestV3.success ? manifestV3.data.priorProfile : manifestV2.success ? manifestV2.data.priorProfile : null,
+    cautions: [benchmarkCreatorProfileSystemBoundary, manifestV4.success ? "Classify each video independently. Do not infer account-level patterns; aggregation belongs to the program." : "M7 items are candidate observations. Account-level sections still require independent cross-video support."],
   };
-  const prompt = `Action: GENERATE_BENCHMARK_CREATOR_PROFILE\nContext:\n${JSON.stringify(context, null, 2)}\n${manifestV3.success ? benchmarkCreatorProfileOutputV3Instruction : manifestV2.success ? benchmarkCreatorProfileOutputV2Instruction : benchmarkCreatorProfileOutputInstruction}`;
+  const prompt = `Action: GENERATE_BENCHMARK_CREATOR_PROFILE\nContext:\n${JSON.stringify(context, null, 2)}\n${manifestV4.success ? benchmarkCreatorProfileOutputV4Instruction : manifestV3.success ? benchmarkCreatorProfileOutputV3Instruction : manifestV2.success ? benchmarkCreatorProfileOutputV2Instruction : benchmarkCreatorProfileOutputInstruction}`;
   const contextTruncated = JSON.stringify(context).length > 200_000;
-  const schemaVersion = manifestV3.success ? "benchmark-creator-profile-v3" : manifestV2.success ? "benchmark-creator-profile-v2" : "benchmark-creator-profile-v1";
-  const promptVersion = manifestV3.success ? 3 : manifestV2.success ? 2 : 1;
-  const summary = { benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: rows.length, materialDistillationIds: rows.map(({ materialDistillationId }) => materialDistillationId), accountResearchStudyId: manifest.accountResearch?.studyId ?? null, priorProfileVersion: manifestV3.success ? manifestV3.data.priorProfileVersion : manifestV2.success ? manifestV2.data.priorProfileVersion : null, schemaVersion };
+  const schemaVersion = manifestV4.success ? "benchmark-creator-profile-v4" : manifestV3.success ? "benchmark-creator-profile-v3" : manifestV2.success ? "benchmark-creator-profile-v2" : "benchmark-creator-profile-v1";
+  const promptVersion = manifestV4.success ? 4 : manifestV3.success ? 3 : manifestV2.success ? 2 : 1;
+  const summary = { benchmarkStudyId: record.id, benchmarkAccountId: record.benchmarkAccountId, sampleCount: rows.length, materialDistillationIds: rows.map(({ materialDistillationId }) => materialDistillationId), accountResearchStudyId: manifest.accountResearch?.studyId ?? null, priorProfileVersion: manifestV4.success ? manifestV4.data.priorProfileVersion : manifestV3.success ? manifestV3.data.priorProfileVersion : manifestV2.success ? manifestV2.data.priorProfileVersion : null, schemaVersion };
   let runId: string | undefined;
   let runProvider: string | undefined;
   let requestedModel: string | undefined;
@@ -515,15 +675,20 @@ export async function processBenchmarkCreatorProfileJob(job: Job<BenchmarkStudyP
       return created;
     });
     runId = run.id;
-    const request = { systemPrompt: `${benchmarkCreatorProfileSystemBoundary}\n\n${generationQualityContract}`, prompt, maxCompletionTokens: 3_500, structuredOutput: { strategy: "JSON_OBJECT" as const } };
-    const result = manifestV3.success
-      ? await runtime.provider.generateStructured(request, benchmarkCreatorProfileGenerationV3Schema)
-      : manifestV2.success
+    const systemBoundary = manifestV4.success ? benchmarkCreatorProfileSystemBoundary.replace("Describe only observable patterns across the supplied account samples.", "Classify each supplied video independently; do not infer account-level patterns.") : benchmarkCreatorProfileSystemBoundary;
+    const request = { systemPrompt: `${systemBoundary}\n\n${generationQualityContract}`, prompt, maxCompletionTokens: 3_500, structuredOutput: { strategy: "JSON_OBJECT" as const } };
+    const result = manifestV4.success
+      ? await runtime.provider.generateStructured(request, benchmarkCreatorProfileGenerationV4Schema)
+      : manifestV3.success
+        ? await runtime.provider.generateStructured(request, benchmarkCreatorProfileGenerationV3Schema)
+        : manifestV2.success
         ? await runtime.provider.generateStructured(request, benchmarkCreatorProfileGenerationV2Schema)
         : await runtime.provider.generateStructured(request, benchmarkCreatorProfileGenerationSchema);
-    const normalized = manifestV3.success
-      ? normalizeBenchmarkCreatorProfileV3Result(result.data.value as BenchmarkCreatorProfileGenerationV3, atoms, manifestV3.data)
-      : manifestV2.success
+    const normalized = manifestV4.success
+      ? normalizeBenchmarkCreatorProfileV4Result(result.data.value as BenchmarkCreatorProfileGenerationV4, atoms, manifestV4.data)
+      : manifestV3.success
+        ? normalizeBenchmarkCreatorProfileV3Result(result.data.value as BenchmarkCreatorProfileGenerationV3, atoms, manifestV3.data)
+        : manifestV2.success
         ? normalizeBenchmarkCreatorProfileV2Result(result.data.value as BenchmarkCreatorProfileGenerationV2, atoms, manifestV2.data)
         : normalizeBenchmarkCreatorProfileResult(result.data.value as BenchmarkCreatorProfileGeneration, atoms, manifest as BenchmarkCreatorProfileInput);
     const output = normalized.output;

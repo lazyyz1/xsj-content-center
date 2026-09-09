@@ -1,7 +1,7 @@
 import "server-only";
 
 import { db } from "@content-center/db";
-import { benchmarkAnalysisOutputSchema, benchmarkCreatorProfileOutputSchema, benchmarkCreatorProfileOutputV2Schema, benchmarkCreatorProfileOutputV3Schema, benchmarkPlaybookOutputSchema, materialDistillationGenerationSchema, type BenchmarkCreatorProfileCardCode, type BenchmarkCreatorProfileSectionCode } from "@content-center/providers";
+import { benchmarkAnalysisOutputSchema, benchmarkCreatorProfileOutputSchema, benchmarkCreatorProfileOutputV2Schema, benchmarkCreatorProfileOutputV3Schema, benchmarkCreatorProfileOutputV4Schema, benchmarkPlaybookOutputSchema, materialDistillationGenerationSchema, type BenchmarkCreatorProfileCardCode, type BenchmarkCreatorProfileSectionCode } from "@content-center/providers";
 import { listBenchmarkStudies } from "./benchmark-study-service";
 
 const key = (platform: string, externalId: string) => `${platform}:${externalId}`;
@@ -128,11 +128,13 @@ export async function getBenchmarkCreatorDetail(input: { workspaceId: string; be
   })) : [];
 
   const creatorProfileStudy = completedStudies.find((study) => study.kind === "CREATOR_PROFILE" && study.output && "kind" in study.output && study.output.kind === "CREATOR_PROFILE");
-  const parsedCreatorProfileV3 = creatorProfileStudy ? benchmarkCreatorProfileOutputV3Schema.safeParse(creatorProfileStudy.output) : null;
-  const parsedCreatorProfileV2 = creatorProfileStudy && !parsedCreatorProfileV3?.success ? benchmarkCreatorProfileOutputV2Schema.safeParse(creatorProfileStudy.output) : null;
-  const parsedCreatorProfileV1 = creatorProfileStudy && !parsedCreatorProfileV3?.success && !parsedCreatorProfileV2?.success ? benchmarkCreatorProfileOutputSchema.safeParse(creatorProfileStudy.output) : null;
-  const parsedProfile = parsedCreatorProfileV3?.success
-    ? { message: parsedCreatorProfileV3.data.message, sections: parsedCreatorProfileV3.data.cards.map((card) => ({ code: card.code, status: card.status, text: card.claims.map(({ text }) => `• ${text}`).join("\n"), evidence: card.claims.flatMap(({ evidence }) => evidence) })) }
+  const parsedCreatorProfileV4 = creatorProfileStudy ? benchmarkCreatorProfileOutputV4Schema.safeParse(creatorProfileStudy.output) : null;
+  const parsedCreatorProfileV3 = creatorProfileStudy && !parsedCreatorProfileV4?.success ? benchmarkCreatorProfileOutputV3Schema.safeParse(creatorProfileStudy.output) : null;
+  const parsedCreatorProfileV2 = creatorProfileStudy && !parsedCreatorProfileV4?.success && !parsedCreatorProfileV3?.success ? benchmarkCreatorProfileOutputV2Schema.safeParse(creatorProfileStudy.output) : null;
+  const parsedCreatorProfileV1 = creatorProfileStudy && !parsedCreatorProfileV4?.success && !parsedCreatorProfileV3?.success && !parsedCreatorProfileV2?.success ? benchmarkCreatorProfileOutputSchema.safeParse(creatorProfileStudy.output) : null;
+  const claimProfile = parsedCreatorProfileV4?.success ? parsedCreatorProfileV4.data : parsedCreatorProfileV3?.success ? parsedCreatorProfileV3.data : null;
+  const parsedProfile = claimProfile
+    ? { message: claimProfile.message, sections: claimProfile.cards.map((card) => ({ code: card.code, status: card.status, text: card.claims.map(({ text }) => `• ${text}`).join("\n"), evidence: card.claims.flatMap(({ evidence }) => evidence) })) }
     : parsedCreatorProfileV2?.success ? { message: parsedCreatorProfileV2.data.message, sections: parsedCreatorProfileV2.data.cards }
       : parsedCreatorProfileV1?.success ? { message: parsedCreatorProfileV1.data.message, sections: parsedCreatorProfileV1.data.sections.map((section) => ({ ...section, status: null })) } : null;
   const creatorProfile = parsedProfile && creatorProfileStudy ? {

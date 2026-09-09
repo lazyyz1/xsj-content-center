@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { db } from "@content-center/db";
-import { benchmarkAnalysisOutputSchema, benchmarkCreatorProfileOutputSchema, benchmarkCreatorProfileOutputV3Schema, benchmarkPlaybookInputSchema, benchmarkPlaybookOutputSchema, materialDistillationGenerationSchema } from "@content-center/providers";
+import { benchmarkAnalysisOutputSchema, benchmarkCreatorProfileOutputSchema, benchmarkCreatorProfileOutputV3Schema, benchmarkCreatorProfileOutputV4Schema, benchmarkPlaybookInputSchema, benchmarkPlaybookOutputSchema, materialDistillationGenerationSchema } from "@content-center/providers";
 import { getBenchmarkCreatorDetail } from "../server/discovery/benchmark-creator-read-model";
 import { listBenchmarkStudies } from "../server/discovery/benchmark-study-service";
 
@@ -82,6 +82,11 @@ describe("benchmark creator profile read model", () => {
     const creatorEvidenceV3 = (sampleIndex: number, evidenceRef: string) => ({ evidenceRef, ...creatorLocksV3[sampleIndex]!, itemKind: "HIGHLIGHT" as const, itemKey: "0", sourceRefs: ["T001"] });
     await db.benchmarkStudy.update({ where: { id: creatorProfileV3.id }, data: { output: benchmarkCreatorProfileOutputV3Schema.parse({ kind: "CREATOR_PROFILE", schemaVersion: "benchmark-creator-profile-v3", message: "已形成一张 claim 画像卡。", account: { name: "真实研究博主", platform: "DOUYIN", bio: "分享可以核对的内容经验", tags: ["教培运营"] }, inputs: creatorLocksV3, accountResearch: { studyId: research.id, version: research.version }, priorProfileVersion: 4, cards: [{ code: "TOPIC_STYLE", status: "OBSERVE", claims: [{ id: "C001", text: "当前样本从具体问题进入判断。", evidenceRefs: ["E001", "E002"], evidence: [creatorEvidenceV3(0, "E001"), creatorEvidenceV3(1, "E002")], derivedFrom: [] }] }] }) } });
 
+    const creatorProfileV4 = await db.benchmarkStudy.create({ data: { workspaceId, benchmarkAccountId: benchmarkId, createdById: ownerId, version: 6, status: "COMPLETED", sampleCount: 5, insufficientSamples: false, samples: { create: sources.slice(0, 5).map((source, index) => ({ sourceItemId: source.id, snapshotId: snapshots[index]!.id })) } }, include: { samples: true } });
+    const creatorLocksV4 = creatorProfileV4.samples.map((sample, index) => ({ sampleId: sample.id, sourceItemId: sample.sourceItemId, materialDistillationId: distillations[index]!.id, materialDistillationVersion: 1 }));
+    const creatorEvidenceV4 = (sampleIndex: number, evidenceRef: string) => ({ evidenceRef, ...creatorLocksV4[sampleIndex]!, itemKind: "HIGHLIGHT" as const, itemKey: "0", sourceRefs: ["T001"] });
+    await db.benchmarkStudy.update({ where: { id: creatorProfileV4.id }, data: { output: benchmarkCreatorProfileOutputV4Schema.parse({ kind: "CREATOR_PROFILE", schemaVersion: "benchmark-creator-profile-v4", message: "已从单视频信号形成画像。", account: { name: "真实研究博主", platform: "DOUYIN", bio: "分享可以核对的内容经验", tags: ["教培运营"] }, inputs: creatorLocksV4, accountResearch: { studyId: research.id, version: research.version }, priorProfileVersion: 5, videoSignals: creatorLocksV4.map((lock, index) => ({ sampleRef: `V00${index + 1}`, sampleId: lock.sampleId, sourceItemId: lock.sourceItemId, primaryTopic: "招生成交", topicSignals: [], styleSignals: [] })), aggregatedSignals: [], cards: [{ code: "TOPIC_STYLE", status: "OBSERVE", claims: [{ id: "C001", text: "当前研究的视频里，多次从具体问题切入。", evidenceRefs: ["E001", "E002"], evidence: [creatorEvidenceV4(0, "E001"), creatorEvidenceV4(1, "E002")], derivedFrom: [] }] }] }) } });
+
     await db.methodAsset.create({ data: { workspaceId, ownerUserId: ownerId, status: "SAVED", versions: { create: { version: 1, title: "已经留下的方法", steps: ["先判断"], applicableScenarios: ["解释问题"], boundaries: ["不照搬事实"], sourceMaterialDistillationId: distillations[0]!.id, evidence: evidence("可核对来源 1"), editedById: ownerId } } } });
 
     const otherAccount = await db.benchmarkAccount.create({ data: { workspaceId: otherWorkspaceId, platform: "DOUYIN", externalAccountId: `other-${suffix}`, name: "其他空间博主", createdById: otherOwnerId } });
@@ -106,9 +111,10 @@ describe("benchmark creator profile read model", () => {
     expect(profile?.copywriting).toEqual([expect.objectContaining({ sourceTitle: "代表视频 2", core: "把判断说清楚" })]);
     expect(profile?.accountResearch).toMatchObject({ sampleCount: 2, groups: [expect.objectContaining({ title: "常见主题" }), expect.objectContaining({ title: "常用开头" })] });
     expect(profile?.playbooks).toEqual([expect.objectContaining({ name: "判断后进入行动", maturity: "OBSERVE", sources: expect.arrayContaining([expect.objectContaining({ title: "代表视频 1" })]) })]);
-    expect(profile?.creatorProfile).toMatchObject({ version: 5, message: "已形成一张 claim 画像卡。", sections: [expect.objectContaining({ code: "TOPIC_STYLE", status: "OBSERVE", text: "• 当前样本从具体问题进入判断。", sources: [expect.objectContaining({ title: "代表视频 1" }), expect.objectContaining({ title: "代表视频 2" })] })] });
+    expect(profile?.creatorProfile).toMatchObject({ version: 6, message: "已从单视频信号形成画像。", sections: [expect.objectContaining({ code: "TOPIC_STYLE", status: "OBSERVE", text: "• 当前研究的视频里，多次从具体问题切入。", sources: [expect.objectContaining({ title: "代表视频 1" }), expect.objectContaining({ title: "代表视频 2" })] })] });
     const history = await listBenchmarkStudies({ workspaceId, benchmarkAccountId: benchmarkId });
     expect(history.find(({ version }) => version === 4)?.output).toMatchObject({ schemaVersion: "benchmark-creator-profile-v1" });
+    expect(history.find(({ version }) => version === 5)?.output).toMatchObject({ schemaVersion: "benchmark-creator-profile-v3" });
     expect(profile?.savedMethods).toEqual([expect.objectContaining({ title: "已经留下的方法", status: "SAVED" })]);
     expect(JSON.stringify(profile)).not.toContain("不应泄漏的内容");
     await expect(getBenchmarkCreatorDetail({ workspaceId: otherWorkspaceId, benchmarkAccountId: benchmarkId, ownerUserId: otherOwnerId })).resolves.toBeNull();
