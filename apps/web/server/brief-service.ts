@@ -2,6 +2,7 @@ import "server-only";
 
 import { db } from "@content-center/db";
 import { ProjectServiceError } from "./project-service";
+import { appendConfirmedCreatorFacts, extractExplicitOwnFacts } from "./ai/creation-context";
 
 export class VersionConflictError extends Error {
   readonly code = "VERSION_CONFLICT";
@@ -27,8 +28,9 @@ export type BriefInput = {
 };
 
 export async function saveBrief(input: { workspaceId: string; userId: string; projectId: string; data: BriefInput }) {
-  const project = await db.contentProject.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, select: { id: true } });
+  const project = await db.contentProject.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, select: { id: true, creatorProfileId: true } });
   if (!project) throw new ProjectServiceError("PROJECT_NOT_FOUND");
+  const explicitFacts = extractExplicitOwnFacts(`${input.data.coreMessage}\n${input.data.background ?? ""}`);
   try {
     return await db.$transaction(async (tx) => {
       const existing = await tx.creativeBrief.findFirst({ where: { projectId: project.id, workspaceId: input.workspaceId } });
@@ -83,6 +85,18 @@ export async function saveBrief(input: { workspaceId: string; userId: string; pr
           metadata: { projectId: project.id, resourceId: brief.id, changedFields: ["topic", "angle", "audience", "coreMessage", ...(input.data.coreQuestion !== undefined ? ["coreQuestion"] : []), ...(input.data.background !== undefined ? ["background"] : []), "keyPoints", "structure", "tone", "risks"] },
         },
       });
+      if (explicitFacts.length) {
+        const profile = project.creatorProfileId
+          ? await tx.creatorProfile.findFirst({ where: { id: project.creatorProfileId, workspaceId: input.workspaceId } })
+          : await tx.creatorProfile.findUnique({ where: { workspaceId_userId: { workspaceId: input.workspaceId, userId: input.userId } } });
+        const notes = appendConfirmedCreatorFacts(profile?.notes ?? "", explicitFacts);
+        if (!profile || notes !== profile.notes) {
+          const stored = profile
+            ? await tx.creatorProfile.update({ where: { id: profile.id }, data: { notes } })
+            : await tx.creatorProfile.create({ data: { workspaceId: input.workspaceId, userId: input.userId, coreTopics: [], personalViews: [], brandTerms: [], forbiddenTerms: [], hookPreferences: [], structurePreferences: [], ctaPreferences: [], examplePhrases: [], notes } });
+          await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "creator_profile.facts_accumulated", resourceType: "creator_profile", resourceId: stored.id, metadata: { projectId: project.id, factCount: explicitFacts.length } } });
+        }
+      }
       return brief;
     });
   } catch (error) {

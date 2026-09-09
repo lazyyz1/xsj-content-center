@@ -54,7 +54,7 @@ describe("Studio method prompt and usage boundary", () => {
     const generationContext = built.context as typeof built.context & { confirmedFacts: string[] };
     expect(built.selectedMethods).toMatchObject([{ methodAssetId: assetId, methodVersionId: versionId, title: "先说问题再给方法" }]);
     expect(built.context).toMatchObject({ selectedMethods: [{ title: "先说问题再给方法", steps: expect.any(Array), applicableScenarios: expect.any(Array), boundaries: expect.any(Array) }] });
-    expect(built.context).toMatchObject({ confirmedFacts: [expect.stringContaining("我从来没有做过加盟业务。")], externalReferenceEvidence: [{ sourceItemId: sourceId, content: expect.stringContaining("第三方来源事实") }] });
+    expect(built.context).toMatchObject({ confirmedFacts: [expect.stringContaining("我从来没有做过加盟业务。")], externalReferences: { evidence: [{ sourceItemId: sourceId, content: expect.stringContaining("第三方来源事实") }] } });
     expect(JSON.stringify(generationContext.confirmedFacts)).not.toContain("第三方来源事实");
     expect(JSON.stringify(built.context)).not.toContain(assetId);
     expect(JSON.stringify(built.context)).not.toContain(versionId);

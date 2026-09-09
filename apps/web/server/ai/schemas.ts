@@ -6,6 +6,33 @@ export type AIAction = (typeof AI_ACTIONS)[number];
 export const STUDIO_QUICK_ACTIONS = ["TOPIC_IDEAS", "REWRITE_OPENING", "REWRITE_BODY", "ADD_CASE", "STRENGTHEN_EVIDENCE", "HUMANIZE_TEXT", "SHORTEN_TEXT", "ALTERNATIVE_EXPRESSION", "FACT_CHECK", "DEFAULT_METHOD_OPTIMIZE"] as const;
 export type StudioQuickAction = (typeof STUDIO_QUICK_ACTIONS)[number];
 export const studioQuickActionSchema = z.enum(STUDIO_QUICK_ACTIONS);
+export type StudioActionRecommendation = { action: StudioQuickAction; label: string; instruction?: string };
+
+export function recommendStudioQuickActions(state: { hasTopic: boolean; hasDraft: boolean; hasOwnEvidence: boolean }): StudioActionRecommendation[] {
+  if (!state.hasDraft) return [
+    { action: "TOPIC_IDEAS", label: "从客户问题找题", instruction: "优先从目标客户正在面对的具体问题寻找选题" },
+    { action: "TOPIC_IDEAS", label: "看几个不同角度", instruction: "给出问题、观点、反常识、场景等不同角度，不要使用同一种结构" },
+    { action: "TOPIC_IDEAS", label: "更有冲突一点", instruction: "保持事实边界，用观点差异或真实处境增加冲突感" },
+    { action: "TOPIC_IDEAS", label: "更偏老板观点", instruction: "从经营负责人的判断和决策角度寻找选题" },
+    { action: "TOPIC_IDEAS", label: state.hasTopic ? "换一组选题" : "用当前资料找题", instruction: "只使用当前统一创作上下文寻找新的选题方向" },
+  ];
+  if (!state.hasOwnEvidence) return [
+    { action: "REWRITE_OPENING", label: "改开头" },
+    { action: "HUMANIZE_TEXT", label: "更像本人说话" },
+    { action: "REWRITE_BODY", label: "先写观点版", instruction: "当前没有可用我方案例，只写观点、判断和建议，不虚构经历或结果" },
+    { action: "TOPIC_IDEAS", label: "换个不用数据的角度", instruction: "给出不依赖我方数字或案例的观点型、场景型选题" },
+    { action: "STRENGTHEN_EVIDENCE", label: "补真实证据" },
+    { action: "FACT_CHECK", label: "检查事实风险" },
+  ];
+  return [
+    { action: "REWRITE_OPENING", label: "改开头" },
+    { action: "HUMANIZE_TEXT", label: "更像本人说话" },
+    { action: "STRENGTHEN_EVIDENCE", label: "加强证据" },
+    { action: "SHORTEN_TEXT", label: "精简一点" },
+    { action: "FACT_CHECK", label: "检查事实风险" },
+    { action: "DEFAULT_METHOD_OPTIMIZE", label: "按鑫世界方法检查" },
+  ];
+}
 export const studioQuickActionSections: Record<StudioQuickAction, Array<"AUDIENCE" | "TOPIC" | "OPENING" | "BODY" | "EVIDENCE" | "ENDING" | "BOUNDARY">> = {
   TOPIC_IDEAS: ["AUDIENCE", "TOPIC", "BOUNDARY"],
   REWRITE_OPENING: ["AUDIENCE", "OPENING", "BOUNDARY"],

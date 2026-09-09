@@ -65,7 +65,7 @@ describe("AI creation engine", () => {
     expect("sources" in analyze.context ? analyze.context.sources?.[0]?.text : undefined).toHaveLength(20);
     expect(analyze.contextTruncated).toBe(true);
     const mother = await builder.build({ workspaceId: workspaceAId, userId: userAId, projectId, action: "GENERATE_MOTHER_CONTENT" });
-    const motherUnderstanding = "materialUnderstanding" in mother.context ? mother.context.materialUnderstanding?.[0]?.materialUnderstanding : null;
+    const motherUnderstanding = "externalReferences" in mother.context ? mother.context.externalReferences.materials[0]?.materialUnderstanding : null;
     expect(motherUnderstanding).toMatchObject({ reusable: [{ content: "Transferable mechanism" }] });
     expect(JSON.stringify(motherUnderstanding)).toContain("星加克");
     expect(JSON.stringify(motherUnderstanding)).toContain("当天成交13个");

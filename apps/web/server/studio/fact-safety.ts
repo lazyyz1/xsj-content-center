@@ -8,12 +8,36 @@ const firstPersonTrackRecord = /(?:我|我们)(?:自己)?(?:做|带|跑|验证|�
 const numericFact = /(?:\d+(?:\.\d+)?\s*(?:%|％|年|个月|月|天|分钟|次|条|个|位|人|元|万|亿|分|组|家|所|倍|版)|[二三四五六七八九十百千万]+(?:年|个月|分钟|次|位|人|元|万|亿|分|组|家|所|倍|版)|百分之[零一二三四五六七八九十百\d.]+)/u;
 const resultClaim = /(稳定带来|稳定出|提升了|增长了|翻倍|已经证明|已经验证|验证有效|取得了|实现了|本质就是|必然|一定能|肯定能)/u;
 const promise = /(保证(?:招生|营收|利润|成交|咨询|播放|爆款|回本|结果)|保底(?:结果|效果|增长|转化)|至少不会(?:更差|比原来差|下降|亏)|不会比原来更差|一定能(?:成交|增长|提升|带来)|肯定能(?:成交|增长|提升|带来)|稳定带来(?:咨询|成交|增长)|固定提升(?:百分比|比例|\d))/u;
+const numericTokens = /(?:\d+(?:\.\d+)?\s*(?:%|％|年|个月|月|天|分钟|次|条|个|位|人|元|万|亿|分|组|家|所|倍|版)|[二三四五六七八九十百千万]+(?:年|个月|分钟|次|位|人|元|万|亿|分|组|家|所|倍|版)|百分之[零一二三四五六七八九十百\d.]+)/gu;
+const experienceTerms = /(教培|教育|校区运营|招生|销售|短视频|直播|产品|项目|客户|学员|学校|成交|转化|收入|成绩|团队)/gu;
 
 function normalize(value: string) { return value.normalize("NFKC").toLocaleLowerCase("zh-CN").replace(/[\s，,。；;：:！？!?、“”‘’（）()《》【】\-—]/gu, ""); }
-function promiseText(value: string) { return value.replace(/(?:不|不能|不得|不要|避免)(?:做出|使用|写出|声称)?[^。！？\n]{0,12}(?:保证|保底|必然|一定|稳定带来)/gu, ""); }
+function promiseText(value: string) {
+  return value
+    .replace(/(?:不|不能|不得|不要|避免)(?:做出|使用|写出|声称)?[^。！？\n]{0,12}(?:保证|保底|必然|一定|稳定带来)/gu, "")
+    .replace(/(?:常听到|所谓|不要说|不能说|避免说)[^。！？\n]{0,24}[“"][^”"]*(?:保证|保底|必然|一定|稳定带来)[^”"]*[”"]/gu, "");
+}
+function matches(value: string, pattern: RegExp) { return [...value.matchAll(pattern)].map(([match]) => normalize(match)); }
 function supported(text: string, ownFacts: string[]) {
   const candidate = normalize(text);
-  return ownFacts.some((fact) => { const source = normalize(fact); return source.length >= 8 && (source.includes(candidate) || candidate.includes(source)); });
+  if (ownFacts.some((fact) => { const source = normalize(fact); return source === candidate || (source.length >= 8 && (source.includes(candidate) || candidate.includes(source))); })) return true;
+  const terms = matches(text, experienceTerms);
+  if (!terms.length) return false;
+  const numbers = matches(text, numericTokens);
+  return ownFacts.some((fact) => {
+    const source = normalize(fact);
+    const sharesSubject = terms.some((term) => source.includes(term));
+    const supportsPrecision = numbers.every((number) => source.includes(number));
+    return sharesSubject && supportsPrecision && (numbers.length > 0 || /(长期|多年|这些年|从事|做过|做了|负责|运营|工作)/u.test(fact));
+  });
+}
+
+export function downgradeStudioFactText(text: string, ownFacts: string[]) {
+  if (supported(text, ownFacts) || (!firstPersonExperience.test(text) && !firstPersonTrackRecord.test(text))) return text;
+  const terms = matches(text, experienceTerms);
+  const hasBroadSupport = terms.length > 0 && ownFacts.some((fact) => terms.some((term) => normalize(fact).includes(term)) && /(长期|多年|从事|做过|负责|运营|工作)/u.test(fact));
+  if (!hasBroadSupport) return text;
+  return text.replace(/(?:\d+(?:\.\d+)?|[二三四五六七八九十百千万]+)\s*年/gu, "这些年");
 }
 
 export function inspectStudioFactText(text: string, ownFacts: string[]) {
@@ -62,12 +86,18 @@ export function deterministicFactRisks(text: string, ownFacts: string[]) {
 export function sanitizeStudioQuickActionOutput(action: StudioQuickAction, value: z.infer<typeof studioQuickActionOutputSchema>, ownFacts: string[], hasOwnEvidence = ownFacts.length > 0) {
   const removed: Array<{ text: string; handling: string }> = [];
   let suggestions = value.suggestions.flatMap((item) => {
-    const result = inspectPassage(`${item.title}\n${item.text}`, ownFacts);
-    if (result.blocked) { removed.push({ text: `候选“${item.title}”包含未确认事实`, handling: `${result.reasons.join("、")}，已阻止进入可应用候选。` }); return []; }
-    return [{ ...item, factState: result.state }];
+    const next = { title: downgradeStudioFactText(item.title, ownFacts), text: downgradeStudioFactText(item.text, ownFacts) };
+    const result = inspectPassage(`${next.title}\n${next.text}`, ownFacts);
+    if (result.blocked && action === "TOPIC_IDEAS" && !result.reasons.includes("包含经营结果承诺")) {
+      removed.push({ text: `候选“${next.title}”需要补充依据`, handling: `${result.reasons.join("、")}。这个选题仍可作为待补证据方向，但不能直接写成我方事实。` });
+      return [{ ...next, factState: "UNVERIFIED_JUDGMENT" as const }];
+    }
+    if (result.blocked) { removed.push({ text: `候选“${next.title}”包含未确认事实`, handling: `${result.reasons.join("、")}，已阻止进入可应用候选。` }); return []; }
+    return [{ ...next, factState: result.state }];
   });
-  const replacementCheck = value.replacement ? inspectPassage(value.replacement, ownFacts) : null;
-  const replacement = replacementCheck?.blocked ? null : value.replacement;
+  const downgradedReplacement = value.replacement ? downgradeStudioFactText(value.replacement, ownFacts) : null;
+  const replacementCheck = downgradedReplacement ? inspectPassage(downgradedReplacement, ownFacts) : null;
+  const replacement = replacementCheck?.blocked ? null : downgradedReplacement;
   if (replacementCheck?.blocked) removed.push({ text: "完整改写包含未确认事实", handling: `${replacementCheck.reasons.join("、")}，已阻止应用。` });
 
   if (action === "ADD_CASE" && !hasOwnEvidence) suggestions = [{ title: "补充一个真实案例", text: "这里需要补一个真实案例：\n起点：\n问题：\n动作：\n过程：\n结果：", factState: "HYPOTHETICAL" as const }];

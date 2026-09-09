@@ -413,7 +413,10 @@ test("shows the published company method compactly in Studio without calling AI"
   const method = page.getByTestId("studio-default-method");
   await expect(method).toContainText("鑫世界默认创作方法 · V1");
   await expect(method).toContainText("已自动应用");
-  for (const action of ["想选题", "改开头", "重写正文", "精简一点", "按鑫世界方法优化"]) await expect(method.getByRole("button", { name: action })).toBeVisible();
+  await expect(method).toContainText("根据当前内容状态推荐");
+  for (const action of ["改开头", "更像本人说话", "先写观点版", "换个不用数据的角度", "补真实证据", "检查事实风险"]) await expect(method.getByRole("button", { name: action, exact: true })).toBeVisible();
+  await method.getByText("更多基础动作", { exact: true }).click();
+  for (const action of ["想选题", "重写正文", "精简一点", "按鑫世界方法优化"]) await expect(method.getByRole("button", { name: action, exact: true })).toBeVisible();
   await expect(method).not.toContainText("我们主要给谁做内容的内部指南");
   await method.getByRole("button", { name: "查看完整方法" }).click();
   const drawer = page.getByRole("dialog", { name: "鑫世界默认创作方法 V1" });

@@ -8,8 +8,10 @@ import type { MaterialAnalysisOutput } from "../material-analysis/schemas";
 import { resolveOwnContribution } from "../../lib/content-production";
 import { getSelectedGenerationMethods } from "../project-methods/service";
 import { getPublishedDefaultContentMethodForStudio } from "../default-content-method/service";
+import { classifyCreatorContext, extractExplicitOwnFacts, uniqueConfirmedFacts, type ConfirmedOwnFact } from "./creation-context";
 
 export type ContextBudgetLimits = { perSourceChars: number; totalSourceChars: number; totalEvidenceChars: number };
+export type AdditionalExternalReference = { id: string; title: string; content: string };
 const defaults: ContextBudgetLimits = { perSourceChars: 8_000, totalSourceChars: 24_000, totalEvidenceChars: 12_000 };
 
 function strings(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
@@ -18,10 +20,10 @@ function take(value: string, maximum: number) { return value.length <= maximum ?
 export class ProjectContextBuilder {
   constructor(private readonly limits: ContextBudgetLimits = defaults) {}
 
-  async build(input: { workspaceId: string; userId: string; projectId: string; action: AIAction; studioAction?: StudioQuickAction }) {
+  async build(input: { workspaceId: string; userId: string; projectId: string; action: AIAction; studioAction?: StudioQuickAction; externalReferences?: AdditionalExternalReference[] }) {
     const project = await db.contentProject.findFirst({
       where: { id: input.projectId, workspaceId: input.workspaceId, workspace: { members: { some: { userId: input.userId } } } },
-      select: { id: true, title: true, description: true, goal: true, audience: true, creatorProfileId: true },
+      select: { id: true, title: true, description: true, goal: true, audience: true, creatorProfileId: true, motherContent: { select: { title: true, body: true, version: true, confirmedVersion: true } } },
     });
     if (!project) throw new ProjectServiceError("PROJECT_NOT_FOUND");
     const creatorProfile = project.creatorProfileId
@@ -31,7 +33,7 @@ export class ProjectContextBuilder {
     const needsEvidence = Boolean(input.studioAction) || ["GENERATE_ANGLES", "GENERATE_BRIEF", "GENERATE_MOTHER_CONTENT"].includes(input.action);
     const needsBrief = Boolean(input.studioAction) || ["GENERATE_BRIEF", "GENERATE_MOTHER_CONTENT", "REWRITE_SELECTION", "SHORTEN", "EXPAND", "ADD_PERSONAL_VIEW", "HUMANIZE"].includes(input.action);
     const [sourceRows, evidenceRows, brief] = await Promise.all([
-      needsSources ? db.projectSource.findMany({ where: { projectId: project.id }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], select: { role: true, sourceItem: { select: { id: true, title: true, sourcePlatform: true, rawText: true, transcript: { select: { fullText: true } }, materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { version: true, suggestedTitle: true, summary: true, topic: true, targetAudience: true, coreViewpoint: true, keyPoints: true, coreQuestion: true, understanding: true } } } } } }) : [],
+      needsSources ? db.projectSource.findMany({ where: { projectId: project.id }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], select: { role: true, sourceItem: { select: { id: true, title: true, sourcePlatform: true, rawText: true, transcript: { select: { fullText: true } }, materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { version: true, suggestedTitle: true, summary: true, topic: true, targetAudience: true, coreViewpoint: true, keyPoints: true, coreQuestion: true, understanding: true } }, materialDistillations: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { id: true, version: true, schemaVersion: true, output: true } } } } } }) : [],
       needsEvidence ? db.evidenceItem.findMany({ where: { projectId: project.id, workspaceId: input.workspaceId }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], select: { id: true, type: true, excerpt: true, claim: true, note: true, sourceItemId: true } }) : [],
       needsBrief ? db.creativeBrief.findFirst({ where: { projectId: project.id, workspaceId: input.workspaceId } }) : null,
     ]);
@@ -46,7 +48,7 @@ export class ProjectContextBuilder {
     const creationAction = input.action === "GENERATE_MOTHER_CONTENT" || Boolean(input.studioAction);
     let contextTruncated = false;
     let sourceBudget = this.limits.totalSourceChars;
-    type BuiltSource = { id: string; title: string | null; platform: string; role?: string; text?: string; materialAnalysis?: Record<string, unknown> | null; materialUnderstanding?: MaterialAnalysisOutput | { whatItSays: { summary: string; keyPoints: string[] }; reusable: never[]; doNotCopy: never[]; uncertain: never[] } | { reusable: MaterialAnalysisOutput["reusable"]; prohibitedReferenceClaims: Array<{ content: string; reason: string }> } | null };
+    type BuiltSource = { id: string; title: string | null; platform: string; role?: string; text?: string; materialAnalysis?: Record<string, unknown> | null; materialDistillation?: { id: string; version: number; schemaVersion: string; output: unknown } | null; materialUnderstanding?: MaterialAnalysisOutput | { whatItSays: { summary: string; keyPoints: string[] }; reusable: never[]; doNotCopy: never[]; uncertain: never[] } | { reusable: MaterialAnalysisOutput["reusable"]; prohibitedReferenceClaims: Array<{ content: string; reason: string }> } | null };
     const sources: BuiltSource[] = sourceRows.flatMap(({ sourceItem, role }): BuiltSource[] => {
       if (sourceBudget <= 0) { contextTruncated = true; return []; }
       const raw = creationAction ? "" : sourceItem.transcript?.fullText || sourceItem.rawText || "";
@@ -54,11 +56,13 @@ export class ProjectContextBuilder {
       sourceBudget -= selected.value.length;
       contextTruncated ||= selected.truncated || raw.length > selected.value.length;
       const analysis = sourceItem.materialAnalyses[0];
+      const distillation = sourceItem.materialDistillations[0];
       const understanding = materialAnalysisOutputSchema.safeParse(analysis?.understanding);
       if (creationAction) return [{
         id: sourceItem.id,
         title: sourceItem.title,
         platform: sourceItem.sourcePlatform,
+        materialDistillation: distillation ? { id: distillation.id, version: distillation.version, schemaVersion: distillation.schemaVersion, output: distillation.output } : null,
         materialUnderstanding: understanding.success
           ? { reusable: understanding.data.reusable, prohibitedReferenceClaims: [...understanding.data.doNotCopy, ...understanding.data.uncertain] }
           : analysis ? { reusable: [], prohibitedReferenceClaims: [{ content: analysis.summary || strings(analysis.keyPoints).join("；"), reason: "旧版整理只作来源背景，不得写成创作者事实" }].filter((item) => item.content) } : null,
@@ -74,16 +78,32 @@ export class ProjectContextBuilder {
       contextTruncated ||= selected.truncated;
       return [{ id: item.id, type: item.type, sourceItemId: item.sourceItemId, content: selected.value }];
     });
-    const profile = creatorProfile ? { displayName: creatorProfile.displayName, positioning: creatorProfile.positioning, targetAudience: creatorProfile.targetAudience, tone: creatorProfile.tone, preferredStyle: creatorProfile.preferredStyle, forbiddenStyle: creatorProfile.forbiddenStyle, coreTopics: strings(creatorProfile.coreTopics), personalViews: strings(creatorProfile.personalViews), brandTerms: strings(creatorProfile.brandTerms), forbiddenTerms: strings(creatorProfile.forbiddenTerms), hookPreferences: strings(creatorProfile.hookPreferences), structurePreferences: strings(creatorProfile.structurePreferences), ctaPreferences: strings(creatorProfile.ctaPreferences), examplePhrases: strings(creatorProfile.examplePhrases) } : null;
+    const profileContext = classifyCreatorContext(creatorProfile ? { displayName: creatorProfile.displayName, positioning: creatorProfile.positioning, targetAudience: creatorProfile.targetAudience, tone: creatorProfile.tone, preferredStyle: creatorProfile.preferredStyle, forbiddenStyle: creatorProfile.forbiddenStyle, coreTopics: strings(creatorProfile.coreTopics), personalViews: strings(creatorProfile.personalViews), brandTerms: strings(creatorProfile.brandTerms), forbiddenTerms: strings(creatorProfile.forbiddenTerms), hookPreferences: strings(creatorProfile.hookPreferences), structurePreferences: strings(creatorProfile.structurePreferences), ctaPreferences: strings(creatorProfile.ctaPreferences), examplePhrases: strings(creatorProfile.examplePhrases), notes: creatorProfile.notes } : null);
     const briefData = brief ? { topic: brief.topic, angle: brief.angle, audience: brief.audience, coreMessage: brief.coreMessage, coreQuestion: brief.coreQuestion, background: brief.background, keyPoints: strings(brief.keyPoints), structure: strings(brief.structure), tone: brief.tone, risks: strings(brief.risks), version: brief.version } : null;
     const ownContribution = resolveOwnContribution({ coreMessage: briefData?.coreMessage, background: briefData?.background, audience: briefData?.audience });
     const hasOwnBackground = Boolean(briefData?.background?.trim());
     const isExternalReferenceEvidence = (item: (typeof evidence)[number]) => typeof item.sourceItemId === "string" && item.sourceItemId.trim().length > 0;
-    const confirmedFacts = evidence.filter((item) => !isExternalReferenceEvidence(item)).map((item) => item.content);
+    const profileFacts: ConfirmedOwnFact[] = profileContext.confirmedFacts.map((text) => ({ text, source: "CREATOR_PROFILE", kind: "EXPERIENCE" }));
+    const supplementFacts: ConfirmedOwnFact[] = extractExplicitOwnFacts(`${briefData?.coreMessage ?? ""}\n${briefData?.background ?? ""}`).map((text) => ({ text, source: "MY_SUPPLEMENT", kind: "EXPERIENCE" }));
+    const projectFacts: ConfirmedOwnFact[] = evidenceRows.filter((item) => !item.sourceItemId).flatMap((item) => {
+      const text = item.claim?.trim() || item.excerpt?.trim() || item.note?.trim();
+      return text ? [{ text, source: "PROJECT_EVIDENCE" as const, kind: item.type, sourceId: item.id }] : [];
+    });
+    const baseOwnFacts = uniqueConfirmedFacts([...profileFacts, ...supplementFacts, ...projectFacts]);
+    const currentDraftFacts: ConfirmedOwnFact[] = project.motherContent ? baseOwnFacts.filter((fact) => project.motherContent!.body.includes(fact.text)).map((fact) => ({ ...fact, source: "CURRENT_DRAFT" })) : [];
+    const ownFacts = uniqueConfirmedFacts([...baseOwnFacts, ...currentDraftFacts]);
+    const confirmedFacts = ownFacts.map(({ text }) => text);
     const externalReferenceEvidence = evidence.filter(isExternalReferenceEvidence).map(({ id, type, sourceItemId, content }) => ({ id, type, sourceItemId, content }));
+    const additionalExternalReferences = (input.externalReferences ?? []).map((item) => ({ ...item, attribution: "EXTERNAL" as const }));
+    const currentDraft = project.motherContent ? { title: project.motherContent.title, version: project.motherContent.version, confirmedVersion: project.motherContent.confirmedVersion, hasBody: Boolean(project.motherContent.body.trim()), trustedFacts: currentDraftFacts.map(({ text }) => text) } : { title: "", version: 0, confirmedVersion: null, hasBody: false, trustedFacts: [] as string[] };
     const context = creationAction
-      ? { project: { title: project.title }, mySupplement: briefData ? { myCoreViewpoint: briefData.coreMessage, audience: briefData.audience, ownBusinessExperienceOrCases: briefData.background, otherRequirements: briefData.angle } : null, ownContribution, creatorProfile: profile, materialUnderstanding: sources, confirmedFacts, ...(defaultMethodContext ? { defaultContentMethod: defaultMethodContext } : {}), ...(selectedMethodContext.length ? { selectedMethods: selectedMethodContext } : {}), externalReferenceEvidence }
-      : { project: { id: project.id, title: project.title, description: project.description, goal: project.goal, audience: project.audience }, creatorProfile: profile, sources, evidence, creativeBasis: evidence.map((item) => ({ ...item, status: "ADOPTED", verificationRequired: false })), creativeBrief: briefData, ...(defaultMethodContext ? { defaultContentMethod: defaultMethodContext } : {}), ...(selectedMethodContext.length ? { selectedMethods: selectedMethodContext } : {}) };
-    return { context, ownContribution, hasOwnBackground, contextTruncated, selectedMethods, defaultMethod, inputSummary: { action: input.action, ...(input.studioAction ? { studioAction: input.studioAction } : {}), sourceCount: sources.length, evidenceCount: evidence.length, materialAnalysisCount: sourceRows.filter(({ sourceItem }) => sourceItem.materialAnalyses.length > 0).length, hasUnifiedCreativeAnalysis: false, hasCreativeBrief: Boolean(brief), contextChars: JSON.stringify(context).length, hasCreatorProfile: Boolean(profile), ownContribution, hasOwnBackground, contextTruncated, ...(defaultMethod ? { defaultMethodAssetId: defaultMethod.assetId, defaultMethodVersionId: defaultMethod.versionId, defaultMethodVersion: defaultMethod.version, defaultMethodSections: defaultMethod.sections.map(({ code }) => code) } : {}), ...(selectedMethods.length ? { selectedMethodCount: selectedMethods.length, selectedMethodVersionIds: selectedMethods.map(({ methodVersionId }) => methodVersionId) } : {}) } };
+      ? { task: { action: input.action, studioAction: input.studioAction ?? null }, project: { id: project.id, title: project.title, goal: project.goal, audience: project.audience }, mySupplement: briefData ? { myCoreViewpoint: briefData.coreMessage, audience: briefData.audience, ownBusinessExperienceOrCases: briefData.background, otherRequirements: briefData.angle } : null, ownContribution, creatorProfile: { ...profileContext.profile, confirmedFacts: profileContext.confirmedFacts, currentUnderstanding: profileContext.currentUnderstanding, pendingInformation: profileContext.pendingInformation }, confirmedFacts, currentDraft, ...(defaultMethodContext ? { defaultContentMethod: defaultMethodContext } : {}), ...(selectedMethodContext.length ? { selectedMethods: selectedMethodContext } : {}), externalReferences: { materials: sources, evidence: externalReferenceEvidence, additional: additionalExternalReferences }, factSafetyBoundary: { methodsAreFacts: false, externalReferencesAreOwnFacts: false, unconfirmedInformationIsUsableAsFact: false, promisesAllowed: false } }
+      : { project: { id: project.id, title: project.title, description: project.description, goal: project.goal, audience: project.audience }, creatorProfile: profileContext.profile, sources, evidence, creativeBasis: evidence.map((item) => ({ ...item, status: "ADOPTED", verificationRequired: false })), creativeBrief: briefData, ...(defaultMethodContext ? { defaultContentMethod: defaultMethodContext } : {}), ...(selectedMethodContext.length ? { selectedMethods: selectedMethodContext } : {}) };
+    const hasOwnEvidence = ownFacts.some(({ kind }) => ["FACT", "CASE", "DATA", "EXPERIENCE"].includes(kind));
+    const hasOwnCaseOrData = ownFacts.some(({ kind }) => ["CASE", "DATA"].includes(kind));
+    const snapshot = creationAction ? context : null;
+    return { context, snapshot, ownFacts, hasOwnEvidence, hasOwnCaseOrData, ownContribution, hasOwnBackground, contextTruncated, selectedMethods, defaultMethod, inputSummary: { action: input.action, ...(input.studioAction ? { studioAction: input.studioAction } : {}), sourceCount: sources.length, evidenceCount: evidence.length, materialAnalysisCount: sourceRows.filter(({ sourceItem }) => sourceItem.materialAnalyses.length > 0).length, materialDistillationCount: sourceRows.filter(({ sourceItem }) => sourceItem.materialDistillations.length > 0).length, hasUnifiedCreativeAnalysis: false, hasCreativeBrief: Boolean(brief), contextChars: JSON.stringify(context).length, hasCreatorProfile: Boolean(profileContext.profile), confirmedOwnFactCount: ownFacts.length, creatorUnderstandingCount: profileContext.currentUnderstanding.length, pendingCreatorInformationCount: profileContext.pendingInformation.length, hasCurrentDraft: currentDraft.hasBody, hasOwnEvidence, hasOwnCaseOrData, ownContribution, hasOwnBackground, contextTruncated, ...(defaultMethod ? { defaultMethodAssetId: defaultMethod.assetId, defaultMethodVersionId: defaultMethod.versionId, defaultMethodVersion: defaultMethod.version, defaultMethodSections: defaultMethod.sections.map(({ code }) => code) } : {}), ...(selectedMethods.length ? { selectedMethodCount: selectedMethods.length, selectedMethodVersionIds: selectedMethods.map(({ methodVersionId }) => methodVersionId) } : {}) } };
   }
 }
+
+export { ProjectContextBuilder as CreationContextBuilder };

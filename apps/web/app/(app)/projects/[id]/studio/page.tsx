@@ -18,6 +18,8 @@ import { motherContentPreviewSchema } from "@/server/ai/schemas";
 import { getProjectMethodState } from "@/server/project-methods/service";
 import { CreationFeedbackError, getCreationFeedbackContext, type CreationFeedbackContext } from "@/server/creation-feedback/service";
 import { getPublishedDefaultContentMethodForStudio } from "@/server/default-content-method/service";
+import { ProjectContextBuilder } from "@/server/ai/project-context";
+import { recommendStudioQuickActions } from "@/server/ai/schemas";
 
 function stringArray(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
 
@@ -31,7 +33,7 @@ export default async function ProjectStudioPage({ params }: { params: Promise<{ 
     if (!(error instanceof CreationFeedbackError)) throw error;
     return { available: false, projectId: project.id, motherContentId: null, motherContentVersion: null, sourceAiRunId: null, methods: [], feedback: null, unavailableReason: "MOTHER_NOT_READY" as const };
   });
-  const [availableSources, llm, ownProfile, motherHistory, latestAppliedMotherRun, methodState, feedbackContext, defaultMethod] = await Promise.all([
+  const [availableSources, llm, ownProfile, motherHistory, latestAppliedMotherRun, methodState, feedbackContext, defaultMethod, creationContext] = await Promise.all([
     db.sourceItem.findMany({ where: { workspaceId: workspace.id, status: "READY", ...(sourceIds.length ? { id: { notIn: sourceIds } } : {}) }, select: { id: true, title: true, sourcePlatform: true, sourceType: true, createdAt: true, materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { summary: true } } }, orderBy: { createdAt: "desc" }, take: 100 }),
     new IntegrationService().getIntegrationStatus(workspace.id, "LLM"),
     getCreatorProfile(workspace.id, session.user.id),
@@ -40,6 +42,7 @@ export default async function ProjectStudioPage({ params }: { params: Promise<{ 
     getProjectMethodState({ workspaceId: workspace.id, userId: session.user.id, projectId: project.id }),
     feedbackForPage,
     getPublishedDefaultContentMethodForStudio({ workspaceId: workspace.id }),
+    new ProjectContextBuilder().build({ workspaceId: workspace.id, userId: session.user.id, projectId: project.id, action: "REWRITE_SELECTION", studioAction: "TOPIC_IDEAS" }),
   ]);
   const brief = project.creativeBrief;
   const mother = project.motherContent;
@@ -62,5 +65,6 @@ export default async function ProjectStudioPage({ params }: { params: Promise<{ 
   const parsedProductionPlan = motherContentPreviewSchema.safeParse(latestAppliedMotherRun?.outputJson);
   const ai = { integrationStatus: llm.status !== "CONFIGURED" && process.env.MOCK_MODE === "true" ? "MOCK" as const : llm.status, creatorProfile: profile ? { displayName: profile.displayName, positioning: profile.positioning } : null };
   const namedAvailableSources = availableSources.map((source) => ({ ...source, displayName: sourceDisplayName({ title: source.title, summary: source.materialAnalyses[0]?.summary, platformLabel: sourcePlatformLabels[source.sourcePlatform] || source.sourcePlatform, createdAt: source.createdAt }) }));
-  return <><header className="mb-5 flex flex-wrap items-start justify-between gap-4"><div><Link href="/projects" className="mb-3 inline-flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"><ArrowLeft size={16} />返回我的创作</Link><h1 className="text-2xl font-semibold tracking-tight">{project.title}</h1><p className="mt-1 text-sm text-[var(--text-secondary)]">参考素材 → 我的补充 → 我的口播稿</p></div><Badge>{projectStatusLabels[project.status] || project.status}</Badge></header><StudioShell project={{ ...studioProject, productionPlan: parsedProductionPlan.success ? parsedProductionPlan.data : null }} methods={methodState} defaultMethod={defaultMethod} availableSources={namedAvailableSources} feedback={feedbackContext} editable={role !== "VIEWER"} ai={ai} initialWarnings={initialWarnings} /></>;
+  const recommendedActions = recommendStudioQuickActions({ hasTopic: Boolean(brief?.coreMessage.trim() || brief?.topic.trim()), hasDraft: Boolean(mother?.body.trim()), hasOwnEvidence: creationContext.hasOwnCaseOrData });
+  return <><header className="mb-5 flex flex-wrap items-start justify-between gap-4"><div><Link href="/projects" className="mb-3 inline-flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"><ArrowLeft size={16} />返回我的创作</Link><h1 className="text-2xl font-semibold tracking-tight">{project.title}</h1><p className="mt-1 text-sm text-[var(--text-secondary)]">参考素材 → 我的补充 → 我的口播稿</p></div><Badge>{projectStatusLabels[project.status] || project.status}</Badge></header><StudioShell project={{ ...studioProject, productionPlan: parsedProductionPlan.success ? parsedProductionPlan.data : null }} methods={methodState} defaultMethod={defaultMethod} recommendedActions={recommendedActions} availableSources={namedAvailableSources} feedback={feedbackContext} editable={role !== "VIEWER"} ai={ai} initialWarnings={initialWarnings} /></>;
 }

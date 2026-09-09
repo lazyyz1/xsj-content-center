@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deterministicFactRisks, inspectStudioFactText, sanitizeStudioQuickActionOutput } from "../server/studio/fact-safety";
+import { deterministicFactRisks, downgradeStudioFactText, inspectStudioFactText, sanitizeStudioQuickActionOutput } from "../server/studio/fact-safety";
 
 const output = (original: string, suggestions: Array<{ title: string; text: string }> = [], replacement: string | null = null) => ({ original, summary: "建议", suggestions, replacement, risks: [] });
 
@@ -28,15 +28,29 @@ describe("Studio fact-state and promise boundary", () => {
     expect(inspectStudioFactText("外部案例中的完播率是 5%。", [])).toMatchObject({ state: "EXTERNAL_FACT", blocked: false });
   });
 
-  it("filters unsafe topic and opening candidates while preserving tension and hypotheses", () => {
+  it("keeps safe, hypothetical, and evidence-needed topic angles without treating them as facts", () => {
     const result = sanitizeStudioQuickActionOutput("TOPIC_IDEAS", output("项目", [
       { title: "真实冲突", text: "很多机构拍了一阵都没人问，问题可能出在哪里？" },
       { title: "假设场景", text: "假设完播率只有 5%，可以先检查开头是否说清问题。" },
       { title: "虚构经历", text: "我做教培短视频三年，已经验证这套方法稳定出咨询。" },
       { title: "不能用后文示例洗白前文", text: "我们试了 4 种方法。比如一天接待 4 组咨询。" },
     ]), []);
-    expect(result.suggestions.map(({ title }) => title)).toEqual(["真实冲突", "假设场景"]);
-    expect(result.risks[0]?.text).toContain("虚构经历");
+    expect(result.suggestions.map(({ title }) => title)).toEqual(["真实冲突", "假设场景", "虚构经历", "不能用后文示例洗白前文"]);
+    expect(result.suggestions.slice(2).every(({ factState }) => factState === "UNVERIFIED_JUDGMENT")).toBe(true);
+    expect(result.risks.some(({ text }) => text.includes("虚构经历"))).toBe(true);
+    expect(sanitizeStudioQuickActionOutput("REWRITE_OPENING", output("原稿", [{ title: "虚构经历", text: "我做教培短视频三年，已经验证这套方法稳定出咨询。" }]), []).suggestions).toEqual([]);
+  });
+
+  it("uses confirmed context before regexes and safely downgrades unsupported precision", () => {
+    const broad = ["长期从事教培经营"];
+    expect(inspectStudioFactText("我做教培这些年，最关注经营问题。", broad)).toMatchObject({ state: "CONFIRMED_OWN_FACT", blocked: false });
+    expect(inspectStudioFactText("我以前做校区运营的时候，最关注家长反馈。", ["曾负责校区运营"])).toMatchObject({ state: "CONFIRMED_OWN_FACT", blocked: false });
+    expect(inspectStudioFactText("我做教培 12 年。", broad).blocked).toBe(true);
+    expect(downgradeStudioFactText("我做教培 12 年，最关注经营问题。", broad)).toBe("我做教培 这些年，最关注经营问题。");
+    expect(sanitizeStudioQuickActionOutput("REWRITE_OPENING", output("原稿", [{ title: "经历开头", text: "我做教培 12 年，最关注经营问题。" }]), broad).suggestions[0]?.text).toContain("这些年");
+    expect(inspectStudioFactText("我做教培 12 年。", ["我做教培 12 年。"]).blocked).toBe(false);
+    expect(inspectStudioFactText("我们客户的成交率提高了 30%。", ["这个客户是我们合作的，成交率提高了 30%。"]).blocked).toBe(false);
+    expect(inspectStudioFactText("我们客户的成交率提高了 30%。", []).blocked).toBe(true);
   });
 
   it("uses a case placeholder and missing-evidence prompt when no own facts exist", () => {
@@ -60,5 +74,6 @@ describe("Studio fact-state and promise boundary", () => {
     expect(risks.map(({ handling }) => handling).join(" ")).toMatch(/第一人称|具体数字|经营结果承诺/u);
     const checked = sanitizeStudioQuickActionOutput("FACT_CHECK", output("很多机构都会遇到这种情况。假设一天接待 4 组咨询。", [{ title: "模型建议", text: "不采用" }]), []);
     expect(checked).toMatchObject({ summary: "当前未发现明显事实风险。", suggestions: [], replacement: null, risks: [] });
+    expect(deterministicFactRisks("你在外面常听到“绝对有效”“保证结果”，这种词不能当承诺。", [])).toEqual([]);
   });
 });
