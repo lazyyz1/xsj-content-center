@@ -5,6 +5,7 @@ import { materialAnalysisOutputSchema, type CurrentMaterialAnalysisOutput } from
 import { benchmarkAnalysisOutputSchema, type BenchmarkCommonMethod } from "@content-center/providers";
 import { materialDistillationGenerationSchema, type MaterialDistillationHighlight } from "@content-center/providers";
 import { z } from "zod";
+import { isDefaultContentMethodPayload } from "../default-content-method/schemas";
 
 const requiredText = (maximum: number) => z.string().trim().min(1).max(maximum);
 
@@ -185,6 +186,10 @@ function toMethodDTO(row: MethodAssetRow): MethodDTO {
   };
 }
 
+function isDefaultMethodAsset(row: { versions: Array<{ steps: Prisma.JsonValue }> }) {
+  return row.versions.some((version) => isDefaultContentMethodPayload(version.steps));
+}
+
 async function findMethodRow(input: { workspaceId: string; ownerUserId: string; methodId: string }) {
   return db.methodAsset.findFirst({
     where: { id: input.methodId, workspaceId: input.workspaceId, ownerUserId: input.ownerUserId },
@@ -203,12 +208,12 @@ export async function listMethods(input: { workspaceId: string; ownerUserId: str
     orderBy: { updatedAt: "desc" },
     include: { versions: { orderBy: { version: "desc" }, take: 1, include: methodVersionInclude } },
   });
-  return rows.map(toMethodDTO);
+  return rows.filter((row) => !isDefaultMethodAsset(row)).map(toMethodDTO);
 }
 
 export async function getMethod(input: { workspaceId: string; ownerUserId: string; methodId: string }) {
   const row = await findMethodRow(input);
-  return row ? toMethodDTO(row) : null;
+  return row && !isDefaultMethodAsset(row) ? toMethodDTO(row) : null;
 }
 
 function currentUnderstanding(value: Prisma.JsonValue | null): CurrentMaterialAnalysisOutput {
@@ -395,6 +400,7 @@ export async function updateMethodContent(input: {
       const asset = await tx.methodAsset.findFirst({ where: { id: input.methodId, workspaceId: input.workspaceId, ownerUserId: input.ownerUserId }, include: { versions: { orderBy: { version: "desc" }, take: 1 } } });
       const current = asset?.versions[0];
       if (!asset || !current) throw new MethodError("METHOD_NOT_FOUND", "方法不存在。");
+      if (isDefaultContentMethodPayload(current.steps)) throw new MethodError("METHOD_INVALID", "默认创作方法请使用公司方法管理入口。");
       if (current.version !== input.expectedVersion) throw new MethodError("METHOD_VERSION_CONFLICT", "这个方法刚刚有新的修改，请刷新后再保存。");
       await tx.methodVersion.create({ data: { assetId: asset.id, version: current.version + 1, title: content.data.title, steps: json(content.data.steps), applicableScenarios: json(content.data.applicableScenarios), boundaries: json(content.data.boundaries), sourceItemId: current.sourceItemId, sourceMaterialAnalysisId: current.sourceMaterialAnalysisId, sourceTranscriptId: current.sourceTranscriptId, sourceTranscriptUpdatedAt: current.sourceTranscriptUpdatedAt, sourceBenchmarkStudyId: current.sourceBenchmarkStudyId, sourceMaterialDistillationId: current.sourceMaterialDistillationId, evidence: json(current.evidence ?? []), editedById: input.ownerUserId } });
       await tx.methodAsset.update({ where: { id: asset.id }, data: { updatedAt: new Date() } });
@@ -414,8 +420,9 @@ export async function updateMethodStatus(input: { workspaceId: string; ownerUser
   await assertMethodEditor({ workspaceId: input.workspaceId, userId: input.ownerUserId });
   const parsed = methodStatusSchema.safeParse(input.status);
   if (!parsed.success) throw new MethodError("METHOD_STATUS_INVALID", "请选择有效的方法状态。");
-  const asset = await db.methodAsset.findFirst({ where: { id: input.methodId, workspaceId: input.workspaceId, ownerUserId: input.ownerUserId }, select: { id: true } });
+  const asset = await db.methodAsset.findFirst({ where: { id: input.methodId, workspaceId: input.workspaceId, ownerUserId: input.ownerUserId }, select: { id: true, versions: { orderBy: { version: "desc" }, take: 1, select: { steps: true } } } });
   if (!asset) throw new MethodError("METHOD_NOT_FOUND", "方法不存在。");
+  if (asset.versions[0] && isDefaultContentMethodPayload(asset.versions[0].steps)) throw new MethodError("METHOD_INVALID", "默认创作方法请使用公司方法管理入口。");
   await db.$transaction([
     db.methodAsset.update({ where: { id: asset.id }, data: { status: parsed.data, statusUpdatedAt: new Date() } }),
     db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.ownerUserId, action: "method.status_updated", resourceType: "method_asset", resourceId: asset.id, metadata: { status: parsed.data } } }),

@@ -5,21 +5,24 @@ import { PageHeader } from "@/components/page";
 import { methodStatusLabels } from "@/lib/content-labels";
 import { requireWorkspace } from "@/server/access";
 import { getCreatorMethodsOverview, type CreatorMethodDTO } from "@/server/creator-methods/service";
+import { getDefaultContentMethod } from "@/server/default-content-method/service";
+import { DefaultContentMethod } from "@/components/projects/default-content-method";
 
 export default async function CreatorMethodsPage() {
   const { session, workspace, role } = await requireWorkspace();
-  const overview = await getCreatorMethodsOverview({ workspaceId: workspace.id, ownerUserId: session.user.id });
+  const [overview, defaultMethod] = await Promise.all([getCreatorMethodsOverview({ workspaceId: workspace.id, ownerUserId: session.user.id }), getDefaultContentMethod({ workspaceId: workspace.id })]);
   const canOperate = role !== "VIEWER";
   const description = "这里整理的是你已经确认、正在尝试和实际使用过的创作方法。系统不会因为一次收藏或一次生成，就自动改变你的长期创作习惯。";
-  if (!overview.all.length) return <><Link href="/projects" className="mb-5 inline-flex items-center gap-2 text-sm text-[var(--text-secondary)]"><ArrowLeft size={16} />返回我的创作</Link><PageHeader title="我的创作方法" description={description} /><EmptyMethods /></>;
   const savedWithoutUse = overview.groups.SAVED.filter((method) => method.attempts === 0);
   return <><div className="mb-5 flex items-center justify-between gap-3"><Link href="/projects" className="inline-flex items-center gap-2 text-sm text-[var(--text-secondary)]"><ArrowLeft size={16} />返回我的创作</Link><Link href="/library/methods" className="text-sm font-medium text-[var(--accent)]">查看全部方法</Link></div><PageHeader title="我的创作方法" description={description} />
+    <DefaultContentMethod initial={defaultMethod} editable={canOperate} />
+    {!overview.all.length ? <EmptyMethods /> : <>
     <section className="mb-8 rounded-2xl border bg-[var(--surface)] p-5" data-testid="creator-methods-summary"><p className="text-sm leading-6 text-[var(--text-secondary)]">最近 30 天共有 <span className="font-semibold text-[var(--text-primary)]">{overview.totalGenerations}</span> 次口播稿生成记录。生成完成只表示技术流程完成，不代表方法有效；这里不计算成功率。</p></section>
     <MethodSection testId="core-methods" title="我常用的方法" description="你手动标记为常用的方法。" items={overview.groups.CORE} totalGenerations={overview.totalGenerations} canOperate={canOperate} />
     <MethodSection testId="trial-methods" title="我正在试的方法" description="你手动标记为试用中的方法。" items={overview.groups.TRIAL} totalGenerations={overview.totalGenerations} canOperate={canOperate} />
     <RecentSection items={overview.recentlyUsed} canOperate={canOperate} />
     <MethodSection testId="saved-methods" title="还没开始尝试" description="这些方法已经收藏，但最近 30 天还没有实际使用记录。" items={savedWithoutUse} totalGenerations={overview.totalGenerations} canOperate={canOperate} secondary />
-    {overview.groups.DISABLED.length ? <details className="mt-8" data-testid="disabled-methods"><summary className="cursor-pointer text-sm font-medium text-[var(--text-secondary)]">已停用（{overview.groups.DISABLED.length}）</summary><div className="mt-4 grid gap-4 md:grid-cols-2"><p className="text-sm text-[var(--text-secondary)] md:col-span-2">这些方法过去的使用记录仍会保留，但当前不会出现在创作选择中。</p>{overview.groups.DISABLED.map((method) => <MethodCard key={method.id} method={method} totalGenerations={overview.totalGenerations} canOperate={canOperate} disabled />)}</div></details> : null}
+    {overview.groups.DISABLED.length ? <details className="mt-8" data-testid="disabled-methods"><summary className="cursor-pointer text-sm font-medium text-[var(--text-secondary)]">已停用（{overview.groups.DISABLED.length}）</summary><div className="mt-4 grid gap-4 md:grid-cols-2"><p className="text-sm text-[var(--text-secondary)] md:col-span-2">这些方法过去的使用记录仍会保留，但当前不会出现在创作选择中。</p>{overview.groups.DISABLED.map((method) => <MethodCard key={method.id} method={method} totalGenerations={overview.totalGenerations} canOperate={canOperate} disabled />)}</div></details> : null}</>}
   </>;
 }
 

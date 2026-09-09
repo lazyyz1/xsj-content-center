@@ -1045,6 +1045,7 @@ model MethodVersion {
   sourceTranscriptUpdatedAt DateTime?
   sourceBenchmarkStudyId String?
   sourceMaterialDistillationId String?
+  workspaceDefaultKey      String?
   evidence               Json
   editedById             String
   createdAt              DateTime        @default(now())
@@ -1065,6 +1066,7 @@ model MethodVersion {
   @@index([sourceTranscriptId])
   @@index([sourceBenchmarkStudyId])
   @@index([sourceMaterialDistillationId])
+  @@index([workspaceDefaultKey])
 }
 
 model ProjectMethodSelection {

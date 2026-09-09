@@ -3,6 +3,7 @@ import "server-only";
 import { db, type Prisma } from "@content-center/db";
 import { listMethods } from "../methods/service";
 import { z } from "zod";
+import { isDefaultContentMethodPayload } from "../default-content-method/schemas";
 
 const methodVersionId = z.string().trim().min(1).max(200);
 export const methodSelectionSchema = z.object({
@@ -101,7 +102,7 @@ export async function getProjectMethodState(input: { workspaceId: string; userId
     listMethods({ workspaceId: input.workspaceId, ownerUserId: input.userId }),
   ]);
   return {
-    selected: selectedRows.map(selectedDTO),
+    selected: selectedRows.filter((row) => !isDefaultContentMethodPayload(row.methodVersion.steps)).map(selectedDTO),
     available: available.flatMap((method) => method.status === "DISABLED" ? [] : [{ methodAssetId: method.id, methodVersionId: method.current.id, title: method.current.title, summary: method.current.steps[0] || "已保存的方法内容", status: method.status }]),
   };
 }
@@ -112,7 +113,8 @@ export async function setProjectMethodSelections(input: { workspaceId: string; u
   if (!membership || membership.role === "VIEWER") throw new ProjectMethodError("METHOD_SELECTION_FORBIDDEN", "当前用户不能修改方法选择。");
   const ids = [...new Set(input.methodVersionIds)];
   if (ids.length > 3) throw new ProjectMethodError("METHOD_SELECTION_INVALID", "最多选择 3 个方法。");
-  const versions = ids.length ? await db.methodVersion.findMany({ where: { id: { in: ids }, asset: { workspaceId: input.workspaceId, ownerUserId: input.userId, status: { not: "DISABLED" } }, }, select: { id: true, assetId: true } }) : [];
+  const rows = ids.length ? await db.methodVersion.findMany({ where: { id: { in: ids }, asset: { workspaceId: input.workspaceId, ownerUserId: input.userId, status: { not: "DISABLED" } }, }, select: { id: true, assetId: true, steps: true } }) : [];
+  const versions = rows.filter(({ steps }) => !isDefaultContentMethodPayload(steps));
   if (versions.length !== ids.length || new Set(versions.map(({ assetId }) => assetId)).size !== versions.length) throw new ProjectMethodError("METHOD_SELECTION_FORBIDDEN", "只能选择自己的可用方法。");
   await db.$transaction(async (tx) => {
     await tx.projectMethodSelection.deleteMany({ where: { projectId: input.projectId, selectedByUserId: input.userId } });
@@ -130,7 +132,7 @@ export async function getSelectedGenerationMethods(input: { workspaceId: string;
     include: { methodVersion: { select: { title: true, steps: true, applicableScenarios: true, boundaries: true } } },
   });
   if (rows.length > 3) throw new ProjectMethodError("METHOD_SELECTION_INVALID", "本次选择的方法超过 3 个，请刷新后重新选择。");
-  return rows.map(({ methodAssetId, methodVersionId, methodVersion }) => ({ methodAssetId, methodVersionId, title: methodVersion.title, steps: strings(methodVersion.steps), applicableScenarios: strings(methodVersion.applicableScenarios), boundaries: strings(methodVersion.boundaries) }));
+  return rows.filter(({ methodVersion }) => !isDefaultContentMethodPayload(methodVersion.steps)).map(({ methodAssetId, methodVersionId, methodVersion }) => ({ methodAssetId, methodVersionId, title: methodVersion.title, steps: strings(methodVersion.steps), applicableScenarios: strings(methodVersion.applicableScenarios), boundaries: strings(methodVersion.boundaries) }));
 }
 
 export async function recordSelectedMethodUsages(input: { workspaceId: string; userId: string; projectId: string; aiRunId: string; methodVersionIds: string[] }) {
@@ -143,9 +145,9 @@ export async function recordSelectedMethodUsages(input: { workspaceId: string; u
     if (!run) throw new ProjectMethodError("METHOD_SELECTION_INVALID", "本次生成记录不存在或不属于当前创作。请刷新后重试。");
     const rows = await tx.projectMethodSelection.findMany({
       where: { projectId: input.projectId, selectedByUserId: input.userId, methodVersionId: { in: ids }, project: { workspaceId: input.workspaceId }, methodAsset: { workspaceId: input.workspaceId, ownerUserId: input.userId, status: { not: "DISABLED" } } },
-      select: { methodAssetId: true, methodVersionId: true, methodVersion: { select: { assetId: true } } },
+      select: { methodAssetId: true, methodVersionId: true, methodVersion: { select: { assetId: true, steps: true } } },
     });
-    if (rows.length !== ids.length || new Set(rows.map(({ methodAssetId }) => methodAssetId)).size !== rows.length || rows.some(({ methodAssetId, methodVersion }) => methodAssetId !== methodVersion.assetId)) throw new ProjectMethodError("METHOD_SELECTION_INVALID", "本次选择的方法已变化，请刷新后重试。");
+    if (rows.length !== ids.length || new Set(rows.map(({ methodAssetId }) => methodAssetId)).size !== rows.length || rows.some(({ methodAssetId, methodVersion }) => methodAssetId !== methodVersion.assetId || isDefaultContentMethodPayload(methodVersion.steps))) throw new ProjectMethodError("METHOD_SELECTION_INVALID", "本次选择的方法已变化，请刷新后重试。");
     await tx.methodUsage.createMany({ data: rows.map(({ methodAssetId, methodVersionId }) => ({ projectId: input.projectId, methodAssetId, methodVersionId, aiRunId: input.aiRunId, userId: input.userId })) });
     return rows.map(({ methodAssetId, methodVersionId }) => ({ methodAssetId, methodVersionId }));
   }, { isolationLevel: "Serializable" });
