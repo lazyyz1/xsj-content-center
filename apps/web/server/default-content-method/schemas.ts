@@ -44,6 +44,24 @@ export const defaultContentMethodPayloadSchema = z.object({
 export type DefaultContentMethodPayload = z.infer<typeof defaultContentMethodPayloadSchema>;
 export type DefaultContentMethodSection = z.infer<typeof defaultContentMethodSectionSchema>;
 
+export const defaultContentMethodMinimumItems: Record<DefaultContentMethodSection["code"], number> = {
+  AUDIENCE: 1,
+  TOPIC: 2,
+  OPENING: 1,
+  BODY: 2,
+  EVIDENCE: 2,
+  ENDING: 1,
+  BOUNDARY: 2,
+};
+
+export function getDefaultContentMethodReadiness(sections: DefaultContentMethodSection[]) {
+  const missingSections = defaultContentMethodSectionCodes.filter((code) => {
+    const section = sections.find((item) => item.code === code);
+    return !section || section.items.length < defaultContentMethodMinimumItems[code] || section.items.some((item) => item.sourceRefs.length === 0);
+  });
+  return { readyToPublish: missingSections.length === 0, missingSections };
+}
+
 export function emptyDefaultContentMethodSections(): DefaultContentMethodSection[] {
   return defaultContentMethodSectionCodes.map((code) => ({ code, items: [] }));
 }

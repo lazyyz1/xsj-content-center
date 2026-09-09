@@ -13,7 +13,7 @@ import {
   publishDefaultContentMethod,
   saveDefaultContentMethodDraft,
 } from "../server/default-content-method/service";
-import { defaultContentMethodSectionCodes } from "../server/default-content-method/schemas";
+import { defaultContentMethodMinimumItems, defaultContentMethodSectionCodes } from "../server/default-content-method/schemas";
 import { getMethod, listMethods, updateMethodContent, updateMethodStatus } from "../server/methods/service";
 import { getProjectMethodState, setProjectMethodSelections } from "../server/project-methods/service";
 
@@ -26,7 +26,7 @@ describe("workspace default content method foundation", () => {
   let projectId = "";
   let privateMethodVersionId = "";
 
-  const sections = (suffixText = "V1") => defaultContentMethodSectionCodes.map((code) => ({ code, items: [{ text: `${code} 指南 ${suffixText}`, sourceRefs: [{ type: "OWN_EXPERIENCE" as const, referenceId: `source-${code}`, label: `内部经验 ${code}` }] }] }));
+  const sections = (suffixText = "V1") => defaultContentMethodSectionCodes.map((code) => ({ code, items: Array.from({ length: defaultContentMethodMinimumItems[code] }, (_, index) => ({ text: `${code} 指南 ${suffixText} ${index + 1}`, sourceRefs: [{ type: "OWN_EXPERIENCE" as const, referenceId: `source-${code}-${index}`, label: `内部经验 ${code}` }] })) }));
 
   beforeAll(async () => {
     await db.user.createMany({ data: [{ id: ownerId, name: "Default Method Owner", email: `${ownerId}@example.test` }, { id: otherId, name: "Other Default Owner", email: `${otherId}@example.test` }] });
@@ -83,11 +83,11 @@ describe("workspace default content method foundation", () => {
   it("creates V2 as a draft without changing V1, then publishes while retaining history", async () => {
     const draft = await createDefaultContentMethodDraft({ workspaceId, userId: ownerId, origin: "HUMAN" });
     expect(draft).toMatchObject({ current: { version: 1 }, draft: { version: 2, status: "DRAFT", createdFromVersion: 1 } });
-    expect(draft.draft?.sections[0]?.items[0]?.text).toBe("AUDIENCE 指南 V1");
+    expect(draft.draft?.sections[0]?.items[0]?.text).toBe("AUDIENCE 指南 V1 1");
     await saveDefaultContentMethodDraft({ workspaceId, userId: ownerId, version: 2, sections: sections("V2"), origin: "HUMAN" });
     const published = await publishDefaultContentMethod({ workspaceId, userId: ownerId, version: 2, actor: "HUMAN" });
     expect(published).toMatchObject({ current: { version: 2 }, draft: null, history: [{ version: 2 }, { version: 1 }] });
-    expect(published.history[1]?.sections[0]?.items[0]?.text).toBe("AUDIENCE 指南 V1");
+    expect(published.history[1]?.sections[0]?.items[0]?.text).toBe("AUDIENCE 指南 V1 1");
   });
 
   it("allows an AI-origin draft but never lets AI publish it", async () => {
@@ -110,8 +110,8 @@ describe("workspace default content method foundation", () => {
   it("uses employee language and hides engineering codes in the existing creator-method page", async () => {
     const component = await readFile(new URL("../components/projects/default-content-method.tsx", import.meta.url), "utf8");
     const page = await readFile(new URL("../app/(app)/projects/methods/page.tsx", import.meta.url), "utf8");
-    for (const text of ["鑫世界默认创作方法", "当前版本", "我们主要给谁做内容", "什么样的选题优先做", "开头怎么进入", "正文怎么讲", "案例和数据怎么用", "怎么收尾", "哪些事情不要做", "查看依据", "历史版本", "创建新版本", "发布新版本"]) expect(`${component}${page}`).toContain(text);
-    expect(component).toContain("previous[index]?.text === text ? previous[index].sourceRefs : []");
+    for (const text of ["鑫世界默认创作方法", "当前版本", "我们主要给谁做内容", "什么样的选题优先做", "开头怎么进入", "正文怎么讲", "案例和数据怎么用", "怎么收尾", "哪些事情不要做", "查看依据", "历史版本", "生成 V1 候选稿", "创建新版本", "确认并发布", "重新生成候选稿"]) expect(`${component}${page}`).toContain(text);
+    expect(component).toContain("previous.find((item) => item.text === text)?.sourceRefs ?? []");
     for (const text of [">MethodVersion<", ">SourceRef<", ">EvidenceRef<", ">Schema<", ">Provider<", ">Signal<", ">Claim<", ">WorkspaceId<"]) expect(component).not.toContain(text);
   });
 });

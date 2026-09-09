@@ -7,6 +7,7 @@ import {
   DEFAULT_CONTENT_METHOD_SCHEMA_VERSION,
   defaultContentMethodSectionsSchema,
   emptyDefaultContentMethodSections,
+  getDefaultContentMethodReadiness,
   parseDefaultContentMethodPayload,
   type DefaultContentMethodPayload,
   type DefaultContentMethodSection,
@@ -30,6 +31,8 @@ export type DefaultContentMethodVersionDTO = {
   createdFromVersion: number | null;
   publishedAt: string | null;
   sections: DefaultContentMethodSection[];
+  readyToPublish: boolean;
+  missingSections: DefaultContentMethodSection["code"][];
   editedBy: string;
   createdAt: string;
 };
@@ -74,6 +77,7 @@ function toVersion(row: VersionRow): DefaultContentMethodVersionDTO | null {
     createdFromVersion: parsed.data.createdFromVersion,
     publishedAt: parsed.data.publishedAt,
     sections: parsed.data.sections,
+    ...getDefaultContentMethodReadiness(parsed.data.sections),
     editedBy: row.editedBy.name,
     createdAt: row.createdAt.toISOString(),
   };
@@ -92,7 +96,7 @@ function toDTO(asset: { id: string; updatedAt: Date; versions: VersionRow[] } | 
   };
 }
 
-async function assertEditor(workspaceId: string, userId: string) {
+export async function assertDefaultContentMethodEditor(workspaceId: string, userId: string) {
   const member = await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId, userId } }, select: { role: true } });
   if (!member || member.role === "VIEWER") throw new DefaultContentMethodError("DEFAULT_METHOD_FORBIDDEN", "当前权限不能修改默认创作方法。");
 }
@@ -109,7 +113,7 @@ export async function getDefaultContentMethod(input: { workspaceId: string }): P
 }
 
 export async function createDefaultContentMethodDraft(input: { workspaceId: string; userId: string; origin: "HUMAN" | "AI_SUGGESTION" }) {
-  await assertEditor(input.workspaceId, input.userId);
+  await assertDefaultContentMethodEditor(input.workspaceId, input.userId);
   await db.$transaction(async (tx) => {
     const matches = await defaultAssets(tx, input.workspaceId);
     if (matches.length > 1) throw new DefaultContentMethodError("DEFAULT_METHOD_CONFLICT", "当前空间存在多个默认创作方法，请联系管理员处理。");
@@ -130,7 +134,7 @@ export async function createDefaultContentMethodDraft(input: { workspaceId: stri
 }
 
 export async function saveDefaultContentMethodDraft(input: { workspaceId: string; userId: string; version: number; sections: unknown; origin: "HUMAN" | "AI_SUGGESTION" }) {
-  await assertEditor(input.workspaceId, input.userId);
+  await assertDefaultContentMethodEditor(input.workspaceId, input.userId);
   const sections = defaultContentMethodSectionsSchema.safeParse(input.sections);
   if (!sections.success) throw new DefaultContentMethodError("DEFAULT_METHOD_INVALID", "请检查七个创作指南部分。");
   await db.$transaction(async (tx) => {
@@ -148,7 +152,7 @@ export async function saveDefaultContentMethodDraft(input: { workspaceId: string
 }
 
 export async function publishDefaultContentMethod(input: { workspaceId: string; userId: string; version: number; actor: "HUMAN" | "AI" }) {
-  await assertEditor(input.workspaceId, input.userId);
+  await assertDefaultContentMethodEditor(input.workspaceId, input.userId);
   if (input.actor !== "HUMAN") throw new DefaultContentMethodError("DEFAULT_METHOD_FORBIDDEN", "AI 只能提出草稿，不能发布正式方法。");
   await db.$transaction(async (tx) => {
     const matches = await defaultAssets(tx, input.workspaceId);
@@ -157,7 +161,7 @@ export async function publishDefaultContentMethod(input: { workspaceId: string; 
     const current = row ? parseDefaultContentMethodPayload(row.steps) : null;
     if (!asset || !row || !current?.success) throw new DefaultContentMethodError("DEFAULT_METHOD_NOT_FOUND", "默认创作方法草稿不存在。");
     if (current.data.publicationStatus !== "DRAFT" || asset.versions[0]?.version !== input.version) throw new DefaultContentMethodError("DEFAULT_METHOD_CONFLICT", "这个版本已发布或已经不是当前草稿。");
-    if (current.data.sections.some((section) => section.items.length === 0 || section.items.some((item) => item.sourceRefs.length === 0))) throw new DefaultContentMethodError("DEFAULT_METHOD_INVALID", "每个部分至少需要一条有依据的建议后才能发布。");
+    if (!getDefaultContentMethodReadiness(current.data.sections).readyToPublish) throw new DefaultContentMethodError("DEFAULT_METHOD_INVALID", "候选稿还有部分内容需要补充后才能发布。");
     const published = payload({ status: "PUBLISHED", origin: current.data.origin, createdFromVersion: current.data.createdFromVersion, sections: current.data.sections, publishedById: input.userId });
     await tx.methodVersion.update({ where: { id: row.id }, data: { steps: json(published), editedById: input.userId } });
     await tx.methodAsset.update({ where: { id: asset.id }, data: { status: "CORE", statusUpdatedAt: new Date(), updatedAt: new Date() } });
@@ -167,7 +171,7 @@ export async function publishDefaultContentMethod(input: { workspaceId: string; 
 }
 
 export async function deleteDefaultContentMethod(input: { workspaceId: string; userId: string }) {
-  await assertEditor(input.workspaceId, input.userId);
+  await assertDefaultContentMethodEditor(input.workspaceId, input.userId);
   const current = await getDefaultContentMethod({ workspaceId: input.workspaceId });
   if (!current.assetId) throw new DefaultContentMethodError("DEFAULT_METHOD_NOT_FOUND", "默认创作方法不存在。");
   if (current.current) throw new DefaultContentMethodError("DEFAULT_METHOD_ACTIVE", "当前正式默认创作方法不能删除。");
@@ -175,5 +179,6 @@ export async function deleteDefaultContentMethod(input: { workspaceId: string; u
 }
 
 export const defaultContentMethodDraftRequestSchema = z.object({ action: z.literal("CREATE_DRAFT") }).strict();
+export const defaultContentMethodGenerateRequestSchema = z.object({ action: z.literal("GENERATE_CANDIDATE"), replaceExisting: z.boolean().optional() }).strict();
 export const defaultContentMethodSaveRequestSchema = z.object({ version: z.number().int().positive(), sections: defaultContentMethodSectionsSchema }).strict();
 export const defaultContentMethodPublishRequestSchema = z.object({ action: z.literal("PUBLISH"), version: z.number().int().positive() }).strict();
