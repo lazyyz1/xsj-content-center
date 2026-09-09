@@ -1,0 +1,80 @@
+import type { z } from "zod";
+import { studioQuickActionOutputSchema, type StudioFactState, type StudioQuickAction } from "../ai/schemas";
+
+const hypothetical = /(假设|假如|比如|举个例子|举例来说|示例|模拟场景|如果有一位|如果有一家)/u;
+const external = /(对标账号|外部(?:视频|案例|资料)|原视频|该账号|对方|第三方|案例中的)/u;
+const firstPersonExperience = /(?:我|我们)(?:自己)?(?:做过|做了|做这|带过|带着|跑过|跑了|验证过|验证了|测试过|测试了|服务过|帮助过|研究过|研究了|从事|干了|拍了|试了|拥有|有个|有一位)|(?:我的|我们的)(?:客户|学员|学校|成绩|收入|成交|转化|项目|案例|经历|数据)/u;
+const firstPersonTrackRecord = /(?:我|我们)(?:自己)?(?:做|带|跑|验证|测试|服务|帮助|研究)[^。！？\n]{0,30}(?:年|个月|次|版|团队|客户|项目|结果|咨询|成交|行业)/u;
+const numericFact = /(?:\d+(?:\.\d+)?\s*(?:%|％|年|个月|月|天|分钟|次|条|个|位|人|元|万|亿|分|组|家|所|倍|版)|[二三四五六七八九十百千万]+(?:年|个月|分钟|次|位|人|元|万|亿|分|组|家|所|倍|版)|百分之[零一二三四五六七八九十百\d.]+)/u;
+const resultClaim = /(稳定带来|稳定出|提升了|增长了|翻倍|已经证明|已经验证|验证有效|取得了|实现了|本质就是|必然|一定能|肯定能)/u;
+const promise = /(保证(?:招生|营收|利润|成交|咨询|播放|爆款|回本|结果)|保底(?:结果|效果|增长|转化)|至少不会(?:更差|比原来差|下降|亏)|不会比原来更差|一定能(?:成交|增长|提升|带来)|肯定能(?:成交|增长|提升|带来)|稳定带来(?:咨询|成交|增长)|固定提升(?:百分比|比例|\d))/u;
+
+function normalize(value: string) { return value.normalize("NFKC").toLocaleLowerCase("zh-CN").replace(/[\s，,。；;：:！？!?、“”‘’（）()《》【】\-—]/gu, ""); }
+function promiseText(value: string) { return value.replace(/(?:不|不能|不得|不要|避免)(?:做出|使用|写出|声称)?[^。！？\n]{0,12}(?:保证|保底|必然|一定|稳定带来)/gu, ""); }
+function supported(text: string, ownFacts: string[]) {
+  const candidate = normalize(text);
+  return ownFacts.some((fact) => { const source = normalize(fact); return source.length >= 8 && (source.includes(candidate) || candidate.includes(source)); });
+}
+
+export function inspectStudioFactText(text: string, ownFacts: string[]) {
+  const hasPromise = promise.test(promiseText(text));
+  const hasPersonalExperience = firstPersonExperience.test(text) || firstPersonTrackRecord.test(text);
+  const hasNumber = numericFact.test(text);
+  const hasResultClaim = resultClaim.test(text);
+  const hasSupport = supported(text, ownFacts);
+  const isHypothetical = hypothetical.test(text);
+  const isExternal = external.test(text);
+  let state: StudioFactState = "CREATIVE_EXPRESSION";
+  if (hasSupport) state = "CONFIRMED_OWN_FACT";
+  else if (isExternal) state = "EXTERNAL_FACT";
+  else if (isHypothetical) state = "HYPOTHETICAL";
+  else if (hasPersonalExperience || hasNumber || hasResultClaim) state = "UNVERIFIED_JUDGMENT";
+  const reasons = [
+    ...(hasPromise ? ["包含经营结果承诺"] : []),
+    ...(!hasSupport && !isHypothetical && !isExternal && hasPersonalExperience ? ["包含无来源的第一人称经历"] : []),
+    ...(!hasSupport && !isHypothetical && !isExternal && hasNumber ? ["包含无来源的具体数字"] : []),
+    ...(!hasSupport && !isHypothetical && !isExternal && hasResultClaim ? ["把未验证判断写成已经有效"] : []),
+  ];
+  return { state, blocked: hasPromise || state === "UNVERIFIED_JUDGMENT", reasons };
+}
+
+function sentences(text: string) { return text.split(/(?<=[。！？!?])|\n+/u).map((item) => item.trim()).filter(Boolean); }
+
+function inspectPassage(text: string, ownFacts: string[]) {
+  const results = sentences(text).map((sentence) => inspectStudioFactText(sentence, ownFacts));
+  const blocked = results.some((result) => result.blocked);
+  const reasons = [...new Set(results.flatMap((result) => result.reasons))];
+  const state = results.find((result) => result.state === "CONFIRMED_OWN_FACT")?.state
+    ?? results.find((result) => result.state === "EXTERNAL_FACT")?.state
+    ?? results.find((result) => result.state === "HYPOTHETICAL")?.state
+    ?? "CREATIVE_EXPRESSION";
+  return { state, blocked, reasons };
+}
+
+export function deterministicFactRisks(text: string, ownFacts: string[]) {
+  return sentences(text).flatMap((sentence) => {
+    const result = inspectStudioFactText(sentence, ownFacts);
+    if (!result.blocked) return [];
+    return [{ text: `“${sentence.slice(0, 60)}${sentence.length > 60 ? "…" : ""}”需要核实`, handling: `${result.reasons.join("、")}。补充真实来源，或改成明确的示例、假设或待验证表达。` }];
+  }).filter((item, index, all) => all.findIndex((candidate) => candidate.text === item.text) === index);
+}
+
+export function sanitizeStudioQuickActionOutput(action: StudioQuickAction, value: z.infer<typeof studioQuickActionOutputSchema>, ownFacts: string[], hasOwnEvidence = ownFacts.length > 0) {
+  const removed: Array<{ text: string; handling: string }> = [];
+  let suggestions = value.suggestions.flatMap((item) => {
+    const result = inspectPassage(`${item.title}\n${item.text}`, ownFacts);
+    if (result.blocked) { removed.push({ text: `候选“${item.title}”包含未确认事实`, handling: `${result.reasons.join("、")}，已阻止进入可应用候选。` }); return []; }
+    return [{ ...item, factState: result.state }];
+  });
+  const replacementCheck = value.replacement ? inspectPassage(value.replacement, ownFacts) : null;
+  const replacement = replacementCheck?.blocked ? null : value.replacement;
+  if (replacementCheck?.blocked) removed.push({ text: "完整改写包含未确认事实", handling: `${replacementCheck.reasons.join("、")}，已阻止应用。` });
+
+  if (action === "ADD_CASE" && !hasOwnEvidence) suggestions = [{ title: "补充一个真实案例", text: "这里需要补一个真实案例：\n起点：\n问题：\n动作：\n过程：\n结果：", factState: "HYPOTHETICAL" as const }];
+  if (action === "STRENGTHEN_EVIDENCE" && !hasOwnEvidence) suggestions = [{ title: "补充真实证据", text: "这里最好补充一项真实资料：真实咨询记录、真实客户反馈、前后流程、产品界面或已确认数据。", factState: "CREATIVE_EXPRESSION" as const }];
+  if (action === "FACT_CHECK") {
+    const risks = deterministicFactRisks(value.original, ownFacts);
+    return { ...value, summary: risks.length ? `发现 ${risks.length} 处需要核实的事实或承诺。` : "当前未发现明显事实风险。", suggestions: [], replacement: null, replacementFactState: null, risks, factSafety: { removedSuggestions: value.suggestions.length, blockedReplacement: Boolean(value.replacement) } };
+  }
+  return { ...value, suggestions, replacement, replacementFactState: replacementCheck?.state ?? null, risks: [...removed, ...value.risks], factSafety: { removedSuggestions: value.suggestions.length - suggestions.length, blockedReplacement: Boolean(value.replacement && !replacement) } };
+}

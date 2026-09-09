@@ -19,14 +19,19 @@ export const studioQuickActionSections: Record<StudioQuickAction, Array<"AUDIENC
   DEFAULT_METHOD_OPTIMIZE: ["BODY", "EVIDENCE", "ENDING", "BOUNDARY"],
 };
 
-const quickSuggestionSchema = z.object({ title: z.string().trim().min(1).max(200), text: z.string().trim().min(1).max(20_000) }).strict();
+export const STUDIO_FACT_STATES = ["CONFIRMED_OWN_FACT", "EXTERNAL_FACT", "HYPOTHETICAL", "CREATIVE_EXPRESSION", "UNVERIFIED_JUDGMENT"] as const;
+export type StudioFactState = (typeof STUDIO_FACT_STATES)[number];
+const studioFactStateSchema = z.enum(STUDIO_FACT_STATES);
+const quickSuggestionSchema = z.object({ title: z.string().trim().min(1).max(200), text: z.string().trim().min(1).max(20_000), factState: studioFactStateSchema.optional() }).strict();
 const quickRiskSchema = z.object({ text: z.string().trim().min(1).max(2_000), handling: z.string().trim().min(1).max(2_000) }).strict();
 export const studioQuickActionOutputSchema = z.object({
   original: z.string().max(1_000_000),
   summary: z.string().trim().min(1).max(2_000),
   suggestions: z.array(quickSuggestionSchema).max(5),
   replacement: z.string().trim().min(1).max(1_000_000).nullable(),
+  replacementFactState: studioFactStateSchema.nullable().optional(),
   risks: z.array(quickRiskSchema).max(20),
+  factSafety: z.object({ removedSuggestions: z.number().int().nonnegative(), blockedReplacement: z.boolean() }).strict().optional(),
 }).strict();
 
 const ids = z.array(z.string().min(1)).max(100).default([]);

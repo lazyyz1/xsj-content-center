@@ -119,7 +119,7 @@ describe("published workspace default method in Studio", () => {
     expect(topic.canApply).toBe(false);
     expect(topic.output.suggestions).toHaveLength(2);
     expect(fact.canApply).toBe(false);
-    expect(fact.output.risks).toEqual([{ text: "有一项事实需要确认", handling: "核对内部来源后再保留" }]);
+    expect(fact.output).toMatchObject({ summary: "当前未发现明显事实风险。", risks: [] });
     await expect(applyStudioQuickAction({ workspaceId, userId, projectId, runId: fact.id, expectedVersion: before.version })).rejects.toMatchObject({ code: "QUICK_ACTION_NOT_APPLICABLE" });
     expect((await db.motherContent.findUniqueOrThrow({ where: { projectId } })).body).toBe(before.body);
   });
@@ -137,7 +137,7 @@ describe("published workspace default method in Studio", () => {
 
   it("shows compact employee actions and keeps the full method in the existing drawer", async () => {
     const component = await readFile(new URL("../components/projects/studio-default-method.tsx", import.meta.url), "utf8");
-    for (const label of ["鑫世界默认创作方法", "已自动应用", "查看完整方法", "想选题", "改开头", "重写正文", "补案例", "加强证据", "改得更像人话", "精简一点", "换个表达", "检查事实风险", "按鑫世界方法优化", "应用前预览"]) expect(component).toContain(label);
+    for (const label of ["鑫世界默认创作方法", "已自动应用", "查看完整方法", "想选题", "改开头", "重写正文", "补案例", "加强证据", "改得更像人话", "精简一点", "换个表达", "检查事实风险", "按鑫世界方法优化", "应用前预览", "示例场景"]) expect(component).toContain(label);
     for (const forbidden of ["MethodVersion", "Provider", "Schema", "模型选择", "21 条 guideline"]) expect(component).not.toContain(forbidden);
   });
 });
