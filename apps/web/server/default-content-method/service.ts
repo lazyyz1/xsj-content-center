@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   DEFAULT_CONTENT_METHOD_KIND,
   DEFAULT_CONTENT_METHOD_SCHEMA_VERSION,
+  defaultContentMethodSectionCodes,
   defaultContentMethodSectionsSchema,
   emptyDefaultContentMethodSections,
   getDefaultContentMethodReadiness,
@@ -46,11 +47,27 @@ export type DefaultContentMethodDTO = {
   updatedAt: string | null;
 };
 
+export type StudioDefaultContentMethodDTO = {
+  assetId: string;
+  versionId: string;
+  version: number;
+  title: string;
+  sections: DefaultContentMethodSection[];
+};
+
 const versionSelect = { id: true, version: true, title: true, steps: true, workspaceDefaultKey: true, editedById: true, editedBy: { select: { name: true } }, createdAt: true } as const;
 type VersionRow = Prisma.MethodVersionGetPayload<{ select: typeof versionSelect }>;
 
 function json(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
+async function serializable<T>(work: (tx: Prisma.TransactionClient) => Promise<T>) {
+  try { return await db.$transaction(work, { isolationLevel: "Serializable" }); }
+  catch (error) {
+    if (!error || typeof error !== "object" || !("code" in error) || error.code !== "P2034") throw error;
+    return db.$transaction(work, { isolationLevel: "Serializable" });
+  }
 }
 
 function payload(input: { status: "DRAFT" | "PUBLISHED"; origin: "HUMAN" | "AI_SUGGESTION"; createdFromVersion: number | null; sections: DefaultContentMethodSection[]; publishedById?: string | null }): DefaultContentMethodPayload {
@@ -112,9 +129,16 @@ export async function getDefaultContentMethod(input: { workspaceId: string }): P
   return toDTO(assets[0] ?? null);
 }
 
+export async function getPublishedDefaultContentMethodForStudio(input: { workspaceId: string; sectionCodes?: DefaultContentMethodSection["code"][] }): Promise<StudioDefaultContentMethodDTO | null> {
+  const state = await getDefaultContentMethod(input);
+  if (!state.assetId || !state.current) return null;
+  const wanted = new Set(input.sectionCodes ?? defaultContentMethodSectionCodes);
+  return { assetId: state.assetId, versionId: state.current.id, version: state.current.version, title: state.title, sections: state.current.sections.filter(({ code }) => wanted.has(code)) };
+}
+
 export async function createDefaultContentMethodDraft(input: { workspaceId: string; userId: string; origin: "HUMAN" | "AI_SUGGESTION" }) {
   await assertDefaultContentMethodEditor(input.workspaceId, input.userId);
-  await db.$transaction(async (tx) => {
+  await serializable(async (tx) => {
     const matches = await defaultAssets(tx, input.workspaceId);
     if (matches.length > 1) throw new DefaultContentMethodError("DEFAULT_METHOD_CONFLICT", "当前空间存在多个默认创作方法，请联系管理员处理。");
     const existing = matches[0];
@@ -129,7 +153,7 @@ export async function createDefaultContentMethodDraft(input: { workspaceId: stri
     await tx.methodVersion.create({ data: { assetId: asset.id, version: nextVersion, title: DEFAULT_CONTENT_METHOD_TITLE, steps: json(payload({ status: "DRAFT", origin: input.origin, createdFromVersion: published?.row.version ?? null, sections: published?.payload.sections ?? emptyDefaultContentMethodSections() })), applicableScenarios: [], boundaries: [], workspaceDefaultKey: DEFAULT_CONTENT_METHOD_KEY, evidence: [], editedById: input.userId } });
     await tx.methodAsset.update({ where: { id: asset.id }, data: { updatedAt: new Date() } });
     await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "default_content_method.draft_created", resourceType: "method_asset", resourceId: asset.id, metadata: { version: nextVersion, origin: input.origin } } });
-  }, { isolationLevel: "Serializable" });
+  });
   return getDefaultContentMethod({ workspaceId: input.workspaceId });
 }
 
@@ -137,7 +161,7 @@ export async function saveDefaultContentMethodDraft(input: { workspaceId: string
   await assertDefaultContentMethodEditor(input.workspaceId, input.userId);
   const sections = defaultContentMethodSectionsSchema.safeParse(input.sections);
   if (!sections.success) throw new DefaultContentMethodError("DEFAULT_METHOD_INVALID", "请检查七个创作指南部分。");
-  await db.$transaction(async (tx) => {
+  await serializable(async (tx) => {
     const matches = await defaultAssets(tx, input.workspaceId);
     const asset = matches.length === 1 ? matches[0] : null;
     const row = asset?.versions.find((version) => version.version === input.version);
@@ -147,14 +171,14 @@ export async function saveDefaultContentMethodDraft(input: { workspaceId: string
     await tx.methodVersion.update({ where: { id: row.id }, data: { steps: json({ ...current.data, origin: input.origin, sections: sections.data }), editedById: input.userId } });
     await tx.methodAsset.update({ where: { id: asset.id }, data: { updatedAt: new Date() } });
     await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "default_content_method.draft_saved", resourceType: "method_asset", resourceId: asset.id, metadata: { version: input.version, origin: input.origin } } });
-  }, { isolationLevel: "Serializable" });
+  });
   return getDefaultContentMethod({ workspaceId: input.workspaceId });
 }
 
 export async function publishDefaultContentMethod(input: { workspaceId: string; userId: string; version: number; actor: "HUMAN" | "AI" }) {
   await assertDefaultContentMethodEditor(input.workspaceId, input.userId);
   if (input.actor !== "HUMAN") throw new DefaultContentMethodError("DEFAULT_METHOD_FORBIDDEN", "AI 只能提出草稿，不能发布正式方法。");
-  await db.$transaction(async (tx) => {
+  await serializable(async (tx) => {
     const matches = await defaultAssets(tx, input.workspaceId);
     const asset = matches.length === 1 ? matches[0] : null;
     const row = asset?.versions.find((version) => version.version === input.version);
@@ -166,7 +190,7 @@ export async function publishDefaultContentMethod(input: { workspaceId: string; 
     await tx.methodVersion.update({ where: { id: row.id }, data: { steps: json(published), editedById: input.userId } });
     await tx.methodAsset.update({ where: { id: asset.id }, data: { status: "CORE", statusUpdatedAt: new Date(), updatedAt: new Date() } });
     await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "default_content_method.published", resourceType: "method_asset", resourceId: asset.id, metadata: { version: input.version } } });
-  }, { isolationLevel: "Serializable" });
+  });
   return getDefaultContentMethod({ workspaceId: input.workspaceId });
 }
 

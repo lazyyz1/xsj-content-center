@@ -1,0 +1,143 @@
+import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+
+import { db } from "@content-center/db";
+import { MockLLMProvider } from "@content-center/providers";
+import { applyAIResult, runAIAction } from "../server/ai/ai-run-service";
+import { ProjectContextBuilder } from "../server/ai/project-context";
+import { STUDIO_QUICK_ACTIONS, studioQuickActionSections } from "../server/ai/schemas";
+import { defaultContentMethodMinimumItems, defaultContentMethodSectionCodes } from "../server/default-content-method/schemas";
+import { getCreatorMethodsOverview } from "../server/creator-methods/service";
+import { getCreationFeedbackContext } from "../server/creation-feedback/service";
+import { setProjectMethodSelections } from "../server/project-methods/service";
+import { applyStudioQuickAction, runStudioQuickAction } from "../server/studio/quick-actions";
+
+describe("published workspace default method in Studio", () => {
+  const suffix = randomUUID();
+  const userId = `studio-default-${suffix}`;
+  const otherUserId = `studio-default-other-${suffix}`;
+  let workspaceId = "";
+  let otherWorkspaceId = "";
+  let projectId = "";
+  let otherProjectId = "";
+  let privateMethodVersionId = "";
+  let defaultAssetId = "";
+  let defaultV1Id = "";
+  let quickV1RunId = "";
+  const prompts: string[] = [];
+
+  const sections = (suffixText = "V1") => defaultContentMethodSectionCodes.map((code) => ({ code, items: Array.from({ length: defaultContentMethodMinimumItems[code] }, (_, index) => ({ text: `${code} 可执行建议 ${suffixText} ${index + 1}`, sourceRefs: [{ type: "OWN_EXPERIENCE" as const, referenceId: `internal-${code}-${index}`, label: `内部依据 ${code}` }] })) }));
+  const runtime = {
+    provider: new MockLLMProvider((input) => {
+      prompts.push(input.prompt);
+      if (input.prompt.includes("Action: GENERATE_MOTHER_CONTENT")) return { recommendedAngle: "真实问题", alternativeAngles: ["另一个角度"], recommendedTitle: "默认方法生成稿", alternativeTitles: ["问题标题", "场景标题"], openingHook: "新的开头", outline: ["开头", "正文"], body: "新的开头\n\n新的正文", evidenceIds: [], sourceItemIds: [] };
+      const action = STUDIO_QUICK_ACTIONS.find((value) => input.prompt.includes(`【本次任务】${value}`));
+      const replacementActions = ["REWRITE_BODY", "HUMANIZE_TEXT", "SHORTEN_TEXT", "ALTERNATIVE_EXPRESSION", "DEFAULT_METHOD_OPTIMIZE"];
+      return { original: "模型不得决定原文", summary: `${action} 已形成建议`, suggestions: action === "FACT_CHECK" || replacementActions.includes(action ?? "") ? [] : [{ title: "建议一", text: "建议使用这个安全表达。" }, { title: "建议二", text: "可以换成另一种安全表达。" }], replacement: replacementActions.includes(action ?? "") ? "新的开头\n\n按默认方法优化后的正文" : null, risks: action === "FACT_CHECK" ? [{ text: "有一项事实需要确认", handling: "核对内部来源后再保留" }] : [] };
+    }),
+    providerName: "FIXTURE",
+    model: "fixture",
+    requestedModel: "fixture",
+    mode: "FIXTURE" as const,
+  };
+
+  beforeAll(async () => {
+    await db.user.createMany({ data: [{ id: userId, name: "Studio Default", email: `${userId}@example.test` }, { id: otherUserId, name: "Studio Default Other", email: `${otherUserId}@example.test` }] });
+    const [workspace, other] = await Promise.all([
+      db.workspace.create({ data: { name: "Studio Default", slug: `studio-default-${suffix}`, members: { create: { userId, role: "OWNER" } } } }),
+      db.workspace.create({ data: { name: "Studio Default Other", slug: `studio-default-other-${suffix}`, members: { create: { userId: otherUserId, role: "OWNER" } } } }),
+    ]);
+    workspaceId = workspace.id; otherWorkspaceId = other.id;
+    projectId = (await db.contentProject.create({ data: { workspaceId, createdById: userId, title: "默认方法创作", audience: "教培老板", creativeBrief: { create: { workspaceId, topic: "真实经营问题", angle: "不要使用固定结构", audience: "教培老板", coreMessage: "先解决真实问题", keyPoints: [], structure: [], tone: "自然", risks: [], createdById: userId } }, motherContent: { create: { workspaceId, title: "原稿", body: "旧的开头\n\n旧的正文", outline: ["开头", "正文"], createdById: userId } } } })).id;
+    otherProjectId = (await db.contentProject.create({ data: { workspaceId: other.id, createdById: otherUserId, title: "其他空间创作", motherContent: { create: { workspaceId: other.id, title: "其他原稿", body: "其他开头\n\n其他正文", outline: [], createdById: otherUserId } } } })).id;
+    const source = await db.sourceItem.create({ data: { workspaceId, createdById: userId, sourceType: "TEXT", sourcePlatform: "GENERIC", title: "私人方法来源", rawText: "私人方法依据", status: "READY", transcript: { create: { workspaceId, provider: "MANUAL", providerMode: "REAL", fullText: "私人方法依据", segments: [] } } } });
+    const transcript = await db.transcript.findUniqueOrThrow({ where: { sourceItemId: source.id } });
+    const analysis = await db.materialAnalysis.create({ data: { workspaceId, sourceItemId: source.id, createdById: userId, version: 1, status: "COMPLETED", tags: [], keywords: [], keyPoints: [], understanding: {}, transcriptUpdatedAtAtAnalysis: transcript.updatedAt } });
+    const privateAsset = await db.methodAsset.create({ data: { workspaceId, ownerUserId: userId, status: "CORE" } });
+    privateMethodVersionId = (await db.methodVersion.create({ data: { assetId: privateAsset.id, version: 1, title: "我的补充方法", steps: ["优先使用个人表达"], applicableScenarios: [], boundaries: ["不能编事实"], sourceItemId: source.id, sourceMaterialAnalysisId: analysis.id, sourceTranscriptId: transcript.id, sourceTranscriptUpdatedAt: transcript.updatedAt, evidence: [], editedById: userId } })).id;
+    await setProjectMethodSelections({ workspaceId, userId, projectId, methodVersionIds: [privateMethodVersionId] });
+    defaultAssetId = (await db.methodAsset.create({ data: { workspaceId, ownerUserId: userId, status: "CORE" } })).id;
+    defaultV1Id = (await db.methodVersion.create({ data: { assetId: defaultAssetId, version: 1, title: "鑫世界默认创作方法", workspaceDefaultKey: "DEFAULT_CONTENT", steps: { kind: "WORKSPACE_DEFAULT_CONTENT_METHOD", schemaVersion: "workspace-default-content-method-v1", publicationStatus: "PUBLISHED", origin: "HUMAN", createdFromVersion: null, publishedAt: new Date().toISOString(), publishedById: userId, sections: sections() }, applicableScenarios: [], boundaries: [], evidence: [], editedById: userId } })).id;
+  });
+
+  afterAll(async () => {
+    await db.methodAsset.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } });
+    await db.workspace.deleteMany({ where: { id: { in: [workspaceId, otherWorkspaceId] } } });
+    await db.user.deleteMany({ where: { id: { in: [userId, otherUserId] } } });
+    await db.$disconnect();
+  });
+
+  it("selects only deterministic task sections and keeps personal methods as supplements", async () => {
+    for (const studioAction of STUDIO_QUICK_ACTIONS) {
+      const built = await new ProjectContextBuilder().build({ workspaceId, userId, projectId, action: "REWRITE_SELECTION", studioAction });
+      expect(built.defaultMethod?.versionId).toBe(defaultV1Id);
+      expect(built.defaultMethod?.sections.map(({ code }) => code)).toEqual(studioQuickActionSections[studioAction]);
+      expect(built.defaultMethod?.sections.length).toBeLessThanOrEqual(4);
+      expect(built.selectedMethods.map(({ methodVersionId }) => methodVersionId)).toEqual([privateMethodVersionId]);
+    }
+    const mother = await new ProjectContextBuilder().build({ workspaceId, userId, projectId, action: "GENERATE_MOTHER_CONTENT" });
+    expect(mother.defaultMethod?.sections.map(({ code }) => code)).toEqual(["BODY", "EVIDENCE", "ENDING", "BOUNDARY"]);
+  });
+
+  it("automatically locks V1 usage for normal generation without polluting M5 or M6 personal methods", async () => {
+    const before = await db.motherContent.findUniqueOrThrow({ where: { projectId } });
+    const run = await runAIAction({ workspaceId, userId, projectId, action: "GENERATE_MOTHER_CONTENT", instruction: "今天使用故事结构" }, { runtime });
+    expect(JSON.stringify(run.output)).toContain("新的正文");
+    const usages = await db.methodUsage.findMany({ where: { aiRunId: run.id }, orderBy: { createdAt: "asc" }, select: { methodVersionId: true } });
+    expect(usages.map(({ methodVersionId }) => methodVersionId).sort()).toEqual([defaultV1Id, privateMethodVersionId].sort());
+    await applyAIResult({ workspaceId, userId, projectId, runId: run.id, expectedVersion: before.version, confirmReplace: true });
+    expect((await getCreatorMethodsOverview({ workspaceId, ownerUserId: userId })).all.map(({ current }) => current.title)).toEqual(["我的补充方法"]);
+    expect((await getCreationFeedbackContext({ workspaceId, userId, projectId })).methods.map(({ title }) => title)).toEqual(["我的补充方法"]);
+    expect(prompts.at(-1)).toContain("defaultContentMethod");
+    expect(prompts.at(-1)).toContain("今天使用故事结构");
+  });
+
+  it("returns quick suggestions before applying and records the exact action and V1", async () => {
+    const mother = await db.motherContent.findUniqueOrThrow({ where: { projectId } });
+    const run = await runStudioQuickAction({ workspaceId, userId, projectId, studioAction: "REWRITE_OPENING", instruction: "不要固定一种结构" }, { runtime });
+    quickV1RunId = run.id;
+    expect(run.canApply).toBe(true);
+    expect(run.output.suggestions).toHaveLength(2);
+    expect((await db.motherContent.findUniqueOrThrow({ where: { projectId } })).body).toBe(mother.body);
+    const stored = await db.aIRun.findUniqueOrThrow({ where: { id: run.id } });
+    expect(stored.metadata).toMatchObject({ kind: "STUDIO_QUICK_ACTION", studioAction: "REWRITE_OPENING", defaultMethodVersionId: defaultV1Id, defaultMethodSections: "AUDIENCE,OPENING,BOUNDARY" });
+    expect((await db.methodUsage.findMany({ where: { aiRunId: run.id }, select: { methodVersionId: true } })).map(({ methodVersionId }) => methodVersionId).sort()).toEqual([defaultV1Id, privateMethodVersionId].sort());
+    const applied = await applyStudioQuickAction({ workspaceId, userId, projectId, runId: run.id, expectedVersion: mother.version, suggestionIndex: 0 });
+    expect(applied.motherContent.body).toBe("建议使用这个安全表达。\n\n新的正文");
+    expect(prompts.at(-1)).toContain("【用户明确要求】不要固定一种结构");
+    expect(prompts.at(-1)).toContain("AUDIENCE");
+    expect(prompts.at(-1)).not.toContain("TOPIC 可执行建议");
+  });
+
+  it("keeps topic and fact checks as previews and does not silently overwrite the draft", async () => {
+    const before = await db.motherContent.findUniqueOrThrow({ where: { projectId } });
+    const topic = await runStudioQuickAction({ workspaceId, userId, projectId, studioAction: "TOPIC_IDEAS" }, { runtime });
+    const fact = await runStudioQuickAction({ workspaceId, userId, projectId, studioAction: "FACT_CHECK" }, { runtime });
+    expect(topic.canApply).toBe(false);
+    expect(topic.output.suggestions).toHaveLength(2);
+    expect(fact.canApply).toBe(false);
+    expect(fact.output.risks).toEqual([{ text: "有一项事实需要确认", handling: "核对内部来源后再保留" }]);
+    await expect(applyStudioQuickAction({ workspaceId, userId, projectId, runId: fact.id, expectedVersion: before.version })).rejects.toMatchObject({ code: "QUICK_ACTION_NOT_APPLICABLE" });
+    expect((await db.motherContent.findUniqueOrThrow({ where: { projectId } })).body).toBe(before.body);
+  });
+
+  it("locks later runs to V2 without changing historical V1 usage", async () => {
+    const v2Id = (await db.methodVersion.create({ data: { assetId: defaultAssetId, version: 2, title: "鑫世界默认创作方法", workspaceDefaultKey: "DEFAULT_CONTENT", steps: { kind: "WORKSPACE_DEFAULT_CONTENT_METHOD", schemaVersion: "workspace-default-content-method-v1", publicationStatus: "PUBLISHED", origin: "HUMAN", createdFromVersion: 1, publishedAt: new Date().toISOString(), publishedById: userId, sections: sections("V2") }, applicableScenarios: [], boundaries: [], evidence: [], editedById: userId } })).id;
+    const run = await runStudioQuickAction({ workspaceId, userId, projectId, studioAction: "SHORTEN_TEXT" }, { runtime });
+    expect((await db.methodUsage.findFirstOrThrow({ where: { aiRunId: run.id, methodVersionId: v2Id } })).methodVersionId).toBe(v2Id);
+    expect((await db.methodUsage.findFirstOrThrow({ where: { aiRunId: quickV1RunId, methodVersionId: defaultV1Id } })).methodVersionId).toBe(defaultV1Id);
+  });
+
+  it("does not expose a workspace default method across workspaces", async () => {
+    await expect(runStudioQuickAction({ workspaceId: otherWorkspaceId, userId: otherUserId, projectId: otherProjectId, studioAction: "REWRITE_BODY" }, { runtime })).rejects.toMatchObject({ code: "QUICK_ACTION_NOT_READY" });
+  });
+
+  it("shows compact employee actions and keeps the full method in the existing drawer", async () => {
+    const component = await readFile(new URL("../components/projects/studio-default-method.tsx", import.meta.url), "utf8");
+    for (const label of ["鑫世界默认创作方法", "已自动应用", "查看完整方法", "想选题", "改开头", "重写正文", "补案例", "加强证据", "改得更像人话", "精简一点", "换个表达", "检查事实风险", "按鑫世界方法优化", "应用前预览"]) expect(component).toContain(label);
+    for (const forbidden of ["MethodVersion", "Provider", "Schema", "模型选择", "21 条 guideline"]) expect(component).not.toContain(forbidden);
+  });
+});

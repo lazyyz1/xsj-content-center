@@ -4,6 +4,7 @@ import { projectApiError } from "../project-api";
 import { AIServiceError } from "./ai-run-service";
 import { llmApiStatus } from "./llm-api-status";
 import { UnifiedCreativeAnalysisError } from "../unified-analysis/service";
+import { StudioQuickActionError } from "../studio/quick-actions";
 
 export function aiApiError(error: unknown) {
   const project = projectApiError(error);
@@ -15,6 +16,7 @@ export function aiApiError(error: unknown) {
   if (error instanceof UnifiedCreativeAnalysisError) {
     return NextResponse.json({ error: error.code, message: error.message }, { status: error.code === "UNIFIED_ANALYSIS_IN_PROGRESS" ? 409 : 422 });
   }
+  if (error instanceof StudioQuickActionError) return NextResponse.json({ error: error.code, message: error.message }, { status: error.code === "QUICK_ACTION_NOT_FOUND" ? 404 : error.code === "QUICK_ACTION_NOT_READY" ? 422 : 409 });
   if (error instanceof LLMError) {
     return NextResponse.json({ error: error.code, message: error.message }, { status: llmApiStatus(error) });
   }

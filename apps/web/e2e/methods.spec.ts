@@ -13,6 +13,7 @@ const studioEmail = `methods-studio-${runId}@example.test`;
 const journeyEmail = `methods-journey-${runId}@example.test`;
 const creatorMethodsEmail = `creator-methods-${runId}@example.test`;
 const creatorMethodsOtherEmail = `creator-methods-other-${runId}@example.test`;
+const studioDefaultEmail = `studio-default-${runId}@example.test`;
 const password = "safe-e2e-password";
 let fixture: Server;
 let fixtureOrigin = "";
@@ -60,15 +61,16 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await worker?.close();
+  fixture.closeAllConnections();
   await new Promise<void>((resolve) => fixture.close(() => resolve()));
-  const users = await db.user.findMany({ where: { email: { in: [email, otherEmail, studioEmail, journeyEmail, creatorMethodsEmail, creatorMethodsOtherEmail] } }, select: { id: true } });
+  const users = await db.user.findMany({ where: { email: { in: [email, otherEmail, studioEmail, journeyEmail, creatorMethodsEmail, creatorMethodsOtherEmail, studioDefaultEmail] } }, select: { id: true } });
   if (users.length) {
     const workspaces = await db.workspace.findMany({ where: { members: { some: { userId: { in: users.map(({ id }) => id) } } } }, select: { id: true } });
     await db.methodAsset.deleteMany({ where: { workspaceId: { in: workspaces.map(({ id }) => id) } } });
     await db.benchmarkStudy.deleteMany({ where: { workspaceId: { in: workspaces.map(({ id }) => id) } } });
     await db.workspace.deleteMany({ where: { id: { in: workspaces.map(({ id }) => id) } } });
   }
-  await db.user.deleteMany({ where: { email: { in: [email, otherEmail, studioEmail, journeyEmail, creatorMethodsEmail, creatorMethodsOtherEmail] } } });
+  await db.user.deleteMany({ where: { email: { in: [email, otherEmail, studioEmail, journeyEmail, creatorMethodsEmail, creatorMethodsOtherEmail, studioDefaultEmail] } } });
   await db.$disconnect();
 });
 
@@ -185,7 +187,7 @@ test("uses explicit method versions in Studio and records each real generation a
 
   await page.goto(`/projects/${project.id}/studio`);
   const selector = page.getByTestId("studio-method-selector");
-  await expect(selector).toContainText("这次不选方法，继续按原有方式生成");
+  await expect(selector).toContainText("这次不额外选择私人方法，也会自动使用公司默认方法");
   await page.getByRole("button", { name: "生成我的口播稿" }).click();
   await expect(page.getByLabel("口播稿正文")).toHaveValue(/我从来没有做过加盟业务/);
   const zeroMethodRun = await db.aIRun.findFirstOrThrow({ where: { projectId: project.id, action: "GENERATE_MOTHER_CONTENT", status: "SUCCEEDED" }, orderBy: { createdAt: "desc" } });
@@ -396,4 +398,27 @@ test("shows personal method status and real 30-day usage without inferring a hab
   await page.goto("/projects/methods");
   await expect(page.getByTestId("core-methods")).not.toContainText("我确认的常用方法");
   await expect(page.getByTestId("trial-methods")).toContainText("我确认的常用方法");
+});
+
+test("shows the published company method compactly in Studio without calling AI", async ({ page }) => {
+  const user = await signIn(page, studioDefaultEmail, "Studio Default Method");
+  const workspaceId = user.workspaceMemberships[0]!.workspaceId;
+  const codes = ["AUDIENCE", "TOPIC", "OPENING", "BODY", "EVIDENCE", "ENDING", "BOUNDARY"] as const;
+  const labels = { AUDIENCE: "我们主要给谁做内容", TOPIC: "什么样的选题优先做", OPENING: "开头怎么进入", BODY: "正文怎么讲", EVIDENCE: "案例和数据怎么用", ENDING: "怎么收尾", BOUNDARY: "哪些事情不要做" } as const;
+  const asset = await db.methodAsset.create({ data: { workspaceId, ownerUserId: user.id, status: "CORE" } });
+  await db.methodVersion.create({ data: { assetId: asset.id, version: 1, title: "鑫世界默认创作方法", workspaceDefaultKey: "DEFAULT_CONTENT", steps: { kind: "WORKSPACE_DEFAULT_CONTENT_METHOD", schemaVersion: "workspace-default-content-method-v1", publicationStatus: "PUBLISHED", origin: "HUMAN", createdFromVersion: null, publishedAt: new Date().toISOString(), publishedById: user.id, sections: codes.map((code) => ({ code, items: [{ text: `${labels[code]}的内部指南。`, sourceRefs: [{ type: "OWN_EXPERIENCE", referenceId: `internal-${code}`, label: `内部依据 ${code}` }] }] })) }, applicableScenarios: [], boundaries: [], evidence: [], editedById: user.id } });
+  const project = await db.contentProject.create({ data: { workspaceId, createdById: user.id, title: "默认方法 Studio", motherContent: { create: { workspaceId, title: "测试口播稿", body: "测试开头\n\n测试正文", outline: ["开头", "正文"], createdById: user.id } } } });
+
+  await page.goto(`/projects/${project.id}/studio`);
+  const method = page.getByTestId("studio-default-method");
+  await expect(method).toContainText("鑫世界默认创作方法 · V1");
+  await expect(method).toContainText("已自动应用");
+  for (const action of ["想选题", "改开头", "重写正文", "精简一点", "按鑫世界方法优化"]) await expect(method.getByRole("button", { name: action })).toBeVisible();
+  await expect(method).not.toContainText("我们主要给谁做内容的内部指南");
+  await method.getByRole("button", { name: "查看完整方法" }).click();
+  const drawer = page.getByRole("dialog", { name: "鑫世界默认创作方法 V1" });
+  for (const label of Object.values(labels)) await expect(drawer.getByRole("heading", { name: label })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  expect(await page.locator("main.app-main").innerText()).not.toMatch(/MethodVersion|Provider|Schema|model selector/i);
 });

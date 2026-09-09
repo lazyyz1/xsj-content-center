@@ -3,7 +3,7 @@ import "server-only";
 import { db, type Prisma } from "@content-center/db";
 import { listMethods } from "../methods/service";
 import { z } from "zod";
-import { isDefaultContentMethodPayload } from "../default-content-method/schemas";
+import { isDefaultContentMethodPayload, parseDefaultContentMethodPayload } from "../default-content-method/schemas";
 
 const methodVersionId = z.string().trim().min(1).max(200);
 export const methodSelectionSchema = z.object({
@@ -136,19 +136,27 @@ export async function getSelectedGenerationMethods(input: { workspaceId: string;
 }
 
 export async function recordSelectedMethodUsages(input: { workspaceId: string; userId: string; projectId: string; aiRunId: string; methodVersionIds: string[] }) {
+  return recordGenerationMethodUsages({ ...input, selectedMethodVersionIds: input.methodVersionIds });
+}
+
+export async function recordGenerationMethodUsages(input: { workspaceId: string; userId: string; projectId: string; aiRunId: string; selectedMethodVersionIds: string[]; defaultMethodVersionId?: string }) {
   await projectForUser(input);
-  const ids = [...new Set(input.methodVersionIds)];
+  const ids = [...new Set(input.selectedMethodVersionIds)];
   if (ids.length > 3) throw new ProjectMethodError("METHOD_SELECTION_INVALID", "本次选择的方法已变化，请刷新后重试。");
-  if (!ids.length) return [];
+  if (!ids.length && !input.defaultMethodVersionId) return [];
   return db.$transaction(async (tx) => {
-    const run = await tx.aIRun.findFirst({ where: { id: input.aiRunId, workspaceId: input.workspaceId, projectId: input.projectId, userId: input.userId, action: "GENERATE_MOTHER_CONTENT", status: "RUNNING" }, select: { id: true } });
+    const run = await tx.aIRun.findFirst({ where: { id: input.aiRunId, workspaceId: input.workspaceId, projectId: input.projectId, userId: input.userId, status: "RUNNING" }, select: { id: true } });
     if (!run) throw new ProjectMethodError("METHOD_SELECTION_INVALID", "本次生成记录不存在或不属于当前创作。请刷新后重试。");
     const rows = await tx.projectMethodSelection.findMany({
       where: { projectId: input.projectId, selectedByUserId: input.userId, methodVersionId: { in: ids }, project: { workspaceId: input.workspaceId }, methodAsset: { workspaceId: input.workspaceId, ownerUserId: input.userId, status: { not: "DISABLED" } } },
       select: { methodAssetId: true, methodVersionId: true, methodVersion: { select: { assetId: true, steps: true } } },
     });
     if (rows.length !== ids.length || new Set(rows.map(({ methodAssetId }) => methodAssetId)).size !== rows.length || rows.some(({ methodAssetId, methodVersion }) => methodAssetId !== methodVersion.assetId || isDefaultContentMethodPayload(methodVersion.steps))) throw new ProjectMethodError("METHOD_SELECTION_INVALID", "本次选择的方法已变化，请刷新后重试。");
-    await tx.methodUsage.createMany({ data: rows.map(({ methodAssetId, methodVersionId }) => ({ projectId: input.projectId, methodAssetId, methodVersionId, aiRunId: input.aiRunId, userId: input.userId })) });
-    return rows.map(({ methodAssetId, methodVersionId }) => ({ methodAssetId, methodVersionId }));
+    const defaultVersion = input.defaultMethodVersionId ? await tx.methodVersion.findFirst({ where: { id: input.defaultMethodVersionId, workspaceDefaultKey: "DEFAULT_CONTENT", asset: { workspaceId: input.workspaceId } }, select: { id: true, assetId: true, steps: true } }) : null;
+    const parsedDefault = defaultVersion ? parseDefaultContentMethodPayload(defaultVersion.steps) : null;
+    if (input.defaultMethodVersionId && (!defaultVersion || !parsedDefault?.success || parsedDefault.data.publicationStatus !== "PUBLISHED")) throw new ProjectMethodError("METHOD_SELECTION_INVALID", "公司默认方法版本已变化，请刷新后重试。");
+    const usages = [...rows.map(({ methodAssetId, methodVersionId }) => ({ methodAssetId, methodVersionId })), ...(defaultVersion ? [{ methodAssetId: defaultVersion.assetId, methodVersionId: defaultVersion.id }] : [])];
+    await tx.methodUsage.createMany({ data: usages.map(({ methodAssetId, methodVersionId }) => ({ projectId: input.projectId, methodAssetId, methodVersionId, aiRunId: input.aiRunId, userId: input.userId })) });
+    return usages;
   }, { isolationLevel: "Serializable" });
 }

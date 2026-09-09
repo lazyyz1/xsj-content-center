@@ -2,6 +2,7 @@ import "server-only";
 
 import { db, type Prisma } from "@content-center/db";
 import { z } from "zod";
+import { isDefaultContentMethodPayload } from "../default-content-method/schemas";
 
 export const creationFeedbackOutcomeSchema = z.enum(["DIRECTLY_USED", "USED_AFTER_EDIT", "NOT_USED"]);
 export const methodUsageFeedbackRatingSchema = z.enum(["HELPFUL", "NEUTRAL", "NOT_SUITABLE"]);
@@ -55,7 +56,7 @@ const projectInclude = {
   motherContent: { select: { id: true, version: true, body: true, origin: true } },
 } as const;
 const usageInclude = {
-  methodVersion: { select: { id: true, version: true, title: true } },
+  methodVersion: { select: { id: true, version: true, title: true, steps: true } },
 } as const;
 
 type UsageRow = Prisma.MethodUsageGetPayload<{ include: typeof usageInclude }>;
@@ -68,7 +69,7 @@ function toFeedback(row: FeedbackRow): CreationFeedbackDTO {
     motherContentVersion: row.motherContentVersion,
     sourceAiRunId: row.sourceAiRunId,
     outcome: row.outcome,
-    methodFeedbacks: row.methodFeedbacks.map((item) => ({ methodUsageId: item.methodUsageId, methodVersionId: item.methodVersionId, methodVersion: item.methodUsage.methodVersion.version, title: item.methodUsage.methodVersion.title, rating: item.rating })),
+    methodFeedbacks: row.methodFeedbacks.filter((item) => !isDefaultContentMethodPayload(item.methodUsage.methodVersion.steps)).map((item) => ({ methodUsageId: item.methodUsageId, methodVersionId: item.methodVersionId, methodVersion: item.methodUsage.methodVersion.version, title: item.methodUsage.methodVersion.title, rating: item.rating })),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -92,11 +93,12 @@ async function appliedGeneration(input: { workspaceId: string; userId: string; p
 }
 
 async function methodUsages(input: { workspaceId: string; userId: string; projectId: string; sourceAiRunId: string }) {
-  return db.methodUsage.findMany({
+  const rows = await db.methodUsage.findMany({
     where: { userId: input.userId, projectId: input.projectId, aiRunId: input.sourceAiRunId, project: { workspaceId: input.workspaceId, createdById: input.userId }, methodAsset: { workspaceId: input.workspaceId, ownerUserId: input.userId }, aiRun: { id: input.sourceAiRunId, workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, action: "GENERATE_MOTHER_CONTENT", status: "SUCCEEDED", appliedAt: { not: null } } },
     orderBy: { createdAt: "asc" },
     include: usageInclude,
   });
+  return rows.filter((row) => !isDefaultContentMethodPayload(row.methodVersion.steps));
 }
 
 async function existingFeedback(input: { userId: string; projectId: string; motherContentId: string; motherContentVersion: number }) {
@@ -134,7 +136,8 @@ export async function upsertCreationFeedback(input: { workspaceId: string; userI
   const run = await appliedGeneration(input);
   if (!run) throw new CreationFeedbackError("FEEDBACK_UNAVAILABLE", "当前口播稿还没有可反馈的生成记录。");
   const ids = parsed.data.methodFeedbacks.map((item) => item.methodUsageId);
-  const usages = ids.length ? await db.methodUsage.findMany({ where: { id: { in: ids }, userId: input.userId, projectId: input.projectId, aiRunId: run.id, project: { workspaceId: input.workspaceId, createdById: input.userId }, methodAsset: { workspaceId: input.workspaceId, ownerUserId: input.userId }, aiRun: { id: run.id, workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, action: "GENERATE_MOTHER_CONTENT", status: "SUCCEEDED", appliedAt: { not: null } } }, select: { id: true, methodVersionId: true } }) : [];
+  const usageRows = ids.length ? await db.methodUsage.findMany({ where: { id: { in: ids }, userId: input.userId, projectId: input.projectId, aiRunId: run.id, project: { workspaceId: input.workspaceId, createdById: input.userId }, methodAsset: { workspaceId: input.workspaceId, ownerUserId: input.userId }, aiRun: { id: run.id, workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, action: "GENERATE_MOTHER_CONTENT", status: "SUCCEEDED", appliedAt: { not: null } } }, select: { id: true, methodVersionId: true, methodVersion: { select: { steps: true } } } }) : [];
+  const usages = usageRows.filter((usage) => !isDefaultContentMethodPayload(usage.methodVersion.steps));
   if (usages.length !== ids.length) throw new CreationFeedbackError("FEEDBACK_METHOD_INVALID", "有方法不是本次生成中使用的版本。");
   const usageById = new Map(usages.map((usage) => [usage.id, usage]));
   await db.$transaction(async (tx) => {

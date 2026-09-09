@@ -3,6 +3,32 @@ import { z } from "zod";
 export const AI_ACTIONS = ["ANALYZE_SOURCES", "EXTRACT_EVIDENCE", "GENERATE_ANGLES", "GENERATE_BRIEF", "GENERATE_MOTHER_CONTENT", "REWRITE_SELECTION", "SHORTEN", "EXPAND", "ADD_PERSONAL_VIEW", "HUMANIZE"] as const;
 export type AIAction = (typeof AI_ACTIONS)[number];
 
+export const STUDIO_QUICK_ACTIONS = ["TOPIC_IDEAS", "REWRITE_OPENING", "REWRITE_BODY", "ADD_CASE", "STRENGTHEN_EVIDENCE", "HUMANIZE_TEXT", "SHORTEN_TEXT", "ALTERNATIVE_EXPRESSION", "FACT_CHECK", "DEFAULT_METHOD_OPTIMIZE"] as const;
+export type StudioQuickAction = (typeof STUDIO_QUICK_ACTIONS)[number];
+export const studioQuickActionSchema = z.enum(STUDIO_QUICK_ACTIONS);
+export const studioQuickActionSections: Record<StudioQuickAction, Array<"AUDIENCE" | "TOPIC" | "OPENING" | "BODY" | "EVIDENCE" | "ENDING" | "BOUNDARY">> = {
+  TOPIC_IDEAS: ["AUDIENCE", "TOPIC", "BOUNDARY"],
+  REWRITE_OPENING: ["AUDIENCE", "OPENING", "BOUNDARY"],
+  REWRITE_BODY: ["BODY", "EVIDENCE", "BOUNDARY"],
+  ADD_CASE: ["EVIDENCE", "BOUNDARY"],
+  STRENGTHEN_EVIDENCE: ["EVIDENCE", "BOUNDARY"],
+  HUMANIZE_TEXT: ["BODY", "BOUNDARY"],
+  SHORTEN_TEXT: ["BODY", "ENDING", "BOUNDARY"],
+  ALTERNATIVE_EXPRESSION: ["BODY", "BOUNDARY"],
+  FACT_CHECK: ["EVIDENCE", "BOUNDARY"],
+  DEFAULT_METHOD_OPTIMIZE: ["BODY", "EVIDENCE", "ENDING", "BOUNDARY"],
+};
+
+const quickSuggestionSchema = z.object({ title: z.string().trim().min(1).max(200), text: z.string().trim().min(1).max(20_000) }).strict();
+const quickRiskSchema = z.object({ text: z.string().trim().min(1).max(2_000), handling: z.string().trim().min(1).max(2_000) }).strict();
+export const studioQuickActionOutputSchema = z.object({
+  original: z.string().max(1_000_000),
+  summary: z.string().trim().min(1).max(2_000),
+  suggestions: z.array(quickSuggestionSchema).max(5),
+  replacement: z.string().trim().min(1).max(1_000_000).nullable(),
+  risks: z.array(quickRiskSchema).max(20),
+}).strict();
+
 const ids = z.array(z.string().min(1)).max(100).default([]);
 const insight = z.object({ text: z.string().min(1).max(10_000), evidenceIds: ids, sourceItemIds: ids }).strict();
 export const analyzeSourcesSchema = z.object({ topics: z.array(z.string()).max(100), coreClaims: z.array(insight).max(100), facts: z.array(insight).max(100), cases: z.array(insight).max(100), questions: z.array(z.string()).max(100), hooks: z.array(z.string()).max(100), structures: z.array(z.string()).max(100), risks: z.array(z.string()).max(100), reusableInsights: z.array(insight).max(100) }).strict();
