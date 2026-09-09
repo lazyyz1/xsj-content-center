@@ -76,6 +76,8 @@ describe("M11 benchmark-inspired topics", () => {
     const result = await generateBenchmarkTopics({ workspaceId, userId, source: { sourceType: "VIDEO", sourceId: videoId } }, { runtime });
     videoRunId = result.id; videoProjectId = result.projectId;
     expect(result.output.source).toMatchObject({ type: "VIDEO", id: videoId, basis: "M7", materialDistillationId: expect.any(String) });
+    expect(result.output.source.sourceOwnership).toBe("EXTERNAL");
+    expect(result.output.topics.every(({ sourceOwnership }) => sourceOwnership === "EXTERNAL")).toBe(true);
     expect(result.output.topics).toHaveLength(5);
     expect(result.output.metrics).toEqual({ candidateCount: 8, validCount: 5, filteredCount: 3 });
     expect(result.output.topics.map(({ angle }) => angle)).toEqual(expect.arrayContaining(["人物经验", "假设场景", "客户认知", "经营判断", "观点冲突"]));
@@ -102,8 +104,22 @@ describe("M11 benchmark-inspired topics", () => {
 
   it("uses an existing M9 profile and never generates a missing profile", async () => {
     const detail: BenchmarkCreatorDetailDTO = { account: { id: "benchmark-with-profile", name: "真实博主", platform: "DOUYIN", avatarUrl: null, bio: "讨论教培经营", lastSyncedAt: null, tags: [] }, stats: { discovered: 5, collected: 5, studied: 5, distilled: 5, copywriting: 0 }, representativeSources: [], highlights: [], copywriting: [], accountResearch: null, playbooks: [], creatorProfile: { studyId: "m9-study-v4", version: 4, schemaVersion: "benchmark-creator-profile-v4", createdAt: new Date().toISOString(), message: "已有画像", sections: [{ code: "TOPIC_STYLE", status: "CLEAR", text: "多次从价格问题切入。", sources: [] }] }, savedMethods: [] };
-    const result = await generateBenchmarkTopics({ workspaceId, userId, source: { sourceType: "CREATOR_PROFILE", sourceId: detail.account.id } }, { runtime, creatorLoader: async () => detail });
+    const m9Output = { summary: "从 M9 稳定特征形成多个角度。", topics: [
+      { title: "我们客户为什么总在报价后消失", angle: "客户案例", why: "从客户问题切入。", ourTake: "我们客户都遇到过这个问题。", evidenceNeed: "NONE" as const, evidenceHint: null },
+      { title: "我们研究过的账号有什么共同点", angle: "研究观察", why: "使用外部稳定观察。", ourTake: "我们研究过 30 个账号后发现开头必须直接。", evidenceNeed: "NONE" as const, evidenceHint: null },
+      { title: "我以前做直播投放时最常犯的错", angle: "对方经历", why: "使用经历建立可信度。", ourTake: "我以前做过直播投放。", evidenceNeed: "NONE" as const, evidenceHint: null },
+      { title: "我们服务过 30 家机构后发现的定价规律", angle: "稳定数字", why: "从具体数字进入。", ourTake: "我们服务过 30 家机构。", evidenceNeed: "NONE" as const, evidenceHint: null },
+      { title: "我以前做校区运营时，最容易忽略的招生问题", angle: "真实人物事实", why: "用我方已确认经历承接。", ourTake: "我以前做校区运营时，会先检查家长是否看懂差异。", evidenceNeed: "NONE" as const, evidenceHint: null },
+    ] };
+    const m9Runtime = { ...runtime, provider: new MockLLMProvider((input) => { providerCalls += 1; prompts.push(input.prompt); return m9Output; }) };
+    const result = await generateBenchmarkTopics({ workspaceId, userId, source: { sourceType: "CREATOR_PROFILE", sourceId: detail.account.id } }, { runtime: m9Runtime, creatorLoader: async () => detail });
     expect(result.output.source).toMatchObject({ type: "CREATOR_PROFILE", basis: "M9", creatorProfileStudyId: "m9-study-v4" });
+    expect(result.output.topics).toHaveLength(5);
+    expect(result.output.topics.every(({ sourceOwnership }) => sourceOwnership === "EXTERNAL")).toBe(true);
+    expect(JSON.stringify(result.output.topics)).not.toMatch(/我们客户|我们研究过|我以前做过直播|我们服务过 30 家/u);
+    expect(result.output.topics.filter(({ evidenceNeed }) => evidenceNeed === "REQUIRED")).toHaveLength(4);
+    expect(result.output.topics.find(({ angle }) => angle === "真实人物事实")).toMatchObject({ factState: "CONFIRMED_OWN_FACT", evidenceStatus: "DIRECT", ourTake: expect.stringContaining("我以前做校区运营") });
+    expect(prompts.at(-1)).toContain("M9 中的 CLEAR");
     const calls = providerCalls;
     await expect(generateBenchmarkTopics({ workspaceId, userId, source: { sourceType: "CREATOR_PROFILE", sourceId: emptyBenchmarkId } }, { runtime })).rejects.toMatchObject({ code: "CREATOR_PROFILE_NOT_READY" });
     expect(providerCalls).toBe(calls);
