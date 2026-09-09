@@ -153,8 +153,8 @@ export function DiscoveryWorkspace({ configured, canWrite, canManageBenchmarks, 
   const resultTitle = useMemo(() => query.trim() ? `“${query.trim()}”的相关内容` : "搜索结果", [query]);
 
   return <>
-    <header className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><h1 className="text-3xl font-semibold tracking-tight">内容发现</h1><p className="mt-2 text-sm text-[var(--text-secondary)]">找值得做的内容</p></div><Button disabled={!canWrite} onClick={() => setQuickCollect(true)}><Plus size={16} /> 快速收录</Button></header>
-    <Card className="p-5 sm:p-6">
+    <header className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><h1 className="page-heading">灵感研究</h1><p className="page-description">发现值得看的内容，提炼可复用的方法，再找到我们能讲的方向。</p></div><Button disabled={!canWrite} onClick={() => setQuickCollect(true)}><Plus size={16} />快速收录</Button></header>
+    <Card className="border-white/75 bg-white/68 p-5 sm:p-6">
       <form onSubmit={searchContent} className="flex flex-col gap-3 sm:flex-row"><label className="flex h-12 min-w-0 flex-1 items-center gap-3 rounded-xl border bg-[var(--surface)] px-4"><Search size={19} className="shrink-0 text-[var(--text-secondary)]" /><input value={query} onChange={(event) => setQuery(event.target.value)} disabled={!configured || !canWrite} aria-label="搜索内容" placeholder="今天想找什么内容？" className="min-w-0 flex-1 border-0 bg-transparent outline-none" /></label><Button className="h-12 px-6" disabled={searching || !query.trim() || !configured || !canWrite}>{searching ? <Loader2 size={17} className="animate-spin" /> : <Search size={17} />} 搜索</Button></form>
       <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
         <span className="mr-1 text-[var(--text-secondary)]">平台</span>{(["ALL", "DOUYIN", "XIAOHONGSHU"] as const).map((value) => <button key={value} onClick={() => setPlatform(value)} className={`rounded-full px-3 py-1.5 ${platform === value ? "bg-[var(--text-primary)] text-white" : "bg-[var(--surface-elevated)] text-[var(--text-secondary)]"}`}>{value === "ALL" ? "全部" : platformLabel[value]}</button>)}

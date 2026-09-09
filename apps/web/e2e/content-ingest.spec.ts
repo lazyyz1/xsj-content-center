@@ -47,7 +47,7 @@ test("manual and URL ingest → tags → collection → search with workspace is
   await page.getByRole("button", { name: "创建 Workspace" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
 
-  await page.getByRole("link", { name: "素材库" }).click();
+  await page.getByRole("link", { name: "资料", exact: true }).click();
   await page.getByRole("button", { name: "收录内容" }).click();
   await page.getByLabel("标题（可选）").fill("阶段二真实手工素材");
   await page.getByLabel("正文").fill("这是一段由用户真实输入并通过 BullMQ Worker 入库的正文，不是模拟业务数据。");
@@ -82,7 +82,7 @@ test("manual and URL ingest → tags → collection → search with workspace is
   expect((await page.request.post(`/api/source-items/${otherSource.id}/tags`, { data: { tagId: otherTag.id } })).status()).toBe(404);
   expect((await page.request.post(`/api/source-items/${manualSourceId}/collections`, { data: { collectionId: otherCollection.id } })).status()).toBe(404);
 
-  await page.getByRole("link", { name: "返回素材库" }).click();
+  await page.getByRole("link", { name: "返回资料" }).click();
   await page.getByLabel("搜索素材").fill("阶段二真实手工素材");
   await page.getByRole("button", { name: "筛选" }).click();
   await expect(page.getByRole("link", { name: "阶段二真实手工素材" })).toBeVisible();

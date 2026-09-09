@@ -4,6 +4,7 @@ import { requireWorkspace } from "@/server/access";
 import { getIntegrationDisplay } from "@/server/integrations";
 import { listBenchmarks, listIdeas } from "@/server/discovery/service";
 import { getCurrentRecommendationBatch, publicRecommendationBatch } from "@/server/discovery/recommendations/service";
+import { WorkspaceAssistant } from "@/components/workspace-assistant";
 
 export default async function DiscoveryPage() {
   const { session, workspace, role } = await requireWorkspace();
@@ -14,7 +15,7 @@ export default async function DiscoveryPage() {
     db.sourceItem.findMany({ where: { workspaceId: workspace.id, sourceProvider: "REDFOX" }, orderBy: { createdAt: "desc" }, take: 6, select: { id: true, title: true, author: true, thumbnailUrl: true, sourcePlatform: true, sourceType: true, status: true, createdAt: true } }),
     getCurrentRecommendationBatch({ workspaceId: workspace.id, userId: session.user.id }),
   ]);
-  return <div className="desktop-discovery"><DiscoveryWorkspace
+  return <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_19rem]"><div className="desktop-discovery min-w-0"><DiscoveryWorkspace
     configured={integration?.status === "CONFIGURED"}
     canWrite={role !== "VIEWER"}
     canManageBenchmarks={role === "OWNER" || role === "ADMIN"}
@@ -22,5 +23,5 @@ export default async function DiscoveryPage() {
     initialIdeas={ideas.map((item) => ({ id: item.id, title: item.title, status: item.status, projectId: item.projectId, updatedAt: item.updatedAt.toISOString(), referenceCount: item._count.references, sourceCount: item.references.length }))}
     recentSources={recentSources.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() }))}
     initialRecommendationBatch={recommendationBatch ? publicRecommendationBatch(recommendationBatch) : null}
-  /></div>;
+  /></div><WorkspaceAssistant title="研究助手" description="我会帮你从真实内容中找到值得看的部分，再把它们变成可继续创作的方向。" actions={[{ label: "找值得看的视频", href: "/discovery" }, { label: "查看已研究博主", href: "/discovery" }, { label: "从资料继续提炼", href: "/library" }, { label: "看看我们能做什么题", href: "/projects" }]} /></div>;
 }

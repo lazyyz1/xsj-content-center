@@ -76,7 +76,7 @@ test("OWNER configures RedFox and ingests a Douyin video into private MinIO stor
   await page.getByRole("button", { name: "创建 Workspace" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
 
-  await page.getByRole("link", { name: "素材库" }).click();
+  await page.getByRole("link", { name: "资料", exact: true }).click();
   await page.getByRole("button", { name: "收录内容" }).click();
   await page.getByRole("button", { name: "抖音视频" }).click();
   await page.getByLabel("抖音分享链接或分享文案").fill(`复制打开抖音 ${douyinUrl}`);

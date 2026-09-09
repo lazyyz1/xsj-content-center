@@ -32,8 +32,16 @@ test("register → onboarding → dashboard → integrations → logout → logi
   await page.getByRole("button", { name: "创建 Workspace" }).click();
 
   await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByRole("heading", { name: "今天从哪里开始？" })).toBeVisible();
-  await expect(page.getByText("素材").first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "从一个想法开始，把内容做得更清楚" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "资料", exact: true })).toBeVisible();
+  for (const label of ["开始创作", "项目", "灵感研究", "资料", "方法", "发布"]) {
+    await expect(page.getByRole("link", { name: label, exact: true }).first()).toBeVisible();
+  }
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 768, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   const otherUser = await db.user.create({
     data: { name: "Other User", email: otherEmail },

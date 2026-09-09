@@ -2,9 +2,9 @@ import { Card } from "@content-center/ui";
 
 export function PageHeader({ title, description }: { title: string; description: string }) {
   return (
-    <header className="mb-8">
-      <h1 className="text-3xl font-semibold tracking-tight">{title}</h1>
-      <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{description}</p>
+    <header className="mb-7">
+      <h1 className="page-heading">{title}</h1>
+      <p className="page-description">{description}</p>
     </header>
   );
 }

@@ -14,7 +14,7 @@ export default async function CreatorMethodsPage() {
   const canOperate = role !== "VIEWER";
   const description = "这里整理的是你已经确认、正在尝试和实际使用过的创作方法。系统不会因为一次收藏或一次生成，就自动改变你的长期创作习惯。";
   const savedWithoutUse = overview.groups.SAVED.filter((method) => method.attempts === 0);
-  return <><div className="mb-5 flex items-center justify-between gap-3"><Link href="/projects" className="inline-flex items-center gap-2 text-sm text-[var(--text-secondary)]"><ArrowLeft size={16} />返回我的创作</Link><Link href="/library/methods" className="text-sm font-medium text-[var(--accent)]">查看全部方法</Link></div><PageHeader title="我的创作方法" description={description} />
+  return <><div className="mb-5 flex items-center justify-between gap-3"><Link href="/projects" className="inline-flex min-h-10 items-center gap-2 text-sm text-[var(--text-secondary)]"><ArrowLeft size={16} />返回项目</Link><Link href="/library/methods" className="text-sm font-medium text-[var(--accent)]">查看全部方法</Link></div><PageHeader title="方法" description={description} />
     <DefaultContentMethod initial={defaultMethod} editable={canOperate} />
     {!overview.all.length ? <EmptyMethods /> : <>
     <section className="mb-8 rounded-2xl border bg-[var(--surface)] p-5" data-testid="creator-methods-summary"><p className="text-sm leading-6 text-[var(--text-secondary)]">最近 30 天共有 <span className="font-semibold text-[var(--text-primary)]">{overview.totalGenerations}</span> 次口播稿生成记录。生成完成只表示技术流程完成，不代表方法有效；这里不计算成功率。</p></section>

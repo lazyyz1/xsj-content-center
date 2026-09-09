@@ -7,7 +7,7 @@ type SaveState = "IDLE" | "DIRTY" | "SAVING" | "SAVED" | "FAILED";
 
 const labels: Record<SaveState, string> = { IDLE: "已保存", DIRTY: "等待保存", SAVING: "正在保存", SAVED: "已保存", FAILED: "保存失败" };
 
-export function MotherContentEditor({ projectId, initial, editable, onSaved }: { projectId: string; initial: { title: string; body: string; outline: string[]; version: number; origin?: "HUMAN" | "KIMI" | "GPT_WEB"; originNote?: string | null }; editable: boolean; onSaved?: (version: number, snapshot: Snapshot) => void }) {
+export function MotherContentEditor({ projectId, initial, editable, onSaved, onSelectionChange }: { projectId: string; initial: { title: string; body: string; outline: string[]; version: number; origin?: "HUMAN" | "KIMI" | "GPT_WEB"; originNote?: string | null }; editable: boolean; onSaved?: (version: number, snapshot: Snapshot) => void; onSelectionChange?: (selection: { text: string; start: number; end: number } | null) => void }) {
   const [title, setTitle] = useState(initial.title);
   const [body, setBody] = useState(initial.body);
   const [outlineText, setOutlineText] = useState(initial.outline.join("\n"));
@@ -17,6 +17,13 @@ export function MotherContentEditor({ projectId, initial, editable, onSaved }: {
   const pending = useRef<Snapshot | null>(null);
   const lastSaved = useRef<Snapshot>({ title: initial.title, body: initial.body, outline: initial.outline });
   const version = useRef(initial.version);
+
+  function reportSelection(element: HTMLTextAreaElement) {
+    const start = element.selectionStart;
+    const end = element.selectionEnd;
+    const selected = body.slice(start, end).trim();
+    onSelectionChange?.(selected ? { text: body.slice(start, end), start, end } : null);
+  }
 
   async function drain() {
     if (inFlight.current || !pending.current) return;
@@ -61,11 +68,11 @@ export function MotherContentEditor({ projectId, initial, editable, onSaved }: {
 
   const characters = body.replace(/\s/g, "").length;
   return (
-    <section className="flex min-h-[40rem] flex-col">
-      <div className="flex items-center justify-between gap-3 border-b pb-3"><div><h3 className="font-semibold">口播稿</h3><p className="mt-1 text-xs text-[var(--text-secondary)]">可以直接修改，所有平台内容都以这份稿子为准。</p></div><div className="text-right text-xs"><p className={saveState === "FAILED" ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}>{labels[saveState]}</p><p className="mt-1 text-[var(--text-secondary)]">{characters} 字</p></div></div>
-      <input aria-label="口播稿标题" value={title} disabled={!editable} onChange={(event) => setTitle(event.target.value)} className="mt-4 h-12 border-0 bg-transparent text-xl font-semibold outline-none" placeholder="口播稿标题" />
-      <textarea aria-label="口播稿提纲" value={outlineText} disabled={!editable} onChange={(event) => setOutlineText(event.target.value)} rows={4} className="mt-3 rounded-xl border bg-[var(--surface-elevated)] p-3 text-sm leading-6 outline-none" placeholder="提纲，每行一点" />
-      <textarea aria-label="口播稿正文" value={body} disabled={!editable} onChange={(event) => setBody(event.target.value)} className="mt-3 min-h-[32.5rem] flex-1 resize-y rounded-xl border bg-[var(--surface)] p-4 text-sm leading-7 outline-none focus:border-[var(--accent)]" placeholder="从这里开始写口播稿。停止输入 800ms 后自动保存。" />
+    <section className="flex min-h-[42rem] flex-col">
+      <div className="flex items-center justify-between gap-3 border-b pb-3"><div><h3 className="font-semibold">稿件</h3><p className="mt-1 text-xs text-[var(--text-secondary)]">直接编辑正文；选中文字后，右侧助手会提供局部操作。</p></div><div className="text-right text-xs"><p className={saveState === "FAILED" ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}>{labels[saveState]}</p><p className="mt-1 text-[var(--text-secondary)]">{characters} 字</p></div></div>
+      <input aria-label="口播稿标题" value={title} disabled={!editable} onChange={(event) => setTitle(event.target.value)} className="mt-4 h-14 border-0 bg-transparent text-2xl font-bold tracking-tight outline-none" placeholder="口播稿标题" />
+      <details className="mt-2 rounded-xl bg-[var(--surface-muted)] px-3 py-2"><summary className="text-sm font-medium text-[var(--text-secondary)]">查看和编辑大纲</summary><textarea aria-label="口播稿提纲" value={outlineText} disabled={!editable} onChange={(event) => setOutlineText(event.target.value)} rows={4} className="mt-2 w-full resize-y border-0 bg-transparent p-2 text-sm leading-6 outline-none" placeholder="提纲，每行一点" /></details>
+      <textarea aria-label="口播稿正文" value={body} disabled={!editable} onChange={(event) => { setBody(event.target.value); onSelectionChange?.(null); }} onSelect={(event) => reportSelection(event.currentTarget)} onKeyUp={(event) => reportSelection(event.currentTarget)} onMouseUp={(event) => reportSelection(event.currentTarget)} className="mt-3 min-h-[34rem] flex-1 resize-y rounded-2xl border border-transparent bg-white/55 p-5 text-[15px] leading-8 outline-none transition-colors hover:border-[var(--border)] focus:border-[var(--accent-border)] focus:bg-white" placeholder="从这里开始写口播稿。停止输入 800ms 后自动保存。" />
       {error ? <p role="alert" className="mt-2 text-xs text-[var(--danger)]">{error}</p> : null}
     </section>
   );

@@ -4,7 +4,7 @@ import { Button, Input } from "@content-center/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-export function ProjectForm({ sourceItemId }: { sourceItemId?: string }) {
+export function ProjectForm({ sourceItemId, initialIdea }: { sourceItemId?: string; initialIdea?: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -36,10 +36,10 @@ export function ProjectForm({ sourceItemId }: { sourceItemId?: string }) {
 
   return (
     <form action={submit} className="grid gap-5">
-      <label className="grid gap-2 text-sm font-medium">项目名称 *<Input name="title" required maxLength={200} placeholder="例如：短视频内容生产方法论" /></label>
+      <label className="grid gap-2 text-sm font-medium">项目名称 *<Input name="title" required maxLength={200} defaultValue={initialIdea?.slice(0, 200)} placeholder="例如：短视频内容生产方法论" /></label>
       <label className="grid gap-2 text-sm font-medium">创作目标<textarea name="goal" maxLength={2000} rows={3} className="rounded-[var(--radius)] border bg-[var(--surface)] p-3 font-normal outline-none focus:border-[var(--accent)]" placeholder="这篇内容希望达成什么目标？" /></label>
       <label className="grid gap-2 text-sm font-medium">目标受众<textarea name="audience" maxLength={2000} rows={3} className="rounded-[var(--radius)] border bg-[var(--surface)] p-3 font-normal outline-none focus:border-[var(--accent)]" placeholder="内容写给谁？" /></label>
-      <label className="grid gap-2 text-sm font-medium">项目说明<textarea name="description" maxLength={5000} rows={5} className="rounded-[var(--radius)] border bg-[var(--surface)] p-3 font-normal outline-none focus:border-[var(--accent)]" placeholder="补充项目背景和边界。" /></label>
+      <label className="grid gap-2 text-sm font-medium">项目说明<textarea name="description" maxLength={5000} rows={5} defaultValue={initialIdea} className="rounded-[var(--radius-control)] border bg-[var(--surface)] p-3 font-normal outline-none focus:border-[var(--accent)]" placeholder="补充项目背景和边界。" /></label>
       {error ? <p role="alert" className="text-sm text-[var(--danger)]">{error}</p> : null}
       <div><Button disabled={busy}>{busy ? "正在创建…" : "创建并进入工作台"}</Button></div>
     </form>

@@ -40,7 +40,7 @@ export default async function PublishingCenterPage({ searchParams }: { searchPar
   return <>
     <PageHeader title="发布中心" description="使用已人工批准的内容快照准备发布包、安排时间，并由人工完成真实发布。" />
     <nav aria-label="发布中心视图" className="mb-5 flex gap-1 rounded-xl border bg-[var(--surface)] p-1">
-      {([['calendar','日历'],['pending','待发布'],['published','已发布']] as const).map(([key, label]) => <Link key={key} href={`/calendar?view=${key}`} className={`flex-1 rounded-lg px-4 py-2 text-center text-sm font-medium ${view === key ? "bg-[var(--text-primary)] text-white" : "text-[var(--text-secondary)]"}`}>{label}</Link>)}
+      {([['calendar','日历'],['pending','待发布'],['published','已发布']] as const).map(([key, label]) => <Link key={key} href={`/calendar?view=${key}`} className={`flex-1 rounded-lg px-4 py-2 text-center text-sm font-medium ${view === key ? "bg-[var(--accent)] text-white shadow-[var(--shadow-button)]" : "text-[var(--text-secondary)]"}`}>{label}</Link>)}
     </nav>
     <Card className="mb-5 p-4">
       <form className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -73,6 +73,6 @@ function MonthCalendar({ month, tasks }: { month: string; tasks: Task[] }) {
 }
 
 function TaskList({ tasks, empty }: { tasks: Task[]; empty: string }) {
-  if (!tasks.length) return <Card className="p-10 text-center text-sm text-[var(--text-secondary)]">{empty}</Card>;
+  if (!tasks.length) return <Card className="grid min-h-56 place-items-center p-8 text-center"><div><h2 className="font-semibold">{empty}</h2><p className="mt-2 text-sm text-[var(--text-secondary)]">先完成并确认一篇稿件，再把它加入发布计划。</p><Link href="/projects" className="mt-4 inline-flex min-h-11 items-center text-sm font-medium text-[var(--accent)]">查看项目</Link></div></Card>;
   return <div className="grid gap-3">{tasks.map((task) => <Link key={task.id} href={`/calendar/tasks/${task.id}`}><Card className="flex flex-wrap items-center justify-between gap-4 p-4 transition-colors hover:border-[var(--accent)]"><div><div className="flex flex-wrap items-center gap-2"><Badge>{PLATFORM_LABELS[task.platform]}</Badge><Badge>{STATUS_LABELS[task.status]}</Badge><strong>{task.project.title}</strong></div><p className="mt-2 text-xs text-[var(--text-secondary)]">创作者：{task.project.creatorProfile?.displayName || task.createdBy.name}</p></div><p className="flex items-center gap-2 text-sm"><Clock3 size={15} />{task.scheduledAt ? task.scheduledAt.toLocaleString("zh-CN") : task.publishedAt ? task.publishedAt.toLocaleString("zh-CN") : "未排期"}</p></Card></Link>)}</div>;
 }

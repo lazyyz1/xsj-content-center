@@ -125,7 +125,7 @@ test("discovery search → idea/library/project/benchmark stays explicit and iso
   await expect(page.getByLabel("RedFox 配置").getByText("已配置", { exact: true })).toBeVisible();
 
   await page.goto("/discovery");
-  await expect(page.getByRole("heading", { name: "内容发现" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "灵感研究" })).toBeVisible();
   expect(await db.apiUsage.count({ where: { workspaceId } })).toBe(0);
   expect(calls["/story/api/dyData/searchArticle"]).toBeUndefined();
   await page.getByRole("button", { name: "抖音", exact: true }).click();

@@ -38,15 +38,15 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
       <LibrarySubnav current="sources" />
       <header className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">素材库</h1>
-          <p className="mt-2 text-sm text-[var(--text-secondary)]">收录文本、公开网页和抖音作品，并用标签与素材集整理个人素材。</p>
+          <h1 className="page-heading">资料</h1>
+          <p className="page-description">集中管理 AI 可以理解并用于创作的视频、文档、链接和真实依据。</p>
         </div>
         <IngestDialog />
       </header>
 
-      <Card className="mb-5 p-4">
-        <form className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_repeat(5,minmax(110px,auto))_auto]" method="get">
-          <label className="flex h-10 items-center gap-2 rounded-[var(--radius)] border bg-[var(--surface)] px-3">
+      <Card className="mb-5 border-white/75 bg-white/68 p-4">
+        <form className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" method="get">
+          <label className="flex h-10 items-center gap-2 rounded-[var(--radius)] border bg-[var(--surface)] px-3 sm:col-span-2">
             <Search size={16} className="text-[var(--text-secondary)]" />
             <input name="search" defaultValue={query.search} aria-label="搜索素材" placeholder="搜索标题、作者或正文" className="min-w-0 flex-1 border-0 bg-transparent text-sm outline-none" />
           </label>

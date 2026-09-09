@@ -74,9 +74,8 @@ export function BenchmarkWorkspace({ profile, candidates, studies: initialStudie
   const visibleStudies = studies.filter((study) => !(study.kind === "PLAYBOOKS" && study.status === "FAILED"));
   const profileSelectionReady = canRefresh && selected.length >= 5 && selected.length <= 10 && selected.every((id) => candidates.find((candidate) => candidate.id === id)?.playbookReady);
   const profileProcessing = visibleStudies.some((study) => study.kind === "CREATOR_PROFILE" && study.status === "PROCESSING");
-  return <div className="benchmark-page"><div className="benchmark-topline"><Link href="/discovery" className="benchmark-back-link"><ArrowLeft size={16} /> 返回内容发现</Link>{canManage ? <Button variant="secondary" className="benchmark-disable-button" onClick={() => void remove()}><Trash2 size={14} /> 停用对标</Button> : null}</div>
-    <BenchmarkCreatorHeader profile={profile} />
-    <Card className="mb-4 ml-auto max-w-md p-4"><p className="mb-3 text-sm text-[var(--text-secondary)]">结合这个博主已经完成的画像，转换成适合我们的选题。</p><BenchmarkTopicGenerator sourceType="CREATOR_PROFILE" sourceId={benchmark.id} available={canRefresh && profile.creatorProfile?.schemaVersion === "benchmark-creator-profile-v4"} buttonLabel="看看我们能做什么题" unavailableMessage={canRefresh ? "当前还没有足够的博主研究结果。" : "当前权限只能查看。"} /></Card>
+  return <div className="benchmark-page"><div className="benchmark-topline"><Link href="/discovery" className="benchmark-back-link"><ArrowLeft size={16} /> 返回灵感研究</Link>{canManage ? <Button variant="secondary" className="benchmark-disable-button" onClick={() => void remove()}><Trash2 size={14} /> 停用对标</Button> : null}</div>
+    <div className="benchmark-layout"><main className="min-w-0"><BenchmarkCreatorHeader profile={profile} />
     <WorkspaceTabs value={view} onChange={setView} />
     {view === "PROFILE" ? <BenchmarkCreatorProfile profile={profile} onShowContent={() => setView("CONTENT")} selectedProfileCount={selected.length} canGenerateProfile={profileSelectionReady} profileBusy={action === "profile" || profileProcessing} onShowResearch={() => setView("RESEARCH")} onGenerateProfile={() => void startStudy("CREATOR_PROFILE")} /> : null}
     {view === "CONTENT" ? <BenchmarkCreatorContent profile={profile} /> : null}
@@ -85,7 +84,7 @@ export function BenchmarkWorkspace({ profile, candidates, studies: initialStudie
       <StudyHistory studies={visibleStudies} action={action} onSave={saveMethod} />
       {error ? <p role="alert" className="mt-4 text-sm text-[var(--danger)]">{error}</p> : null}{notice ? <p role="status" className="mt-4 flex flex-wrap items-center gap-3 text-sm text-[var(--success)]">{notice}<Link href="/library/methods" className="font-medium text-[var(--accent)]">查看我的方法</Link></p> : null}
       <AccountWorks sort={sort} setSort={setSort} items={items} busy={busy} canRefresh={canRefresh} action={action} onLoad={() => void load()} onCollect={(item) => void collect(item)} onCreate={(item) => void create(item)} />
-    </div> : null}
+    </div> : null}</main><aside className="benchmark-topic-assistant"><Card className="benchmark-glass border-white/75 p-4"><p className="text-xs font-medium text-[var(--accent)]">研究助手</p><h2 className="mt-2 font-semibold">把对方的稳定特点，变成我们的选题</h2><p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">只借鉴内容方向和表达方法，不会把对方客户、数字或经历写成我们的事实。</p><div className="mt-4"><BenchmarkTopicGenerator sourceType="CREATOR_PROFILE" sourceId={benchmark.id} available={canRefresh && profile.creatorProfile?.schemaVersion === "benchmark-creator-profile-v4"} buttonLabel="看看我们能做什么题" unavailableMessage={canRefresh ? "当前还没有足够的博主研究结果。" : "当前权限只能查看。"} /></div></Card></aside></div>
   </div>;
 }
 

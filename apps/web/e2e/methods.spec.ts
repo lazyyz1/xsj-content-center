@@ -285,7 +285,9 @@ test("completes one continuous first-phase journey from transcript to an editabl
   await expect(page.getByText("我的补充已保存", { exact: false })).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
-  const selector = page.getByTestId("studio-method-selector");
+  await page.getByRole("button", { name: "创作上下文" }).click();
+  const contextDrawer = page.getByRole("dialog", { name: "创作上下文" });
+  const selector = contextDrawer.getByTestId("studio-method-selector");
   await selector.getByRole("button", { name: "选择我的方法" }).click();
   const drawer = page.getByRole("dialog", { name: "选择我的方法" });
   await expect(drawer).toBeVisible();
@@ -295,10 +297,11 @@ test("completes one continuous first-phase journey from transcript to an editabl
   await drawer.getByRole("button", { name: "保存选择" }).click();
   await expect(selector).toContainText("连续旅程方法");
   await expect.poll(() => db.projectMethodSelection.count({ where: { projectId: project.id, selectedByUserId: user.id } })).toBe(1);
+  await contextDrawer.getByRole("button", { name: "关闭" }).click();
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.reload();
   await expect(page.getByTestId("studio-method-selector")).toContainText("连续旅程方法");
   await expect(page.getByLabel("我的核心观点")).toHaveValue(/我从来没有做过加盟业务/);
-  await page.setViewportSize({ width: 1280, height: 900 });
 
   const runCount = await db.aIRun.count({ where: { projectId: project.id, action: "GENERATE_MOTHER_CONTENT" } });
   await page.getByRole("button", { name: "生成我的口播稿" }).dblclick();
@@ -361,8 +364,8 @@ test("shows personal method status and real 30-day usage without inferring a hab
   ] });
 
   await page.goto("/projects");
-  await page.getByRole("link", { name: "我的创作方法" }).click();
-  await expect(page.getByRole("heading", { name: "我的创作方法" })).toBeVisible();
+  await page.getByRole("link", { name: "查看方法" }).click();
+  await expect(page.getByRole("heading", { name: "方法", exact: true })).toBeVisible();
   await expect(page.getByText(/不会因为一次收藏或一次生成/)).toBeVisible();
   await expect(page.getByTestId("creator-methods-summary")).toContainText("4 次口播稿生成记录");
   await expect(page.getByTestId("core-methods")).toContainText("我确认的常用方法");

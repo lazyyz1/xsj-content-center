@@ -4,13 +4,13 @@ import type { ButtonHTMLAttributes } from "react";
 import { cn } from "./utils";
 
 const buttonVariants = cva(
-  "inline-flex h-10 items-center justify-center rounded-[var(--radius)] px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius-control)] px-4 text-sm font-semibold whitespace-nowrap transition-[transform,background-color,border-color,color,box-shadow,opacity] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--background)] active:translate-y-px disabled:pointer-events-none disabled:opacity-45",
   {
     variants: {
       variant: {
-        primary: "bg-[var(--accent)] text-white hover:opacity-90",
-        secondary: "border border-[var(--border)] bg-[var(--surface)] text-[var(--text-primary)] hover:bg-[var(--surface-elevated)]",
-        ghost: "text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)] hover:text-[var(--text-primary)]",
+        primary: "bg-[var(--accent)] text-white shadow-[var(--shadow-button)] hover:bg-[var(--accent-strong)]",
+        secondary: "border border-[var(--border-strong)] bg-[var(--surface-glass)] text-[var(--text-primary)] shadow-[var(--shadow-xs)] hover:border-[var(--accent-border)] hover:bg-[var(--accent-soft)]",
+        ghost: "text-[var(--text-secondary)] hover:bg-[var(--surface-muted)] hover:text-[var(--text-primary)]",
       },
     },
     defaultVariants: { variant: "primary" },
