@@ -6,7 +6,7 @@ const enqueueBenchmarkPlaybookStudy = vi.hoisted(() => vi.fn().mockResolvedValue
 const enqueueBenchmarkCreatorProfileStudy = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "queued-profile" }));
 vi.mock("@content-center/worker/queue", () => ({ enqueueBenchmarkStudy, enqueueBenchmarkPlaybookStudy, enqueueBenchmarkCreatorProfileStudy }));
 import { db } from "@content-center/db";
-import { benchmarkCreatorProfileInputV2Schema, benchmarkCreatorProfileOutputV2Schema } from "@content-center/providers";
+import { benchmarkCreatorProfileInputV3Schema, benchmarkCreatorProfileOutputV3Schema } from "@content-center/providers";
 import { createBenchmarkCreatorProfileStudy, createBenchmarkCreatorProfileStudySchema, createBenchmarkPlaybookStudy, createBenchmarkPlaybookStudySchema, createBenchmarkStudy, createBenchmarkStudySchema, listBenchmarkCandidates, listBenchmarkStudies } from "../server/discovery/benchmark-study-service";
 import { createMethodFromBenchmarkStudy, getMethod } from "../server/methods/service";
 
@@ -184,19 +184,19 @@ describe("benchmark study persistence and provenance", () => {
     const first = await createBenchmarkCreatorProfileStudy({ workspaceId, benchmarkAccountId: benchmarkId, userId: ownerId, sampleIds: snapshotIds.slice(0, 5) });
     expect(first).toMatchObject({ kind: "CREATOR_PROFILE", version: 4, sampleCount: 5, status: "PROCESSING", samples: expect.arrayContaining([expect.objectContaining({ sourceItemId: sourceIds[0], materialDistillationVersion: 2 }), expect.objectContaining({ sourceItemId: sourceIds[1], materialDistillationVersion: 1 })]) });
     const stored = await db.benchmarkStudy.findUniqueOrThrow({ where: { id: first.id }, select: { output: true } });
-    const manifest = benchmarkCreatorProfileInputV2Schema.parse(stored.output);
+    const manifest = benchmarkCreatorProfileInputV3Schema.parse(stored.output);
     expect(manifest.accountResearch).toEqual(m4 ? { studyId: m4.id, version: m4.version } : null);
     expect(manifest.priorProfileVersion).toBeNull();
     expect(manifest.priorProfile).toBeNull();
     expect(JSON.stringify(manifest)).not.toContain("PLAYBOOKS");
-    const completed = benchmarkCreatorProfileOutputV2Schema.parse({ kind: "CREATOR_PROFILE", schemaVersion: "benchmark-creator-profile-v2", message: "Fixture profile", account: manifest.account, inputs: manifest.distillations, accountResearch: manifest.accountResearch, priorProfileVersion: null, cards: [{ code: "PROFILE", status: "OBSERVE", text: "从当前样本看，这是教培经营内容账号。", evidenceRefs: ["E001"], evidence: [{ evidenceRef: "E001", ...manifest.distillations[0]!, itemKind: "HIGHLIGHT", itemKey: "0", sourceRefs: ["T001"] }] }] });
+    const completed = benchmarkCreatorProfileOutputV3Schema.parse({ kind: "CREATOR_PROFILE", schemaVersion: "benchmark-creator-profile-v3", message: "Fixture profile", account: manifest.account, inputs: manifest.distillations, accountResearch: manifest.accountResearch, priorProfileVersion: null, cards: [{ code: "PROFILE", status: "OBSERVE", claims: [{ id: "C001", text: "从当前样本看，这是教培经营内容账号。", evidenceRefs: ["E001"], evidence: [{ evidenceRef: "E001", ...manifest.distillations[0]!, itemKind: "HIGHLIGHT", itemKey: "0", sourceRefs: ["T001"] }], derivedFrom: [] }] }] });
     await db.benchmarkStudy.update({ where: { id: first.id }, data: { status: "COMPLETED", output: completed } });
     const second = await createBenchmarkCreatorProfileStudy({ workspaceId, benchmarkAccountId: benchmarkId, userId: ownerId, sampleIds: snapshotIds.slice(0, 5) });
     expect(second).toMatchObject({ kind: "CREATOR_PROFILE", version: 5, status: "PROCESSING" });
     const secondStored = await db.benchmarkStudy.findUniqueOrThrow({ where: { id: second.id }, select: { output: true } });
-    const secondManifest = benchmarkCreatorProfileInputV2Schema.parse(secondStored.output);
+    const secondManifest = benchmarkCreatorProfileInputV3Schema.parse(secondStored.output);
     expect(secondManifest.priorProfileVersion).toBe(first.version);
-    expect(secondManifest.priorProfile).toMatchObject({ studyId: first.id, version: first.version, schemaVersion: "benchmark-creator-profile-v2", cards: [{ code: "PROFILE", status: "OBSERVE" }] });
+    expect(secondManifest.priorProfile).toMatchObject({ studyId: first.id, version: first.version, schemaVersion: "benchmark-creator-profile-v3", cards: [{ code: "PROFILE", status: "OBSERVE", claims: [{ id: "C001" }] }] });
     const history = await listBenchmarkStudies({ workspaceId, benchmarkAccountId: benchmarkId });
     expect(history.find(({ id }) => id === first.id)).toMatchObject({ kind: "CREATOR_PROFILE", status: "COMPLETED", output: { message: "Fixture profile" } });
     expect(enqueueBenchmarkCreatorProfileStudy).toHaveBeenCalledTimes(2);

@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { benchmarkCreatorProfileGenerationV2Schema } from "../benchmark-creator-profile";
+import { benchmarkCreatorProfileGenerationV3Schema } from "../benchmark-creator-profile";
 import { materialDistillationCopywritingGenerationSchema, materialDistillationDiscoveryGenerationSchema } from "../material-distillation";
 import { OpenAICompatibleLLMProvider } from "./provider";
 
@@ -112,7 +112,7 @@ describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
   });
 
   it("uses the M9 task JSON Object contract without changing the Kimi adapter", async () => {
-    await kimiProvider().generateStructured({ prompt: "M9_PROFILE_REQUEST", structuredOutput: { strategy: "JSON_OBJECT" } }, benchmarkCreatorProfileGenerationV2Schema);
+    await kimiProvider().generateStructured({ prompt: "M9_PROFILE_REQUEST", structuredOutput: { strategy: "JSON_OBJECT" } }, benchmarkCreatorProfileGenerationV3Schema);
     expect(lastRequestBody).toMatchObject({ model: "kimi-k2.6", response_format: { type: "json_object" } });
   });
 
