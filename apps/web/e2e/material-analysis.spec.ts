@@ -5,6 +5,7 @@ import { IntegrationService } from "@content-center/integrations";
 import { createContentIngestWorker } from "@content-center/worker/queue";
 import { expect, test } from "@playwright/test";
 import { auth } from "../lib/auth";
+import { defaultContentMethodMinimumItems, defaultContentMethodSectionCodes } from "../server/default-content-method/schemas";
 
 const runId = randomUUID();
 const email = `material-analysis-${runId}@example.test`;
@@ -43,11 +44,20 @@ test.beforeAll(async () => {
     request.on("end", () => {
       const parsed = JSON.parse(body) as { messages: Array<{ content: string }> };
       const prompt = parsed.messages.at(-1)?.content ?? "";
-      expect(prompt).toContain("ANALYZE_MATERIAL");
-      expect(prompt).toContain("segmentIndex");
-      expect(prompt).toContain("Never return timestamps");
+      const benchmarkTopics = prompt.includes("基于外部启发生成");
+      if (!benchmarkTopics) {
+        expect(prompt).toContain("ANALYZE_MATERIAL");
+        expect(prompt).toContain("segmentIndex");
+        expect(prompt).toContain("Never return timestamps");
+      }
       response.writeHead(request.headers.authorization === "Bearer material-analysis-key" ? 200 : 401, { "content-type": "application/json", "x-request-id": `material-analysis-${calls + 1}` });
-      response.end(JSON.stringify({ id: `material-analysis-${calls + 1}`, model: "kimi-2.6-fixture", choices: [{ message: { content: JSON.stringify(result()) } }], usage: { prompt_tokens: 120, completion_tokens: 55 } }));
+      const output = benchmarkTopics ? { summary: "已形成四个不同选题。", topics: [
+        { title: "家长问价格时，校长为什么不该马上发价格表", angle: "经营问题", why: "从具体销售动作切入。", ourTake: "先判断家长是否看懂课程差异。", evidenceNeed: "NONE", evidenceHint: null },
+        { title: "假设内容发了很久，真正客户还是不来问", angle: "假设场景", why: "用执行和结果的落差制造冲突。", ourTake: "假设一家机构持续发内容，可以先检查吸引来的是谁。", evidenceNeed: "NONE", evidenceHint: null },
+        { title: "同行先讲工具，我们为什么先看经营问题", angle: "观点冲突", why: "把外部做法与我方判断进行对比。", ourTake: "先看经营问题，再决定是否需要工具。", evidenceNeed: "OPTIONAL", evidenceHint: "有真实咨询记录会更有说服力" },
+        { title: "报价之前，最值得先确认的是什么", angle: "客户认知", why: "从客户理解程度切入。", ourTake: "可以先讲判断，不虚构客户案例。", evidenceNeed: "REQUIRED", evidenceHint: "建议补真实案例" },
+      ] } : result();
+      response.end(JSON.stringify({ id: `material-analysis-${calls + 1}`, model: "kimi-2.6-fixture", choices: [{ message: { content: JSON.stringify(output) } }], usage: { prompt_tokens: 120, completion_tokens: 55 } }));
     });
   });
   await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
@@ -63,7 +73,11 @@ test.afterAll(async () => {
   await new Promise<void>((resolve) => fixture.close(() => resolve()));
   const users = await db.user.findMany({ where: { email: { in: [email, unconfiguredEmail] } }, select: { id: true } });
   const ids = users.map(({ id }) => id);
-  if (ids.length) await db.workspace.deleteMany({ where: { members: { some: { userId: { in: ids } } } } });
+  if (ids.length) {
+    const workspaceIds = (await db.workspaceMember.findMany({ where: { userId: { in: ids } }, select: { workspaceId: true } })).map(({ workspaceId }) => workspaceId);
+    await db.methodAsset.deleteMany({ where: { workspaceId: { in: workspaceIds } } });
+    await db.workspace.deleteMany({ where: { id: { in: workspaceIds } } });
+  }
   await db.user.deleteMany({ where: { id: { in: ids } } });
   await db.$disconnect();
 });
@@ -89,6 +103,8 @@ test("material detail supports the persisted asynchronous analysis flow", async 
   const membership = user.workspaceMemberships[0]!;
   await new IntegrationService().saveIntegrationConfig({ workspaceId: membership.workspaceId, userId: user.id, provider: "LLM", config: { integrationType: "KIMI", productModel: "KIMI_2_6", baseUrl: fixtureOrigin, apiKey: "material-analysis-key", apiModelId: "kimi-2.6-fixture" } });
   const source = await db.sourceItem.create({ data: { workspaceId: membership.workspaceId, createdById: user.id, sourceType: "VIDEO", sourcePlatform: "DOUYIN", title: "待拆解视频", status: "READY", transcript: { create: { workspaceId: membership.workspaceId, provider: "LOCAL_FUNASR", providerMode: "REAL", fullText: "内容团队常常收集很多视频，但如果不先整理主题和观点，真正创作时仍然要重新阅读。", segments: [] } } } });
+  const defaultAsset = await db.methodAsset.create({ data: { workspaceId: membership.workspaceId, ownerUserId: user.id, status: "CORE" } });
+  await db.methodVersion.create({ data: { assetId: defaultAsset.id, version: 1, title: "鑫世界默认创作方法", workspaceDefaultKey: "DEFAULT_CONTENT", steps: { kind: "WORKSPACE_DEFAULT_CONTENT_METHOD", schemaVersion: "workspace-default-content-method-v1", publicationStatus: "PUBLISHED", origin: "HUMAN", createdFromVersion: null, publishedAt: new Date().toISOString(), publishedById: user.id, sections: defaultContentMethodSectionCodes.map((code) => ({ code, items: Array.from({ length: defaultContentMethodMinimumItems[code] }, (_, index) => ({ text: `${code} 指南 ${index + 1}`, sourceRefs: [{ type: "OWN_EXPERIENCE", referenceId: `${code}-${index}`, label: "内部依据" }] })) })) }, applicableScenarios: [], boundaries: [], evidence: [], editedById: user.id } });
 
   await page.goto(`/library/${source.id}`);
   const card = page.getByTestId("material-analysis-card");
@@ -116,6 +132,19 @@ test("material detail supports the persisted asynchronous analysis flow", async 
   await expect(page).toHaveURL(/\/projects\/.+\/studio$/);
   await expect(page.getByRole("heading", { name: "待拆解视频" })).toBeVisible();
   expect(calls).toBe(callsBeforeProject);
+  await page.goto(`/library/${source.id}`);
+
+  await page.getByRole("tab", { name: "创作" }).click();
+  await page.getByRole("button", { name: "用这条找选题" }).click();
+  const topicDrawer = page.getByRole("dialog", { name: "我们可以做什么选题" });
+  await expect(topicDrawer.getByText("已形成四个不同选题。")).toBeVisible({ timeout: 15_000 });
+  await expect(topicDrawer.getByRole("heading", { name: "家长问价格时，校长为什么不该马上发价格表" })).toBeVisible();
+  await topicDrawer.getByRole("button", { name: "选这个题去创作" }).first().click();
+  await expect(page).toHaveURL(/\/projects\/.+\/studio$/);
+  await expect(page.getByRole("heading", { name: "家长问价格时，校长为什么不该马上发价格表" })).toBeVisible();
+  const selectedProject = await db.contentProject.findFirstOrThrow({ where: { workspaceId: membership.workspaceId, title: "家长问价格时，校长为什么不该马上发价格表" }, include: { creativeBrief: true, sources: true } });
+  expect(selectedProject.sources).toEqual([expect.objectContaining({ sourceItemId: source.id, role: "INSPIRATION" })]);
+  expect(selectedProject.creativeBrief?.metadata).toMatchObject({ handoff: "BENCHMARK_TOPIC", source: { type: "VIDEO", id: source.id, basis: "M1" } });
   await page.goto(`/library/${source.id}`);
 
   const transcript = await db.transcript.findUniqueOrThrow({ where: { sourceItemId: source.id } });

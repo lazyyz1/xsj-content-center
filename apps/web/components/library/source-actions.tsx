@@ -3,6 +3,7 @@
 import { Button } from "@content-center/ui";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
+import { BenchmarkTopicGenerator } from "@/components/discovery/benchmark-topic-generator";
 
 type NamedResource = { id: string; name: string };
 type AvailableProject = { id: string; title: string };
@@ -24,6 +25,7 @@ export function SourceActions({
   relatedIdeas = [],
   sourceTitle = "未命名素材",
   sourceReference,
+  topicInspiration,
 }: {
   sourceId: string;
   status: string;
@@ -39,6 +41,7 @@ export function SourceActions({
   relatedIdeas?: RelatedIdea[];
   sourceTitle?: string;
   sourceReference?: SourceReference | null;
+  topicInspiration?: { available: boolean; unavailableMessage: string };
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -99,6 +102,7 @@ export function SourceActions({
         <section className="rounded-xl border p-4">
           <h2 className="font-semibold">进入创作</h2>
           <p className="mt-1 text-xs text-[var(--text-secondary)]">素材只建立引用关系，不会复制原始内容。</p>
+          {topicInspiration ? <div className="mt-4"><BenchmarkTopicGenerator sourceType="VIDEO" sourceId={sourceId} available={topicInspiration.available} buttonLabel="用这条找选题" unavailableMessage={topicInspiration.unavailableMessage} /></div> : null}
           {relatedIdeas.length ? <div className="mt-4 grid gap-2 text-sm">{relatedIdeas.map((idea) => <LinkButton key={idea.id} href={`/discovery/ideas/${idea.id}`}>已加入：《{idea.title}》</LinkButton>)}</div> : sourceReference ? <Button className="mt-4 w-full" variant="secondary" disabled={busy} onClick={() => action(async () => { await call("/api/discovery/ideas", "POST", { title: sourceTitle, description: sourceReference.description || undefined, reference: sourceReference, sourceItemId: sourceId }); })}>加入选题</Button> : null}
           {relatedProjects.length ? <div className="mt-4 grid gap-2">{relatedProjects.map((project) => <LinkButton key={project.id} href={`/projects/${project.id}/studio`}>进入创作工作台 · {project.title}</LinkButton>)}</div> : <Button className="mt-4 w-full" disabled={busy} onClick={() => action(async () => { const result = await call(`/api/source-items/${sourceId}/material-analysis/project`, "POST"); router.push(`/projects/${result.projectId}/studio`); })}>基于这条素材创作</Button>}
           <details className="mt-4"><summary className="cursor-pointer text-sm text-[var(--text-secondary)]">加入其他已有项目</summary>

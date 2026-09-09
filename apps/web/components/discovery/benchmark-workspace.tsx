@@ -11,6 +11,7 @@ import { ArrowLeft, ArrowRight, BookmarkPlus, ChevronDown, FlaskConical, Loader2
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { BenchmarkTopicGenerator } from "./benchmark-topic-generator";
 
 type Work = Omit<ExternalContent, "rawProviderMetadata"> & { sourceItemId: string | null; inIdea: boolean };
 
@@ -75,6 +76,7 @@ export function BenchmarkWorkspace({ profile, candidates, studies: initialStudie
   const profileProcessing = visibleStudies.some((study) => study.kind === "CREATOR_PROFILE" && study.status === "PROCESSING");
   return <div className="benchmark-page"><div className="benchmark-topline"><Link href="/discovery" className="benchmark-back-link"><ArrowLeft size={16} /> 返回内容发现</Link>{canManage ? <Button variant="secondary" className="benchmark-disable-button" onClick={() => void remove()}><Trash2 size={14} /> 停用对标</Button> : null}</div>
     <BenchmarkCreatorHeader profile={profile} />
+    <Card className="mb-4 ml-auto max-w-md p-4"><p className="mb-3 text-sm text-[var(--text-secondary)]">结合这个博主已经完成的画像，转换成适合我们的选题。</p><BenchmarkTopicGenerator sourceType="CREATOR_PROFILE" sourceId={benchmark.id} available={canRefresh && profile.creatorProfile?.schemaVersion === "benchmark-creator-profile-v4"} buttonLabel="看看我们能做什么题" unavailableMessage={canRefresh ? "当前还没有足够的博主研究结果。" : "当前权限只能查看。"} /></Card>
     <WorkspaceTabs value={view} onChange={setView} />
     {view === "PROFILE" ? <BenchmarkCreatorProfile profile={profile} onShowContent={() => setView("CONTENT")} selectedProfileCount={selected.length} canGenerateProfile={profileSelectionReady} profileBusy={action === "profile" || profileProcessing} onShowResearch={() => setView("RESEARCH")} onGenerateProfile={() => void startStudy("CREATOR_PROFILE")} /> : null}
     {view === "CONTENT" ? <BenchmarkCreatorContent profile={profile} /> : null}

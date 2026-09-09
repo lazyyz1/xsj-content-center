@@ -14,7 +14,7 @@ export type BenchmarkCreatorDetailDTO = {
   copywriting: Array<{ sourceItemId: string; sourceTitle: string; core: string; opening: string; progression: string[]; reusable: string[]; avoid: string[] }>;
   accountResearch: null | { sampleCount: number; groups: Array<{ title: string; items: Array<{ name: string; summary: string; sources: Array<{ id: string; title: string }> }> }> };
   playbooks: Array<{ name: string; maturity: "OBSERVE" | "STABLE"; elements: string[]; flow: string; useCase: string; sources: Array<{ id: string; title: string }> }>;
-  creatorProfile: null | { studyId: string; version: number; createdAt: string; message: string; sections: Array<{ code: BenchmarkCreatorProfileSectionCode | BenchmarkCreatorProfileCardCode; status: "CLEAR" | "OBSERVE" | null; text: string; sources: Array<{ id: string; title: string }> }> };
+  creatorProfile: null | { studyId: string; version: number; schemaVersion: "benchmark-creator-profile-v1" | "benchmark-creator-profile-v2" | "benchmark-creator-profile-v3" | "benchmark-creator-profile-v4"; createdAt: string; message: string; sections: Array<{ code: BenchmarkCreatorProfileSectionCode | BenchmarkCreatorProfileCardCode; status: "CLEAR" | "OBSERVE" | null; text: string; sources: Array<{ id: string; title: string }> }> };
   savedMethods: Array<{ id: string; title: string; status: "SAVED" | "TRIAL" | "CORE" | "DISABLED" }>;
 };
 
@@ -142,6 +142,7 @@ export async function getBenchmarkCreatorDetail(input: { workspaceId: string; be
   const creatorProfile = parsedProfile && creatorProfileStudy ? {
     studyId: creatorProfileStudy.id,
     version: creatorProfileStudy.version,
+    schemaVersion: parsedCreatorProfileV4?.success ? "benchmark-creator-profile-v4" as const : parsedCreatorProfileV3?.success ? "benchmark-creator-profile-v3" as const : parsedCreatorProfileV2?.success ? "benchmark-creator-profile-v2" as const : "benchmark-creator-profile-v1" as const,
     createdAt: creatorProfileStudy.createdAt,
     message: parsedProfile.message,
     sections: parsedProfile.sections.map((section) => ({
