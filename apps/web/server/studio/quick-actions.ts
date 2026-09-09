@@ -40,10 +40,17 @@ const openingOutputShape = '{"summary":string,"suggestions":[{"title":string,"te
 
 function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
 function object(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
-function target(action: StudioQuickAction, body: string, fallback: string) {
+type ExplicitSelection = { text?: string; start?: number; end?: number };
+
+function target(action: StudioQuickAction, body: string, fallback: string, explicit?: ExplicitSelection) {
   if (action === "TOPIC_IDEAS") return { original: fallback, start: null, end: null };
   if (!body.trim()) throw new StudioQuickActionError("QUICK_ACTION_NOT_READY", "请先准备一版口播稿再使用这个动作。");
   if (body.length > 20_000) throw new StudioQuickActionError("QUICK_ACTION_NOT_READY", "当前口播稿过长，请先精简后再使用快捷动作。");
+  if (explicit?.text !== undefined || explicit?.start !== undefined || explicit?.end !== undefined) {
+    const { text = "", start = -1, end = -1 } = explicit;
+    if (!text.trim() || start < 0 || end <= start || body.slice(start, end) !== text) throw new StudioQuickActionError("QUICK_ACTION_STALE", "选中的文字已经变化，请重新选择后再试。");
+    return { original: text, start, end };
+  }
   if (action !== "REWRITE_OPENING") return { original: body, start: 0, end: body.length };
   const start = Math.max(0, body.search(/\S/u));
   const opening = body.slice(start);
@@ -53,16 +60,16 @@ function target(action: StudioQuickAction, body: string, fallback: string) {
   return { original: body.slice(start, end), start, end };
 }
 
-export async function runStudioQuickAction(input: { workspaceId: string; userId: string; projectId: string; studioAction: StudioQuickAction; instruction?: string }, dependencies: { runtime?: LLMRuntime; contextBuilder?: ProjectContextBuilder } = {}) {
+export async function runStudioQuickAction(input: { workspaceId: string; userId: string; projectId: string; studioAction: StudioQuickAction; instruction?: string; selectedText?: string; selectionStart?: number; selectionEnd?: number }, dependencies: { runtime?: LLMRuntime; contextBuilder?: ProjectContextBuilder } = {}) {
   const project = await db.contentProject.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId, workspace: { members: { some: { userId: input.userId } } } }, select: { title: true, motherContent: { select: { body: true } }, creativeBrief: { select: { topic: true, coreMessage: true, audience: true } } } });
   if (!project) throw new StudioQuickActionError("QUICK_ACTION_NOT_FOUND", "当前创作不存在。");
   const built = await (dependencies.contextBuilder ?? new ProjectContextBuilder()).build({ ...input, action: "REWRITE_SELECTION" });
   if (!built.defaultMethod) throw new StudioQuickActionError("QUICK_ACTION_NOT_READY", "公司默认创作方法尚未发布。");
   const fallback = JSON.stringify({ projectTitle: project.title, topic: project.creativeBrief?.topic, coreMessage: project.creativeBrief?.coreMessage, audience: project.creativeBrief?.audience });
-  const selection = target(input.studioAction, project.motherContent?.body ?? "", fallback);
+  const selection = target(input.studioAction, project.motherContent?.body ?? "", fallback, { text: input.selectedText, start: input.selectionStart, end: input.selectionEnd });
   const ownFactTexts = built.ownFacts.map(({ text }) => text);
   const hasActionEvidence = input.studioAction === "ADD_CASE" ? built.hasOwnCaseOrData : built.hasOwnEvidence;
-  const prompt = `【本次任务】${input.studioAction}\n【用户明确要求】${input.instruction?.trim() || "无额外要求"}\n【统一创作上下文】\n${JSON.stringify(built.context)}\n\n${instructions[input.studioAction]}\nReturn exactly ${input.studioAction === "REWRITE_OPENING" ? openingOutputShape : fullOutputShape}. Do not return markdown or analysis.`;
+  const prompt = `【本次任务】${input.studioAction}\n【用户明确要求】${input.instruction?.trim() || "无额外要求"}\n【当前处理文字】\n${selection.original}\n【统一创作上下文】\n${JSON.stringify(built.context)}\n\n${instructions[input.studioAction]}\nReturn exactly ${input.studioAction === "REWRITE_OPENING" ? openingOutputShape : fullOutputShape}. Do not return markdown or analysis.`;
   const defaultAudit = { defaultMethodAssetId: built.defaultMethod.assetId, defaultMethodVersionId: built.defaultMethod.versionId, defaultMethodVersion: built.defaultMethod.version, defaultMethodSections: studioQuickActionSections[input.studioAction].join(",") };
   const run = await executeStructuredAIRun({
     workspaceId: input.workspaceId,

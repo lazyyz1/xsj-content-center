@@ -124,6 +124,21 @@ describe("published workspace default method in Studio", () => {
     expect(rewriteOpeningProviderSchema.safeParse({ summary: "已调整开头", suggestions: [{ title: "", text: "开头一" }, { title: "方向2", text: "开头二" }] }).success).toBe(false);
   });
 
+  it("keeps selected-text editing inside the Creation Context quick-action path", async () => {
+    const mother = await db.motherContent.findUniqueOrThrow({ where: { projectId } });
+    const selectedText = "新的正文";
+    const selectionStart = mother.body.indexOf(selectedText);
+    const run = await runStudioQuickAction({ workspaceId, userId, projectId, studioAction: "ALTERNATIVE_EXPRESSION", selectedText, selectionStart, selectionEnd: selectionStart + selectedText.length }, { runtime });
+    expect(run.output.original).toBe(selectedText);
+    expect(prompts.at(-1)).toContain(`【当前处理文字】\n${selectedText}`);
+    const stored = await db.aIRun.findUniqueOrThrow({ where: { id: run.id } });
+    expect(stored.metadata).toMatchObject({ kind: "STUDIO_QUICK_ACTION", studioAction: "ALTERNATIVE_EXPRESSION", contextVersion: "creation-context-v1", selectionStart, selectionEnd: selectionStart + selectedText.length, defaultMethodSections: "BODY,BOUNDARY" });
+    const applied = await applyStudioQuickAction({ workspaceId, userId, projectId, runId: run.id, expectedVersion: mother.version });
+    expect(applied.motherContent.body).toContain("建议使用这个安全表达。");
+    expect(applied.motherContent.body).toContain("按默认方法优化后的正文");
+    await expect(runStudioQuickAction({ workspaceId, userId, projectId, studioAction: "SHORTEN_TEXT", selectedText: "不存在的选区", selectionStart: 0, selectionEnd: 6 }, { runtime })).rejects.toMatchObject({ code: "QUICK_ACTION_STALE" });
+  });
+
   it("persists only safe structured-output failure diagnostics", async () => {
     const sensitiveMarker = "RAW_MODEL_CONTENT_MUST_NOT_BE_STORED";
     const details = { providerRequestId: "fixture-failed-request", actualModel: "kimi-k2.6", finishReason: "stop", returnedRootKeys: ["openings"], returnedFirstLevelObjectKeys: { openings: ["copy", "name"] }, validationIssues: [{ path: "suggestions", code: "invalid_type", expected: "array", receivedType: "undefined" }], rawContent: sensitiveMarker };
