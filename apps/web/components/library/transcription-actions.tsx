@@ -9,6 +9,7 @@ export function TranscriptionActions({
   canTranscribe,
   configured,
   hasTranscript,
+  retry = false,
   fullText,
   busy: alreadyBusy,
 }: {
@@ -16,6 +17,7 @@ export function TranscriptionActions({
   canTranscribe: boolean;
   configured: boolean;
   hasTranscript: boolean;
+  retry?: boolean;
   fullText?: string;
   busy: boolean;
 }) {
@@ -52,7 +54,7 @@ export function TranscriptionActions({
     <div className="transcription-actions mt-4 flex flex-wrap items-center gap-2">
       {canTranscribe ? (
         <Button disabled={!configured || busy || alreadyBusy} onClick={transcribe}>
-          {alreadyBusy ? "转写中…" : hasTranscript ? "重新转写" : "开始转写"}
+          {alreadyBusy ? "转写中…" : hasTranscript || retry ? "重新转写" : "开始转写"}
         </Button>
       ) : null}
       {canTranscribe && !configured && !alreadyBusy ? <span className="text-sm text-[var(--text-secondary)]">语音转写服务暂时不可用，请联系管理员。</span> : null}
