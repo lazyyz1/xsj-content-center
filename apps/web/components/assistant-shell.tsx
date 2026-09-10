@@ -8,6 +8,7 @@ export function AssistantShell({
   children,
   onClose,
   composer = true,
+  composerPlaceholder = "有其他想法？可以先写在补充要求里",
 }: {
   title: string;
   description: string;
@@ -15,6 +16,7 @@ export function AssistantShell({
   children: ReactNode;
   onClose?: () => void;
   composer?: boolean;
+  composerPlaceholder?: string;
 }) {
   return <div className="assistant-shell">
     <header className="assistant-shell-header">
@@ -30,7 +32,7 @@ export function AssistantShell({
     {context ? <section className="assistant-shell-context"><span>当前依据</span>{context}</section> : null}
     <div className="assistant-shell-body">{children}</div>
     {composer ? <footer className="assistant-shell-composer" aria-label="自由对话即将支持">
-      <div className="assistant-shell-input">有其他想法？可以先写在补充要求里</div>
+      <div className="assistant-shell-input">{composerPlaceholder}</div>
       <div className="assistant-shell-tools">
         <button type="button" disabled title="附件即将支持" aria-label="上传附件即将支持"><Paperclip size={17} /></button>
         <button type="button" disabled title="联网搜索即将支持" aria-label="联网搜索即将支持"><Globe2 size={17} /></button>
