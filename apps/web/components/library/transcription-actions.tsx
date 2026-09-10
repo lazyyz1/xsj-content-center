@@ -49,7 +49,7 @@ export function TranscriptionActions({
   }
 
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-2">
+    <div className="transcription-actions mt-4 flex flex-wrap items-center gap-2">
       {canTranscribe ? (
         <Button disabled={!configured || busy || alreadyBusy} onClick={transcribe}>
           {alreadyBusy ? "转写中…" : hasTranscript ? "重新转写" : "开始转写"}

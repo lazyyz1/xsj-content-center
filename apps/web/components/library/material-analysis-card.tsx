@@ -72,7 +72,7 @@ export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt
   const statusLabel = processing ? (job?.status === "QUEUED" ? "等待" : "处理中") : failed ? "需要重试" : currentResult ? "已完成" : "尚未拆解";
   const actionLabel = failed || currentResult ? "重新拆解" : "拆解这条内容";
 
-  return <Container className={embedded ? "" : "p-5"} data-testid="material-analysis-card">
+  return <Container className={embedded ? "material-analysis-panel" : "p-5"} data-testid="material-analysis-card">
     <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">看懂这条</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">先弄清这条到底在讲什么、面向谁，以及表达是怎样展开的。</p></div><Badge>{statusLabel}</Badge></div>
     {!hasTranscript && !currentResult ? <p className="mt-4 text-sm text-[var(--text-secondary)]">需要先有视频文字稿，才能看懂这条。</p> : null}
     {hasTranscript && !configured && !currentResult ? <div className="mt-4 rounded-xl border border-dashed p-4 text-sm text-[var(--text-secondary)]">内容理解暂时不可用，请联系管理员。</div> : null}

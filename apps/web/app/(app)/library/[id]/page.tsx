@@ -49,6 +49,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
   const latestTranscription = source.ingestJobs.find((job) => job.jobType === "TRANSCRIBE");
   const transcriptionBusy = latestTranscription?.status === "QUEUED" || latestTranscription?.status === "RUNNING";
   const stored = source.assets.filter((asset) => asset.status === "STORED" && asset.storageKey && asset.assetType !== "AUDIO");
+  const videoAsset = stored.find((asset) => asset.assetType === "VIDEO");
   const storage = stored.length ? getStorageProvider() : null;
   const playable = await Promise.all(stored.map(async (asset) => ({ ...asset, signedUrl: (await storage!.getSignedUrl(asset.storageKey!, 300, {
     assetScope: { workspaceId: workspace.id, sourceItemId: source.id, assetId: asset.id },
@@ -91,13 +92,13 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
   return <>
     <SourceProcessingPoller sourceId={source.id} active={processing.busy || analysisState.latestAttempt?.status === "PROCESSING" || analysisState.job?.status === "QUEUED" || analysisState.job?.status === "RUNNING" || distillationState.latestAttempt?.status === "PROCESSING" || distillationState.job?.status === "QUEUED" || distillationState.job?.status === "RUNNING"} />
     <div className="source-detail-workbench">
-      <Link href="/library" className="mb-4 inline-flex min-h-10 items-center gap-2 text-sm text-[var(--text-secondary)]"><ArrowLeft size={16} />返回资料</Link>
+      <Link href="/library" className="source-back-link"><ArrowLeft size={16} />返回资料</Link>
       <header className="source-detail-header"><div className="min-w-0"><div className="flex flex-wrap gap-2"><Badge>{sourcePlatformLabels[source.sourcePlatform] || source.sourcePlatform}</Badge><Badge>{sourceTypeLabels[source.sourceType] || source.sourceType}</Badge><Badge>{sourceStatusLabels[source.status] || source.status}</Badge></div><h1>{displayName}</h1><p>{source.author || "未知作者"} · {source.createdAt.toLocaleString("zh-CN")}</p></div><details className="relative shrink-0"><summary aria-label="更多操作" className="source-more-button"><MoreHorizontal size={20} /></summary><div className="absolute right-0 z-20 mt-2 w-56 rounded-xl border bg-[var(--surface)] p-3 shadow-xl"><SourceActions sourceId={source.id} status={source.status} failedJobId={source.status === "FAILED" ? latestIngest?.id : undefined} tags={[]} availableTags={[]} collections={[]} availableCollections={[]} availableProjects={[]} canManageProjects={role !== "VIEWER"} mode="DANGER" /></div></details></header>
       <div className="source-reading-layout">
-        <aside className="source-media-column"><Card className="source-media-card"><div className="flex items-center justify-between gap-3"><h2>原始素材</h2>{stored.find((asset) => asset.assetType === "VIDEO") ? <SourceAssetDownloadButton sourceId={source.id} assetId={stored.find((asset) => asset.assetType === "VIDEO")!.id} /> : null}</div>{playable.map((asset) => asset.assetType === "VIDEO" ? <video key={asset.id} controls preload="metadata" src={asset.signedUrl} /> : <img key={asset.id} src={asset.signedUrl} alt={source.title || "素材"} />)}{!playable.length && source.thumbnailUrl ? <img src={source.thumbnailUrl} alt="" /> : null}<p>研究以真实文字稿为主要依据；原视频用于理解语境。</p></Card></aside>
+        <aside className="source-media-column"><Card className="source-media-card"><h2>原始素材</h2>{playable.map((asset) => asset.assetType === "VIDEO" ? <video key={asset.id} controls preload="metadata" src={asset.signedUrl} /> : <img key={asset.id} src={asset.signedUrl} alt={source.title || "素材"} />)}{!playable.length && source.thumbnailUrl ? <img src={source.thumbnailUrl} alt="" /> : null}<p>研究以真实文字稿为主要依据；原始素材用于理解语境。</p>{videoAsset ? <SourceAssetDownloadButton sourceId={source.id} assetId={videoAsset.id} /> : null}</Card></aside>
         <main className="source-transcript-column">{source.sourcePlatform === "DOUYIN" ? <TranscriptPanel sourceId={source.id} status={processing.transcriptionLabel} method={typeof transcriptMetadata.methodLabel === "string" ? transcriptMetadata.methodLabel : source.transcript?.provider === "LOCAL_FUNASR" ? "本地转写" : source.transcript ? "豆包云端" : "—"} quality={qualityLabels[String(transcriptMetadata.qualityMode)] ?? "—"} processingTime={typeof transcriptMetadata.processingMs === "number" ? `${Math.round(transcriptMetadata.processingMs / 1000)} 秒` : "—"} fullText={source.transcript?.fullText} canEdit={role !== "VIEWER"} canTranscribe={role !== "VIEWER"} configured={transcriptionConfigured} busy={transcriptionBusy} message={transcriptionMessage} /> : <Card className="source-document-body"><h2>{source.sourceType === "URL" ? "提取正文" : "原始正文"}</h2><div>{source.rawText || "暂无正文"}</div></Card>}</main>
+        <MaterialWorkspace {...workspaceProps} />
       </div>
-      <MaterialWorkspace {...workspaceProps} />
     </div>
   </>;
 }
