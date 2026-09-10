@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp, FilePenLine, FolderOpen, Globe2, Lightbulb, Link2, Paperclip, UserRoundSearch, Video } from "lucide-react";
+import { ArrowUp, BookOpen, FilePenLine, FolderOpen, Globe2, ImageIcon, Lightbulb, Link2, Paperclip, ShieldCheck, Type, UserRound, UserRoundSearch, Video } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -20,21 +20,22 @@ export function CreationLaunchpad() {
     router.push(value ? `/projects/new?idea=${encodeURIComponent(value)}` : "/projects/new");
   }
   return <section className="creation-launchpad workspace-panel">
-    <div className="creation-orbit creation-orbit-left" aria-hidden="true"><Video size={28} /></div>
-    <div className="creation-orbit creation-orbit-right" aria-hidden="true"><FilePenLine size={27} /></div>
-    <div className="relative mx-auto max-w-3xl text-center">
-      <h1 className="text-balance text-4xl font-bold tracking-[-0.045em] text-[var(--text-primary)] sm:text-5xl">从一个想法开始，把内容做得更清楚</h1>
-      <p className="mx-auto mt-4 max-w-2xl text-base leading-7 text-[var(--text-secondary)]">描述你想讲的内容，或从视频、博主、资料和已有项目继续。</p>
+    <div className="creation-orbit creation-orbit-play" aria-hidden="true"><Video size={31} /></div>
+    <div className="creation-orbit creation-orbit-image" aria-hidden="true"><ImageIcon size={21} /></div>
+    <div className="creation-orbit creation-orbit-type" aria-hidden="true"><Type size={29} /></div>
+    <div className="creation-orbit creation-orbit-note" aria-hidden="true"><FilePenLine size={22} /></div>
+    <div className="creation-hero-copy">
+      <h1>从一个想法开始，把内容做得<span>更清楚</span></h1>
+      <p>用 AI，放大你的创作世界</p>
     </div>
     <div className="creation-composer">
       <label className="sr-only" htmlFor="creation-idea">描述想创作的内容</label>
       <textarea id="creation-idea" value={idea} onChange={(event) => setIdea(event.target.value)} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") start(); }} rows={3} placeholder="描述你想创作的内容，或粘贴一条素材链接…" />
       <div className="creation-composer-footer">
-        <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1 soft-scrollbar">{actions.map(({ label, href, icon: Icon }) => <button key={label} type="button" onClick={() => router.push(href)}><Icon size={16} />{label}</button>)}</div>
+        <div className="creation-composer-tools soft-scrollbar"><div className="creation-primary-actions">{actions.map(({ label, href, icon: Icon }) => <button key={label} type="button" onClick={() => router.push(href)}><Icon size={16} />{label}</button>)}</div><span className="creation-toolbar-divider" aria-hidden="true" /><div className="creation-future-actions"><button type="button" disabled title="即将支持"><Globe2 size={16} />联网搜索<small>即将支持</small></button><button type="button" disabled title="即将支持"><Paperclip size={16} />上传附件<small>即将支持</small></button><button type="button" disabled title="即将支持"><Link2 size={16} />引用资料<small>即将支持</small></button></div></div>
         <button type="button" aria-label="开始创作" className="creation-send" onClick={start}><ArrowUp size={20} /></button>
       </div>
     </div>
-    <div className="creation-future-tools" aria-label="即将支持的创作入口"><span><Globe2 size={15} />联网搜索 · 即将支持</span><span><Paperclip size={15} />上传附件 · 即将支持</span><span><Link2 size={15} />引用已有资料 · 即将支持</span></div>
-    <div className="creation-context-line"><span>默认创作方法已接入</span><span>外部参考只作启发</span><span>事实安全检查已启用</span><span>AI 建议先预览，再决定是否应用</span></div>
+    <div className="creation-context-line"><span><BookOpen size={15} />默认创作方法 · 已接入</span><i /><span><UserRound size={15} />创作上下文 · 已准备</span><i /><span><ShieldCheck size={15} />事实检查 · 已开启</span></div>
   </section>;
 }

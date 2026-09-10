@@ -1,30 +1,39 @@
 import { Button, Card } from "@content-center/ui";
-import { ArrowRight, Clock3, FolderKanban, LayoutDashboard, Lightbulb, LibraryBig } from "lucide-react";
+import { ArrowRight, BookOpenCheck, FileText, LibraryBig, Lightbulb, PlaySquare, UserRoundSearch } from "lucide-react";
 import Link from "next/link";
 import { CreationLaunchpad } from "@/components/creation-launchpad";
+import { DashboardAssistant } from "@/components/dashboard-assistant";
 import { requireWorkspace } from "@/server/access";
-import { getDashboardCounts, getDashboardWork } from "@/server/dashboard";
+import { getDashboardWork } from "@/server/dashboard";
 import { getIntegrationStatuses } from "@/server/integrations";
 import { projectStatusLabels } from "@/lib/content-labels";
 
+const existingStarts = [
+  { title: "单视频找选题", description: "从一条视频发现更多可能", href: "/library", icon: PlaySquare },
+  { title: "对标博主找题", description: "分析已研究博主，找到创作方向", href: "/discovery", icon: UserRoundSearch },
+  { title: "浏览我的资料", description: "基于已有资料开始创作", href: "/library", icon: LibraryBig },
+  { title: "使用默认方法", description: "更适合中文内容创作", href: "/projects/methods", icon: BookOpenCheck },
+] as const;
+
 export default async function DashboardPage() {
   const { workspace } = await requireWorkspace();
-  const [counts, work, integrations] = await Promise.all([getDashboardCounts(workspace.id), getDashboardWork(workspace.id), getIntegrationStatuses(workspace.id)]);
+  const [work, integrations] = await Promise.all([getDashboardWork(workspace.id), getIntegrationStatuses(workspace.id)]);
   const missingServices = integrations.filter((item) => item.provider !== "STORAGE" && item.status !== "CONFIGURED" && item.status !== "MOCK").map((item) => item.name);
-  return <div className="dashboard-workspace">
-    <div className="min-w-0">
-      <CreationLaunchpad />
-      {missingServices.length ? <Link href="/settings/integrations" className="mt-4 flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-[var(--border)] bg-white/64 px-4 text-sm hover:border-[var(--accent-border)]"><span><strong>有服务尚未就绪</strong><span className="ml-2 text-[var(--text-secondary)]">{missingServices.join("、")}</span></span><ArrowRight size={17} /></Link> : null}
-      <section className="dashboard-continuation mt-8" aria-labelledby="recent-work-heading">
-        <div className="flex items-end justify-between gap-4"><div><h2 id="recent-work-heading" className="text-xl font-semibold tracking-tight">最近工作</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">继续上次没有写完的内容</p></div><Link href="/projects" className="inline-flex min-h-11 items-center gap-1 text-sm font-medium text-[var(--accent)]">查看项目<ArrowRight size={15} /></Link></div>
-        {work.projects.length ? <div className="mt-4 grid gap-3 md:grid-cols-2">{work.projects.map((project) => <Link key={project.id} href={`/projects/${project.id}/studio`} className="group rounded-[var(--radius-card)] border border-[var(--border)] bg-white/72 p-4 shadow-[var(--shadow-card)] transition-[transform,border-color,background-color] hover:-translate-y-0.5 hover:border-[var(--accent-border)] hover:bg-white"><div className="flex items-center justify-between gap-3 text-xs text-[var(--text-tertiary)]"><span>{projectStatusLabels[project.status] || project.status}</span><span>{project._count.sources} 条参考</span></div><h3 className="mt-3 line-clamp-2 text-base font-semibold leading-6">{project.title}</h3><p className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-[var(--accent)]">继续创作<ArrowRight size={14} /></p></Link>)}</div> : <Card className="mt-4 flex min-h-40 items-center justify-between gap-5 p-5"><div><h3 className="font-semibold">还没有进行中的项目</h3><p className="mt-2 text-sm text-[var(--text-secondary)]">从一个想法或一条参考内容开始。</p></div><Button asChild><Link href="/projects/new">开始创作</Link></Button></Card>}
-      </section>
-      <section className="dashboard-continuation mt-8" aria-labelledby="inspiration-heading">
-        <div className="flex items-end justify-between gap-4"><div><h2 id="inspiration-heading" className="text-xl font-semibold tracking-tight">可以继续的灵感</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">来自你已经保存的真实内容线索</p></div><Link href="/discovery" className="inline-flex min-h-11 items-center gap-1 text-sm font-medium text-[var(--accent)]">去研究<ArrowRight size={15} /></Link></div>
-        {work.recommendations.length ? <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{work.recommendations.slice(0, 3).map((item) => <Link key={item.id} href={item.projectId ? `/projects/${item.projectId}/studio` : item.contentIdeaId ? `/discovery/ideas/${item.contentIdeaId}` : `/discovery/recommendations/${item.id}`} className="rounded-[var(--radius-card)] border border-[var(--border)] bg-white/68 p-4 transition-colors hover:border-[var(--accent-border)] hover:bg-white"><Lightbulb size={18} className="text-[var(--accent)]" /><h3 className="mt-3 line-clamp-2 font-semibold leading-6">{item.title}</h3><p className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--text-secondary)]">{item.coreQuestion}</p></Link>)}</div> : <Card className="mt-4 p-5 text-sm text-[var(--text-secondary)]">还没有灵感线索。去灵感研究看看有哪些值得参考的内容。</Card>}
-      </section>
-      <section className="dashboard-future-canvas"><span><LayoutDashboard size={20} /></span><div><h2>我的创作流程</h2><p>未来可以在画布中组合资料、方法与 AI 动作。当前仅预留入口，不会生成虚假流程。</p></div><strong>即将支持</strong></section>
-      <div className="mt-7 flex flex-wrap gap-x-6 gap-y-2 border-t border-[var(--border)] pt-4 text-xs text-[var(--text-tertiary)]"><span className="inline-flex items-center gap-1.5"><LibraryBig size={14} />{counts.materials} 条资料</span><span className="inline-flex items-center gap-1.5"><FolderKanban size={14} />{counts.projects} 个项目</span><span className="inline-flex items-center gap-1.5"><Clock3 size={14} />{counts.pendingPublish} 条待发布</span></div>
-    </div>
+  return <div className="dashboard-v2">
+    <CreationLaunchpad />
+    {missingServices.length ? <Link href="/settings/integrations" className="dashboard-service-note"><span><strong>有服务尚未就绪</strong> · {missingServices.join("、")}</span><ArrowRight size={16} /></Link> : null}
+
+    <section className="dashboard-section" aria-labelledby="recent-work-heading">
+      <div className="dashboard-section-heading"><div><h2 id="recent-work-heading">最近工作</h2><p>继续上次没有写完的内容</p></div><Link href="/projects">查看全部<ArrowRight size={15} /></Link></div>
+      {work.projects.length ? <div className="dashboard-recent-grid">{work.projects.map((project, index) => <Link key={project.id} href={`/projects/${project.id}/studio`} className="dashboard-recent-card"><span className="dashboard-project-visual" data-tone={index % 4}><FileText size={21} /></span><div className="min-w-0"><div><span>{projectStatusLabels[project.status] || project.status}</span></div><h3>{project.title}</h3><p>上次编辑 {project.updatedAt.toLocaleDateString("zh-CN")} · {project._count.sources} 条参考</p><strong>继续创作<ArrowRight size={14} /></strong></div></Link>)}</div> : <Card className="dashboard-empty-work"><div><h3>还没有进行中的项目</h3><p>从一个想法或一条参考内容开始。</p></div><Button asChild><Link href="/projects/new">开始创作</Link></Button></Card>}
+    </section>
+
+    <section className="dashboard-section" aria-labelledby="existing-start-heading">
+      <div className="dashboard-section-heading"><div><h2 id="existing-start-heading">从现有内容开始</h2><p>基于你已有的内容，快速找到新的创作方向</p></div></div>
+      <div className="dashboard-start-grid">{existingStarts.map(({ title, description, href, icon: Icon }) => <Link key={title} href={href}><span><Icon size={21} /></span><div><h3>{title}</h3><p>{description}</p></div><ArrowRight size={17} /></Link>)}</div>
+    </section>
+
+    {work.recommendations.length ? <section className="dashboard-inspiration-strip" aria-labelledby="dashboard-inspiration-heading"><div><Lightbulb size={18} /><span><h2 id="dashboard-inspiration-heading">可以继续的灵感</h2><p>来自已保存的真实内容线索</p></span></div><div>{work.recommendations.slice(0, 3).map((item) => <Link key={item.id} href={item.projectId ? `/projects/${item.projectId}/studio` : item.contentIdeaId ? `/discovery/ideas/${item.contentIdeaId}` : `/discovery/recommendations/${item.id}`}>{item.title}<ArrowRight size={14} /></Link>)}</div><Link href="/discovery">去灵感研究</Link></section> : null}
+    <DashboardAssistant />
   </div>;
 }
