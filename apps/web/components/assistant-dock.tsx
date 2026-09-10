@@ -22,8 +22,9 @@ export function AssistantDock() {
   const [open, setOpen] = useState(false);
   if (hiddenPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(prefix)) && !pathname.startsWith("/projects/methods")) return null;
   const current = copy(pathname);
+  const dockLabel = pathname.startsWith("/discovery") ? "研究助手" : "";
   return <>
-    <button type="button" aria-label="打开鑫小助" className="assistant-dock-button" onClick={() => setOpen(true)}><Bot size={21} /></button>
+    <button type="button" aria-label={`打开${current.title}`} className={`assistant-dock-button ${dockLabel ? "is-labeled" : ""}`} onClick={() => setOpen(true)}><Bot size={21} />{dockLabel ? <span>{dockLabel}</span> : null}</button>
     {open ? <div className="assistant-dock-layer"><button type="button" aria-label="关闭鑫小助" className="assistant-dock-backdrop" onClick={() => setOpen(false)} /><aside role="dialog" aria-modal="true" aria-label={current.title} className="assistant-dock-panel"><AssistantShell title={current.title} description={current.description} onClose={() => setOpen(false)} context={<p>当前页面 · {pathname.startsWith("/library") ? "资料" : pathname.startsWith("/discovery") ? "灵感研究" : pathname.startsWith("/calendar") ? "发布" : "方法"}</p>}><div className="assistant-actions">{current.links.map(([label, href]) => <Link key={`${label}-${href}`} href={href} onClick={() => setOpen(false)}><Sparkles size={15} /><span>{label}</span><ExternalLink size={14} /></Link>)}</div><div className="assistant-coming-soon"><strong>更多能力即将支持</strong><p>自由对话、联网搜索、附件和引用资料会在这里统一出现，不会假装已经完成。</p></div></AssistantShell></aside></div> : null}
   </>;
 }
