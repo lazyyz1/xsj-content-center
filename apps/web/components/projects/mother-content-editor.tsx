@@ -1,13 +1,15 @@
 "use client";
 
+import { FileCheck2, MessageSquareText, Scissors, ShieldCheck, Sparkles, WandSparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 type Snapshot = { title: string; body: string; outline: string[] };
 type SaveState = "IDLE" | "DIRTY" | "SAVING" | "SAVED" | "FAILED";
+export type StudioSelectionAction = "ALTERNATIVE_EXPRESSION" | "HUMANIZE_TEXT" | "SHORTEN_TEXT" | "STRENGTHEN_EVIDENCE" | "FACT_CHECK";
 
 const labels: Record<SaveState, string> = { IDLE: "已保存", DIRTY: "等待保存", SAVING: "正在保存", SAVED: "已保存", FAILED: "保存失败" };
 
-export function MotherContentEditor({ projectId, initial, editable, onSaved, onSelectionChange }: { projectId: string; initial: { title: string; body: string; outline: string[]; version: number; origin?: "HUMAN" | "KIMI" | "GPT_WEB"; originNote?: string | null }; editable: boolean; onSaved?: (version: number, snapshot: Snapshot) => void; onSelectionChange?: (selection: { text: string; start: number; end: number } | null) => void }) {
+export function MotherContentEditor({ projectId, initial, editable, onSaved, onSelectionChange, onSelectionAction }: { projectId: string; initial: { title: string; body: string; outline: string[]; version: number; origin?: "HUMAN" | "KIMI" | "GPT_WEB"; originNote?: string | null }; editable: boolean; onSaved?: (version: number, snapshot: Snapshot) => void; onSelectionChange?: (selection: { text: string; start: number; end: number } | null) => void; onSelectionAction?: (action: StudioSelectionAction) => void }) {
   const [title, setTitle] = useState(initial.title);
   const [body, setBody] = useState(initial.body);
   const [outlineText, setOutlineText] = useState(initial.outline.join("\n"));
@@ -18,12 +20,15 @@ export function MotherContentEditor({ projectId, initial, editable, onSaved, onS
   const lastSaved = useRef<Snapshot>({ title: initial.title, body: initial.body, outline: initial.outline });
   const version = useRef(initial.version);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const [selection, setSelection] = useState<{ text: string; start: number; end: number } | null>(null);
 
   function reportSelection(element: HTMLTextAreaElement) {
     const start = element.selectionStart;
     const end = element.selectionEnd;
     const selected = body.slice(start, end).trim();
-    onSelectionChange?.(selected ? { text: body.slice(start, end), start, end } : null);
+    const next = selected ? { text: body.slice(start, end), start, end } : null;
+    setSelection(next);
+    onSelectionChange?.(next);
   }
 
   async function drain() {
@@ -83,11 +88,12 @@ export function MotherContentEditor({ projectId, initial, editable, onSaved, onS
   }
   return (
     <section className="mother-editor-workspace">
-      <div className="mother-editor-status"><div><h3>稿件编辑器</h3><p>直接修改正文；选中文字后，右侧助手会切换到局部操作。</p></div><div><p className={saveState === "FAILED" ? "text-[var(--danger)]" : ""}>{labels[saveState]}</p><span>{characters} 字 · V{version.current}</span></div></div>
+      <div className="mother-editor-status"><div><h3>正文编辑</h3><p>选中文字可调用 AI 局部优化，应用前会先预览。</p></div><div><p className={saveState === "FAILED" ? "text-[var(--danger)]" : ""}><FileCheck2 size={14} />{labels[saveState]}</p><span>{characters} 字 · V{version.current}</span></div></div>
       {outline.length ? <nav className="studio-outline-nav" aria-label="稿件分段导航">{outline.map((item, index) => <button key={`${item}-${index}`} type="button" onClick={() => locateSection(item)}><span>{index + 1}</span><strong>{item}</strong></button>)}</nav> : null}
       <input aria-label="口播稿标题" value={title} disabled={!editable} onChange={(event) => setTitle(event.target.value)} className="mother-title-input" placeholder="口播稿标题" />
+      <div className="mother-document-toolbar"><span>正文</span><i /><span>自动保存已开启</span><span className="ml-auto">选中文字后可局部优化</span></div>
+      <div className="mother-body-shell">{selection && onSelectionAction ? <div className="mother-selection-toolbar" role="toolbar" aria-label="选中文字操作"><button type="button" onClick={() => onSelectionAction("ALTERNATIVE_EXPRESSION")}><WandSparkles size={14} />换个表达</button><button type="button" onClick={() => onSelectionAction("HUMANIZE_TEXT")}><MessageSquareText size={14} />更口语</button><button type="button" onClick={() => onSelectionAction("SHORTEN_TEXT")}><Scissors size={14} />精简</button><button type="button" onClick={() => onSelectionAction("STRENGTHEN_EVIDENCE")}><Sparkles size={14} />补依据</button><button type="button" onClick={() => onSelectionAction("FACT_CHECK")}><ShieldCheck size={14} />检查事实</button></div> : null}<textarea ref={bodyRef} aria-label="口播稿正文" value={body} disabled={!editable} onChange={(event) => { setBody(event.target.value); setSelection(null); onSelectionChange?.(null); }} onSelect={(event) => reportSelection(event.currentTarget)} onKeyUp={(event) => reportSelection(event.currentTarget)} onMouseUp={(event) => reportSelection(event.currentTarget)} className="mother-body-editor" placeholder="从这里开始写口播稿。停止输入 800ms 后自动保存。" /></div>
       <details className="outline-editor"><summary>编辑大纲</summary><textarea aria-label="口播稿提纲" value={outlineText} disabled={!editable} onChange={(event) => setOutlineText(event.target.value)} rows={4} placeholder="提纲，每行一点" /></details>
-      <textarea ref={bodyRef} aria-label="口播稿正文" value={body} disabled={!editable} onChange={(event) => { setBody(event.target.value); onSelectionChange?.(null); }} onSelect={(event) => reportSelection(event.currentTarget)} onKeyUp={(event) => reportSelection(event.currentTarget)} onMouseUp={(event) => reportSelection(event.currentTarget)} className="mother-body-editor" placeholder="从这里开始写口播稿。停止输入 800ms 后自动保存。" />
       {error ? <p role="alert" className="mt-2 text-xs text-[var(--danger)]">{error}</p> : null}
     </section>
   );
