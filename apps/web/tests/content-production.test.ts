@@ -53,13 +53,16 @@ describe("video content production", () => {
     expect(sourceDisplayName({ title: null, summary: null, platformLabel: "抖音", createdAt: new Date("2026-09-03") })).toMatch(/^抖音素材 · /);
   });
 
-  it("keeps the material workbar viewport-limited and secondary analysis content collapsible", () => {
+  it("keeps the material workbench non-linear and moves secondary operations behind more", () => {
     const workspace = readFileSync(new URL("../components/library/material-workspace.tsx", import.meta.url), "utf8");
     const analysis = readFileSync(new URL("../components/library/material-analysis-card.tsx", import.meta.url), "utf8");
-    expect(workspace).toContain("h-[calc(100dvh-2.5rem)]");
+    expect(workspace).toContain("当前已有成果");
+    expect(workspace).toContain("现在最值得做");
+    expect(workspace).toContain("不会强制按顺序研究");
+    expect(workspace).toContain('type Tab = "研究成果" | "去创作" | "更多"');
     expect(workspace).toContain('data-testid="material-workspace-scroll-body"');
     expect(workspace).toContain("overflow-y-auto");
-    expect(workspace).toContain('data-testid="material-workspace-footer"');
+    expect(workspace).toContain("material-secondary-grid");
     expect(analysis).toContain("查看原文依据");
     expect(analysis).toContain("历史拆解");
     expect(analysis).toContain("<details");

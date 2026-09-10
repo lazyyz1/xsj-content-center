@@ -22,6 +22,7 @@ import { ProjectContextBuilder } from "@/server/ai/project-context";
 import { recommendStudioQuickActions } from "@/server/ai/schemas";
 
 function stringArray(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
+function jsonObject(value: unknown) { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 
 export default async function ProjectStudioPage({ params }: { params: Promise<{ id: string }> }) {
   const { session, workspace, role } = await requireWorkspace();
@@ -66,5 +67,15 @@ export default async function ProjectStudioPage({ params }: { params: Promise<{ 
   const ai = { integrationStatus: llm.status !== "CONFIGURED" && process.env.MOCK_MODE === "true" ? "MOCK" as const : llm.status, creatorProfile: profile ? { displayName: profile.displayName, positioning: profile.positioning } : null };
   const namedAvailableSources = availableSources.map((source) => ({ ...source, displayName: sourceDisplayName({ title: source.title, summary: source.materialAnalyses[0]?.summary, platformLabel: sourcePlatformLabels[source.sourcePlatform] || source.sourcePlatform, createdAt: source.createdAt }) }));
   const recommendedActions = recommendStudioQuickActions({ hasTopic: Boolean(brief?.coreMessage.trim() || brief?.topic.trim()), hasDraft: Boolean(mother?.body.trim()), hasOwnEvidence: creationContext.hasOwnCaseOrData });
-  return <div className="studio-page"><header className="mb-3 flex flex-wrap items-start justify-between gap-4"><div><Link href="/projects" className="mb-2 inline-flex min-h-10 items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"><ArrowLeft size={16} />返回项目</Link><h1 className="text-2xl font-bold tracking-[-0.035em]">{project.title}</h1><p className="mt-1 text-sm text-[var(--text-secondary)]">创作上下文、稿件和 AI 建议都在同一个工作台里。</p></div><Badge>{projectStatusLabels[project.status] || project.status}</Badge></header><StudioShell project={{ ...studioProject, productionPlan: parsedProductionPlan.success ? parsedProductionPlan.data : null }} methods={methodState} defaultMethod={defaultMethod} recommendedActions={recommendedActions} availableSources={namedAvailableSources} feedback={feedbackContext} editable={role !== "VIEWER"} ai={ai} initialWarnings={initialWarnings} /></div>;
+  const briefMetadata = jsonObject(brief?.metadata);
+  const contextSummary = {
+    topic: brief?.topic || project.title,
+    goal: project.goal || brief?.coreMessage || "继续完善当前口播稿",
+    ownFacts: creationContext.ownFacts.slice(0, 12).map((fact) => ({ text: fact.text, source: fact.source, kind: fact.kind })),
+    profile: profile ? { displayName: profile.displayName, positioning: profile.positioning } : null,
+    creatorUnderstandingCount: creationContext.inputSummary.creatorUnderstandingCount,
+    externalSourceCount: creationContext.inputSummary.sourceCount,
+    handoff: typeof briefMetadata.handoff === "string" ? briefMetadata.handoff : null,
+  };
+  return <div className="studio-page"><header className="studio-page-header"><div><Link href="/projects" className="mb-2 inline-flex min-h-10 items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"><ArrowLeft size={16} />返回项目</Link><h1>{project.title}</h1><p>围绕当前选题组织依据、编辑稿件，并在应用前检查 AI 建议。</p></div><Badge>{projectStatusLabels[project.status] || project.status}</Badge></header><StudioShell project={{ ...studioProject, productionPlan: parsedProductionPlan.success ? parsedProductionPlan.data : null }} methods={methodState} defaultMethod={defaultMethod} recommendedActions={recommendedActions} availableSources={namedAvailableSources} feedback={feedbackContext} editable={role !== "VIEWER"} ai={ai} contextSummary={contextSummary} initialWarnings={initialWarnings} /></div>;
 }

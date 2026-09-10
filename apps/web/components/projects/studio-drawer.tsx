@@ -3,7 +3,7 @@
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
 
-export function StudioDrawer({ title, open, onClose, children, width = "max-w-[34rem]" }: { title: string; open: boolean; onClose: () => void; children: ReactNode; width?: string }) {
+export function StudioDrawer({ title, open, onClose, children, width = "max-w-[26rem]" }: { title: string; open: boolean; onClose: () => void; children: ReactNode; width?: string }) {
   if (!open) return null;
   return <div className="fixed inset-0 z-50 flex justify-end bg-black/30" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
     <section role="dialog" aria-modal="true" aria-label={title} className={`h-full w-full overflow-y-auto border-l bg-[var(--surface)] p-5 shadow-2xl ${width}`}>

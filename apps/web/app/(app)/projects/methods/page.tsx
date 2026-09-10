@@ -1,7 +1,6 @@
 import { Badge, Button, Card } from "@content-center/ui";
-import { ArrowLeft, ArrowRight, BookOpen, ExternalLink } from "lucide-react";
+import { ArrowRight, BookOpenCheck, Boxes, Workflow } from "lucide-react";
 import Link from "next/link";
-import { PageHeader } from "@/components/page";
 import { methodStatusLabels } from "@/lib/content-labels";
 import { requireWorkspace } from "@/server/access";
 import { getCreatorMethodsOverview, type CreatorMethodDTO } from "@/server/creator-methods/service";
@@ -11,34 +10,19 @@ import { DefaultContentMethod } from "@/components/projects/default-content-meth
 export default async function CreatorMethodsPage() {
   const { session, workspace, role } = await requireWorkspace();
   const [overview, defaultMethod] = await Promise.all([getCreatorMethodsOverview({ workspaceId: workspace.id, ownerUserId: session.user.id }), getDefaultContentMethod({ workspaceId: workspace.id })]);
-  const canOperate = role !== "VIEWER";
-  const description = "这里整理的是你已经确认、正在尝试和实际使用过的创作方法。系统不会因为一次收藏或一次生成，就自动改变你的长期创作习惯。";
-  const savedWithoutUse = overview.groups.SAVED.filter((method) => method.attempts === 0);
-  return <><div className="mb-5 flex items-center justify-between gap-3"><Link href="/projects" className="inline-flex min-h-10 items-center gap-2 text-sm text-[var(--text-secondary)]"><ArrowLeft size={16} />返回项目</Link><Link href="/library/methods" className="text-sm font-medium text-[var(--accent)]">查看全部方法</Link></div><PageHeader title="方法" description={description} />
-    <DefaultContentMethod initial={defaultMethod} editable={canOperate} />
-    {!overview.all.length ? <EmptyMethods /> : <>
-    <section className="mb-8 rounded-2xl border bg-[var(--surface)] p-5" data-testid="creator-methods-summary"><p className="text-sm leading-6 text-[var(--text-secondary)]">最近 30 天共有 <span className="font-semibold text-[var(--text-primary)]">{overview.totalGenerations}</span> 次口播稿生成记录。生成完成只表示技术流程完成，不代表方法有效；这里不计算成功率。</p></section>
-    <MethodSection testId="core-methods" title="我常用的方法" description="你手动标记为常用的方法。" items={overview.groups.CORE} totalGenerations={overview.totalGenerations} canOperate={canOperate} />
-    <MethodSection testId="trial-methods" title="我正在试的方法" description="你手动标记为试用中的方法。" items={overview.groups.TRIAL} totalGenerations={overview.totalGenerations} canOperate={canOperate} />
-    <RecentSection items={overview.recentlyUsed} canOperate={canOperate} />
-    <MethodSection testId="saved-methods" title="还没开始尝试" description="这些方法已经收藏，但最近 30 天还没有实际使用记录。" items={savedWithoutUse} totalGenerations={overview.totalGenerations} canOperate={canOperate} secondary />
-    {overview.groups.DISABLED.length ? <details className="mt-8" data-testid="disabled-methods"><summary className="cursor-pointer text-sm font-medium text-[var(--text-secondary)]">已停用（{overview.groups.DISABLED.length}）</summary><div className="mt-4 grid gap-4 md:grid-cols-2"><p className="text-sm text-[var(--text-secondary)] md:col-span-2">这些方法过去的使用记录仍会保留，但当前不会出现在创作选择中。</p>{overview.groups.DISABLED.map((method) => <MethodCard key={method.id} method={method} totalGenerations={overview.totalGenerations} canOperate={canOperate} disabled />)}</div></details> : null}</>}
-  </>;
+  const activeMethods = overview.all.filter((method) => method.status !== "DISABLED");
+  return <div className="methods-center">
+    <header className="page-hero-row"><div><h1 className="page-heading">方法中心</h1><p className="page-description">公司通用方法、你自己的创作方法，以及未来可组合的创作流程都在这里。</p></div><Button variant="secondary" asChild><Link href="/library/methods">管理全部方法<ArrowRight size={15} /></Link></Button></header>
+    <nav className="method-center-tabs" aria-label="方法中心栏目"><a href="#default-method">鑫世界默认方法</a><a href="#my-methods">我的创作方法</a><a href="#my-workflows">我的创作流程</a></nav>
+    <section id="default-method" aria-labelledby="default-method-heading"><div className="section-heading-row"><div><h2 id="default-method-heading">鑫世界默认方法</h2><p>公司通用的创作底座，Studio 会根据当前动作只使用相关部分。</p></div></div><DefaultContentMethod initial={defaultMethod} editable={role !== "VIEWER"} /></section>
+    <section id="my-methods" aria-labelledby="my-methods-heading" className="mt-9"><div className="section-heading-row"><div><h2 id="my-methods-heading">我的创作方法</h2><p>你确认过、正在尝试或经常使用的方法，可以与默认方法一起使用。</p></div><span>{activeMethods.length} 项</span></div>
+      <Card className="mb-4 flex flex-wrap items-center justify-between gap-3 p-4" data-testid="creator-methods-summary"><p className="text-sm text-[var(--text-secondary)]">最近 30 天有 {overview.totalGenerations} 次口播稿生成记录。这里只记录实际使用，不把生成完成当成方法有效。</p><Link href="/library/methods" className="text-sm font-semibold text-[var(--accent)]">查看完整方法库</Link></Card>
+      {activeMethods.length ? <div className="personal-method-grid">{activeMethods.slice(0, 6).map((method) => <MethodCard key={method.id} method={method} />)}<Link href="/library/methods" className="personal-method-more"><Boxes size={22} /><strong>查看全部方法</strong><span>包括已停用方法和完整版本信息</span></Link></div> : <Card className="empty-state"><BookOpenCheck size={28} /><h3>还没有自己的创作方法</h3><p>从单条内容或博主研究中看到值得保留的做法后，可以保存到这里。</p><Button asChild><Link href="/library">去研究资料</Link></Button></Card>}
+    </section>
+    <section id="my-workflows" className="mt-9" aria-labelledby="my-workflows-heading"><div className="section-heading-row"><div><h2 id="my-workflows-heading">我的创作流程</h2><p>未来可以在画布中组合资料、方法和工具，形成自己的内容流程。</p></div><Badge>即将支持</Badge></div><Card className="workflow-ready-card"><span><Workflow size={24} /></span><div><h3>画布式创作流程</h3><p>当前不会创建虚假流程或运行记录。后续支持后，你可以在这里自由组合已有方法与资料。</p></div><Button disabled variant="secondary">画布编辑即将支持</Button></Card></section>
+  </div>;
 }
 
-function EmptyMethods() {
-  return <Card className="grid min-h-72 place-items-center p-8 text-center"><div className="max-w-md"><BookOpen className="mx-auto text-[var(--accent)]" size={28} /><h2 className="mt-4 text-lg font-semibold">还没有创作方法</h2><p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">你可以从内容拆解或对标账号研究中保存一项方法，之后再在这里查看使用情况。</p><div className="mt-5 flex flex-wrap justify-center gap-3"><Button asChild><Link href="/library">去内容素材</Link></Button><Button variant="secondary" asChild><Link href="/discovery">去对标账号</Link></Button></div></div></Card>;
-}
-
-function MethodSection({ testId, title, description, items, totalGenerations, canOperate, secondary = false }: { testId: string; title: string; description: string; items: CreatorMethodDTO[]; totalGenerations: number; canOperate: boolean; secondary?: boolean }) {
-  return <section className={`mt-8 ${secondary ? "opacity-95" : ""}`} data-testid={testId}><div className="flex items-end justify-between gap-3"><div><h2 className="text-xl font-semibold">{title}</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">{description}</p></div><span className="text-xs text-[var(--text-secondary)]">{items.length} 项</span></div>{items.length ? <div className="mt-4 grid gap-4 md:grid-cols-2">{items.map((method) => <MethodCard key={method.id} method={method} totalGenerations={totalGenerations} canOperate={canOperate} />)}</div> : <Card className="mt-4 p-5 text-sm text-[var(--text-secondary)]">这里暂时没有方法。</Card>}</section>;
-}
-
-function MethodCard({ method, totalGenerations, canOperate, disabled = false }: { method: CreatorMethodDTO; totalGenerations: number; canOperate: boolean; disabled?: boolean }) {
-  const source = method.current.source.title;
-  return <Card className={disabled ? "opacity-65" : ""}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h3 className="line-clamp-2 font-semibold">{method.current.title}</h3><p className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--text-secondary)]">{method.current.steps[0] || "已保存的方法内容"}</p></div><Badge>{methodStatusLabels[method.status]}</Badge></div><p className="mt-4 line-clamp-1 text-xs text-[var(--text-secondary)]">来源：{source}</p>{disabled && method.attempts ? <p className="mt-3 text-xs text-[var(--text-secondary)]">过去使用过，当前已停用。</p> : null}<div className="mt-4 border-t pt-4 text-xs text-[var(--text-secondary)]">{method.attempts ? <p>最近 30 天 {totalGenerations} 次生成中，{method.attempts} 次选择此方法：成功生成 {method.successfulCount} 次，生成失败 {method.failedCount} 次。</p> : <p>{totalGenerations ? `最近 30 天有 ${totalGenerations} 次生成，但还没有选择此方法` : "最近 30 天还没有使用记录"}</p>}{method.latestProject && method.latestUsedAt ? <p className="mt-2">最近一次用于：<Link href={`/projects/${method.latestProject.id}/studio`} className="font-medium text-[var(--accent)]">{method.latestProject.title}</Link> · {new Date(method.latestUsedAt).toLocaleDateString("zh-CN")}</p> : null}</div><div className="mt-4 flex flex-wrap gap-2"><Button variant="secondary" asChild><Link href={`/library/methods/${method.id}`}>{canOperate ? "查看/调整方法" : "查看方法"}</Link></Button>{canOperate && !disabled ? <Button asChild><Link href="/projects">去创作<ArrowRight size={14} /></Link></Button> : null}</div></Card>;
-}
-
-function RecentSection({ items, canOperate }: { items: CreatorMethodDTO[]; canOperate: boolean }) {
-  return <section className="mt-8" data-testid="recently-used-methods"><div><h2 className="text-xl font-semibold">最近实际使用</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">只列出最近 30 天有明确使用记录的方法。</p></div>{items.length ? <div className="mt-4 grid gap-3">{items.slice(0, 8).map((method) => <Card key={method.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><Link href={`/library/methods/${method.id}`} className="font-medium text-[var(--accent)]">{method.current.title}</Link><Badge>{methodStatusLabels[method.status]}</Badge></div><p className="mt-1 text-xs text-[var(--text-secondary)]">实际尝试 {method.attempts} 次 · 成功生成 {method.successfulCount} 次 · 生成失败 {method.failedCount} 次</p>{method.latestProject ? <p className="mt-1 text-xs text-[var(--text-secondary)]">最近一次用于：{method.latestProject.title}</p> : null}</div>{method.latestUsedAt ? <time className="text-xs text-[var(--text-secondary)]">{new Date(method.latestUsedAt).toLocaleString("zh-CN")}</time> : null}</div>{method.status === "DISABLED" ? <p className="mt-2 text-xs text-[var(--text-secondary)]">过去使用过，当前已停用。</p> : null}<div className="mt-3 flex gap-2"><Button variant="secondary" asChild><Link href={`/library/methods/${method.id}`}>{canOperate ? "查看/调整方法" : "查看方法"}<ExternalLink size={13} /></Link></Button></div></Card>)}</div> : <Card className="mt-4 p-5 text-sm text-[var(--text-secondary)]">最近 30 天还没有实际使用方法的记录。</Card>}</section>;
+function MethodCard({ method }: { method: CreatorMethodDTO }) {
+  return <Link href={`/library/methods/${method.id}`} className="personal-method-card"><div className="flex items-start justify-between gap-3"><span className="personal-method-icon"><BookOpenCheck size={19} /></span><Badge>{methodStatusLabels[method.status]}</Badge></div><h3>{method.current.title}</h3><p>{method.current.steps[0] || "已保存的方法内容"}</p><footer><span>{method.attempts ? `最近使用 ${method.attempts} 次` : "还没有实际使用"}</span><ArrowRight size={15} /></footer></Link>;
 }

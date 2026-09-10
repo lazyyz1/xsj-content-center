@@ -1,10 +1,11 @@
 "use client";
 
-import { BookOpenCheck, ChevronDown, Files, FolderKanban, Home, Lightbulb, Menu, Search, Send, Settings, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { BookOpenCheck, ChevronDown, Files, FolderKanban, Home, Lightbulb, Menu, Send, Settings, ShieldCheck, Sparkles, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { LogoutButton } from "./logout-button";
+import { GlobalSearch } from "./global-search";
 
 const links = [
   { label: "开始创作", href: "/dashboard", icon: Home },
@@ -73,7 +74,7 @@ export function Sidebar({ workspaceName, userName, isSystemAdmin = false }: { wo
           <Brand /><div className="mt-4" onClick={() => setMobileOpen(false)}><Navigation pathname={pathname} mobile /></div>
         </div> : null}
       </div>
-      <Link href="/discovery" className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-xl border border-[var(--border)] bg-white/62 px-3 text-sm text-[var(--text-tertiary)] sm:max-w-md lg:ml-auto"><Search size={17} /><span className="truncate">搜索内容、博主或资料</span></Link>
+      <GlobalSearch />
       <details className="relative">
         <summary className="flex min-h-11 list-none items-center gap-2 rounded-xl px-2 hover:bg-white/65"><span className="grid h-8 w-8 place-items-center rounded-full bg-[linear-gradient(145deg,#d7e8ff,#bdd7fb)] text-xs font-semibold text-[var(--accent)]">{userName.trim().slice(0, 1) || "我"}</span><ChevronDown size={14} className="hidden text-[var(--text-tertiary)] sm:block" /></summary>
         <div className="absolute right-0 top-12 z-50 w-56 rounded-2xl border border-white/80 bg-[rgb(249_252_255/0.98)] p-2 shadow-[var(--shadow-panel)]">

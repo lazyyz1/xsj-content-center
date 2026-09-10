@@ -1,7 +1,7 @@
 "use client";
 
-import { Button, Card } from "@content-center/ui";
-import { PanelLeft, Sparkles } from "lucide-react";
+import { Badge, Button, Card } from "@content-center/ui";
+import { BookOpenCheck, ChevronLeft, ChevronRight, LibraryBig, PanelLeft, ShieldCheck, Sparkles, UserRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { BriefEditor, type MySupplement } from "./brief-editor";
 import { MotherContentEditor } from "./mother-content-editor";
@@ -27,13 +27,15 @@ type ProjectStatus = "DRAFT" | "RESEARCHING" | "BRIEF_READY" | "WRITING" | "IN_R
 type MotherSnapshot = { title: string; body: string; outline: string[]; version: number; origin: "HUMAN" | "KIMI" | "GPT_WEB"; originNote: string | null; confirmedVersion: number | null; confirmedWarnings: string[] };
 type CreativePlanHandoff = { plan: CreativePlan; storedPlan: CreativePlan; origins: string[]; autoPrefilled: boolean; titleReferences: string[]; stage: "PREPARING" | "WRITING" };
 type DraftWarning = { code: string; message: string; reason?: string; suggestion?: string };
+type ContextFact = { text: string; source: "CREATOR_PROFILE" | "PROJECT_EVIDENCE" | "MY_SUPPLEMENT" | "CURRENT_DRAFT"; kind: string };
+type ContextSummary = { topic: string; goal: string; ownFacts: ContextFact[]; profile: { displayName: string; positioning: string } | null; creatorUnderstandingCount: number; externalSourceCount: number; handoff: string | null };
 
 function object(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function text(value: unknown) { return typeof value === "string" ? value : ""; }
 function stringArray(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
 function warningKey(warning: Pick<DraftWarning, "code" | "message">) { return `${warning.code}:${warning.message}`; }
 
-export function StudioShell({ project, methods, defaultMethod, recommendedActions, availableSources, feedback, editable, ai, initialWarnings = [] }: {
+export function StudioShell({ project, methods, defaultMethod, recommendedActions, availableSources, feedback, editable, ai, contextSummary, initialWarnings = [] }: {
   project: { id: string; title: string; status: ProjectStatus; description: string | null; goal: string | null; audience: string | null; sources: ProjectSource[]; creativePlan: CreativePlanHandoff; motherContent: MotherSnapshot; motherHistory: MotherContentVersion[]; platformVariants: PlatformVariantView[]; productionPlan: ContentProductionPlan | null };
   methods: ProjectMethodStateDTO;
   defaultMethod: StudioDefaultContentMethodDTO | null;
@@ -42,6 +44,7 @@ export function StudioShell({ project, methods, defaultMethod, recommendedAction
   feedback: CreationFeedbackContext;
   editable: boolean;
   ai: { integrationStatus: "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "DISABLED" | "ERROR" | "MOCK"; creatorProfile: { displayName: string; positioning: string } | null };
+  contextSummary: ContextSummary;
   initialWarnings?: DraftWarning[];
 }) {
   const router = useRouter();
@@ -66,6 +69,8 @@ export function StudioShell({ project, methods, defaultMethod, recommendedAction
   const [historyOpen, setHistoryOpen] = useState(false);
   const [tab, setTab] = useState<"CREATE" | "PLATFORM">("CREATE");
   const [mobilePanel, setMobilePanel] = useState<"CONTEXT" | "ASSISTANT" | null>(null);
+  const [contextTab, setContextTab] = useState<"SOURCES" | "FACTS" | "PERSON" | "METHODS">("SOURCES");
+  const [assistantOpen, setAssistantOpen] = useState(true);
   const [selection, setSelection] = useState<{ text: string; start: number; end: number } | null>(null);
   const [activePlatform, setActivePlatform] = useState<SupportedPlatform>("DOUYIN");
   const [variants, setVariants] = useState(project.platformVariants);
@@ -76,6 +81,16 @@ export function StudioShell({ project, methods, defaultMethod, recommendedAction
   const unresolvedWarningCount = warnings.filter((warning) => !confirmedWarningKeys.includes(warningKey(warning))).length;
 
   useEffect(() => setFeedbackContext(feedback), [feedback]);
+  useEffect(() => {
+    const stored = window.localStorage.getItem("studio-assistant-open");
+    if (stored === "false") setAssistantOpen(false);
+  }, []);
+  useEffect(() => { if (selection) setAssistantOpen(true); }, [selection]);
+
+  function toggleAssistant(next: boolean) {
+    setAssistantOpen(next);
+    window.localStorage.setItem("studio-assistant-open", String(next));
+  }
 
   function invalidateFeedback() {
     setFeedbackContext((current) => current ? { ...current, available: false, sourceAiRunId: null, methods: [], feedback: null, unavailableReason: "NO_APPLIED_GENERATION" } : current);
@@ -169,22 +184,26 @@ export function StudioShell({ project, methods, defaultMethod, recommendedAction
     setMother((current) => ({ ...current, ...content, confirmedVersion: null, confirmedWarnings: [] }));
     setWarnings(nextWarnings); setConfirmedWarningKeys([]); setWarningsOpen(false); setSelection(null); invalidateFeedback(); setMotherMessage("AI 建议已应用，你可以继续修改。");
   };
+  const sourceLabels = { CREATOR_PROFILE: "人物已确认事实", PROJECT_EVIDENCE: "我方资料", MY_SUPPLEMENT: "我的补充", CURRENT_DRAFT: "当前稿件" } as const;
   const contextPanel = <div className="studio-context-stack">
-    <div className="studio-context-summary"><p>AI 当前掌握</p><div><span>{project.sources.length} 条参考</span><span>{defaultMethod ? `默认方法 V${defaultMethod.version}` : "未设置默认方法"}</span><span>{methods.selected.length} 个私人方法</span></div></div>
-    <Card className="p-4"><StudioSources projectId={project.id} sources={project.sources} availableSources={availableSources} editable={editableProject} onUse={useReference} /></Card>
-    <Card className="p-4"><BriefEditor value={supplement} editable={editableProject} busy={supplementBusy} message={supplementMessage} onChange={setSupplement} onSave={() => void saveSupplement()} /></Card>
-    <StudioMethodSelector projectId={project.id} initial={methodState} editable={editableProject} onChange={setMethodState} />
+    <section className="studio-context-hero"><p>当前创作上下文</p><h2>{contextSummary.topic}</h2><span>{contextSummary.goal}</span><div><i>资料 {project.sources.length}</i><i>我方事实 {contextSummary.ownFacts.length}</i><i>人物 {contextSummary.profile ? 1 : 0}</i><i>方法 {(defaultMethod ? 1 : 0) + methods.selected.length}</i></div>{contextSummary.handoff === "BENCHMARK_TOPIC" ? <small>这组选题来自对标启发，外部内容仍保持外部归属。</small> : null}</section>
+    <details className="studio-supplement-disclosure"><summary><span><strong>我的补充</strong><small>核心观点、受众和我方背景</small></span><ChevronRight size={16} /></summary><div><BriefEditor value={supplement} editable={editableProject} busy={supplementBusy} message={supplementMessage} onChange={setSupplement} onSave={() => void saveSupplement()} /></div></details>
+    <div className="studio-context-tabs" role="tablist" aria-label="创作上下文分类"><button role="tab" aria-selected={contextTab === "SOURCES"} onClick={() => setContextTab("SOURCES")}><LibraryBig size={15} />资料</button><button role="tab" aria-selected={contextTab === "FACTS"} onClick={() => setContextTab("FACTS")}><ShieldCheck size={15} />我方事实</button><button role="tab" aria-selected={contextTab === "PERSON"} onClick={() => setContextTab("PERSON")}><UserRound size={15} />人物</button><button role="tab" aria-selected={contextTab === "METHODS"} onClick={() => setContextTab("METHODS")}><BookOpenCheck size={15} />方法</button></div>
+    {contextTab === "SOURCES" ? <Card className="p-4"><StudioSources projectId={project.id} sources={project.sources} availableSources={availableSources} editable={editableProject} onUse={useReference} /></Card> : null}
+    {contextTab === "FACTS" ? <Card className="studio-context-detail p-4"><div className="flex items-center justify-between"><h3>可以安全使用的我方事实</h3><span>{contextSummary.ownFacts.length} 条</span></div>{contextSummary.ownFacts.length ? <ul>{contextSummary.ownFacts.map((fact, index) => <li key={`${fact.source}-${index}`}><p>{fact.text}</p><small>{sourceLabels[fact.source]}</small></li>)}</ul> : <div className="studio-context-empty"><ShieldCheck size={20} /><p>还没有已确认的我方事实</p><span>没有案例也可以继续写观点或明确的假设场景，AI 不会替你编经历。</span></div>}</Card> : null}
+    {contextTab === "PERSON" ? <Card className="studio-context-detail p-4"><h3>人物与表达</h3>{contextSummary.profile ? <div className="studio-profile-summary"><span><UserRound size={18} /></span><div><strong>{contextSummary.profile.displayName}</strong><p>{contextSummary.profile.positioning || "已有人物画像，详细信息可在设置中维护。"}</p><small>另有 {contextSummary.creatorUnderstandingCount} 项表达偏好和当前理解参与创作</small></div></div> : <div className="studio-context-empty"><UserRound size={20} /><p>还没有人物画像</p><span>保持空白即可，AI 不会因此虚构身份或经历。</span></div>}</Card> : null}
+    {contextTab === "METHODS" ? <div className="grid gap-3"><Card className="studio-context-detail p-4"><div className="flex items-center justify-between"><h3>鑫世界默认方法</h3><Badge>{defaultMethod ? `V${defaultMethod.version} 已启用` : "未设置"}</Badge></div><p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">根据当前动作裁剪使用，不会一次注入全部方法。</p></Card><StudioMethodSelector projectId={project.id} initial={methodState} editable={editableProject} onChange={setMethodState} /></div> : null}
   </div>;
   const assistantPanel = <StudioDefaultMethod projectId={project.id} method={defaultMethod} recommendedActions={recommendedActions} editable={editableProject} configured={configured} motherVersion={mother.version} selection={selection} onSelectionApplied={() => setSelection(null)} onUseTopic={(value) => { setSupplement((current) => ({ ...current, coreMessage: value })); setSupplementMessage("已放入我的核心观点，保存后生效"); }} onApplied={handleAIApply} />;
 
   return <>
-    <nav aria-label="创作区域" className="studio-view-switch"><button className={tab === "CREATE" ? "is-active" : ""} onClick={() => setTab("CREATE")}>创作</button><button className={tab === "PLATFORM" ? "is-active" : ""} onClick={() => setTab("PLATFORM")}>平台内容与审核</button></nav>
+    <div className="studio-toolbar"><nav aria-label="创作区域" className="studio-view-switch"><button className={tab === "CREATE" ? "is-active" : ""} onClick={() => setTab("CREATE")}>创作</button><button className={tab === "PLATFORM" ? "is-active" : ""} onClick={() => setTab("PLATFORM")}>平台内容与审核</button></nav>{tab === "CREATE" ? <button type="button" className="studio-assistant-toggle hidden min-[1360px]:inline-flex" onClick={() => toggleAssistant(!assistantOpen)}>{assistantOpen ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}{assistantOpen ? "收起 AI 助手" : "打开 AI 助手"}</button> : null}</div>
     {tab === "CREATE" ? <>
-      <div className="studio-mobile-tools xl:hidden"><Button variant="secondary" onClick={() => setMobilePanel("CONTEXT")}><PanelLeft size={16} />创作上下文</Button><Button onClick={() => setMobilePanel("ASSISTANT")}><Sparkles size={16} />AI 助手</Button></div>
-      <main className="studio-v2">
+      <div className="studio-mobile-tools min-[1360px]:hidden"><Button variant="secondary" onClick={() => setMobilePanel("CONTEXT")}><PanelLeft size={16} />创作上下文</Button><Button onClick={() => setMobilePanel("ASSISTANT")}><Sparkles size={16} />AI 助手</Button></div>
+      <main className={`studio-v2 ${assistantOpen ? "" : "assistant-is-closed"}`}>
         <aside className="studio-context-column soft-scrollbar">{contextPanel}</aside>
         <section className="studio-editor-column soft-scrollbar">
-          {productionPlan ? <ContentProductionPreview plan={productionPlan} selectedAngle={selectedAngle} selectedTitle={selectedTitle} busy={motherGenerating} editable={editableProject} onAngleChange={setSelectedAngle} onTitleChange={(title) => void selectTitle(title)} onRegenerate={() => void generateMotherContent(selectedAngle)} /> : null}
+          {productionPlan ? <details className="studio-plan-disclosure"><summary><span><strong>本次生成思路</strong><small>查看候选角度、标题和开场建议</small></span><ChevronRight size={16} /></summary><div><ContentProductionPreview plan={productionPlan} selectedAngle={selectedAngle} selectedTitle={selectedTitle} busy={motherGenerating} editable={editableProject} onAngleChange={setSelectedAngle} onTitleChange={(title) => void selectTitle(title)} onRegenerate={() => void generateMotherContent(selectedAngle)} /></div></details> : null}
           <Card id="mother-content" className="studio-editor-card p-5">
             <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">我的口播稿</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">你的补充优先，外部内容只作为参考。</p></div>{mother.version ? <Button variant="ghost" className="h-9 px-2 text-xs" onClick={() => setHistoryOpen(true)}>历史版本</Button> : null}</div>
             {warnings.length ? <div className="mt-4"><button type="button" className="w-full rounded-xl border border-[var(--warning)] p-3 text-left text-sm text-[var(--warning)]" onClick={() => setWarningsOpen((current) => !current)}>有 {warnings.length} 处需要确认，{warningsOpen ? "收起" : "查看详情"}</button>{warningsOpen ? <div className="mt-2 grid gap-2">{warnings.map((warning) => { const key = warningKey(warning); const confirmed = confirmedWarningKeys.includes(key); return <article key={key} className="rounded-xl border p-4 text-sm"><p className="font-medium">{warning.message}</p><p className="mt-2 text-[var(--text-secondary)]">风险原因：{warning.reason || "这项内容需要人工判断。"}</p><p className="mt-1 text-[var(--text-secondary)]">建议处理：{warning.suggestion || "核对原始资料，确认后再继续。"}</p><div className="mt-3 flex flex-wrap gap-2"><Button variant={confirmed ? "secondary" : "primary"} disabled={confirmed || !editableProject} onClick={() => void confirmWarning(warning)}>{confirmed ? "已确认" : "我已确认"}</Button><Button variant="ghost" disabled={!editableProject} onClick={() => { setConfirmedWarningKeys((current) => current.filter((item) => item !== key)); setMotherMessage("请返回正文修改这项内容。"); }}>返回修改</Button></div></article>; })}</div> : null}</div> : null}
@@ -193,7 +212,8 @@ export function StudioShell({ project, methods, defaultMethod, recommendedAction
           </Card>
           <CreationFeedback projectId={project.id} context={feedbackContext} editable={editableProject} />
         </section>
-        <aside className="studio-ai-column soft-scrollbar">{assistantPanel}</aside>
+        <aside className="studio-ai-column soft-scrollbar" aria-hidden={!assistantOpen}>{assistantOpen ? assistantPanel : null}</aside>
+        {!assistantOpen ? <button type="button" className="assistant-collapsed-trigger hidden min-[1360px]:flex" onClick={() => toggleAssistant(true)}><Sparkles size={18} /><span>AI 助手</span></button> : null}
       </main>
       <StudioDrawer title="创作上下文" open={mobilePanel === "CONTEXT"} onClose={() => setMobilePanel(null)}>{contextPanel}</StudioDrawer>
       <StudioDrawer title="AI 创作助手" open={mobilePanel === "ASSISTANT"} onClose={() => setMobilePanel(null)}>{assistantPanel}</StudioDrawer>

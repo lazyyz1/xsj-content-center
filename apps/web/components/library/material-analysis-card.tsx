@@ -57,9 +57,9 @@ export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt
       setLatestAttempt({ ...result, status: "PROCESSING", errorCode: null, errorMessage: null });
       setJob({ id: result.jobId, status: "QUEUED", progress: 0, attempt: 0, maxAttempts: 3, errorCode: null, errorMessage: null, updatedAt: new Date().toISOString() });
       setConfirming(false);
-      setNotice("已提交内容拆解，你可以先离开页面，回来后继续查看。");
+      setNotice("已开始理解这条内容，你可以先离开页面，回来后继续查看。");
       router.refresh();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "内容拆解失败，请重试。"); }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "这次没有看懂，请重试。"); }
     finally { analysisStarting.current = false; setBusy(false); }
   }
 
@@ -73,9 +73,9 @@ export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt
   const actionLabel = failed || currentResult ? "重新拆解" : "拆解这条内容";
 
   return <Container className={embedded ? "" : "p-5"} data-testid="material-analysis-card">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">内容拆解</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">看看这条内容是怎么讲的，以及有哪些方法值得借鉴。</p></div><Badge>{statusLabel}</Badge></div>
-    {!hasTranscript && !currentResult ? <p className="mt-4 text-sm text-[var(--text-secondary)]">请先完成视频文字稿，再进行内容拆解。</p> : null}
-    {hasTranscript && !configured && !currentResult ? <div className="mt-4 rounded-xl border border-dashed p-4 text-sm text-[var(--text-secondary)]">内容拆解服务暂时不可用，请联系管理员。</div> : null}
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">看懂这条</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">先弄清这条到底在讲什么、面向谁，以及表达是怎样展开的。</p></div><Badge>{statusLabel}</Badge></div>
+    {!hasTranscript && !currentResult ? <p className="mt-4 text-sm text-[var(--text-secondary)]">需要先有视频文字稿，才能看懂这条。</p> : null}
+    {hasTranscript && !configured && !currentResult ? <div className="mt-4 rounded-xl border border-dashed p-4 text-sm text-[var(--text-secondary)]">内容理解暂时不可用，请联系管理员。</div> : null}
     {processing ? <div className="mt-4 rounded-xl border border-[var(--accent)] p-4 text-sm"><p className="font-medium">正在拆解，你可以先离开这个页面，回来后继续查看。</p><p className="mt-1 text-[var(--text-secondary)]">已有的历史拆解仍然保留。</p></div> : null}
     {failed ? <div className="mt-4 rounded-xl border border-[var(--danger)] p-4 text-sm"><p className="font-medium text-[var(--danger)]">这次没有拆解完成</p><p className="mt-1 text-[var(--text-secondary)]">已有的历史结果不会受到影响。</p></div> : null}
     {currentResult?.stale ? <div className="mt-4 rounded-xl border border-[var(--warning)] p-4 text-sm"><p className="font-medium text-[var(--warning)]">视频文字稿已更新，当前拆解基于旧版本。</p><p className="mt-1 text-[var(--text-secondary)]">旧拆解仍可查看，重新拆解后才会采用最新文字稿。</p></div> : null}

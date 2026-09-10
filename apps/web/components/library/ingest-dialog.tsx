@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@content-center/ui";
-import { Plus, X } from "lucide-react";
+import { FileUp, ImagePlus, Plus, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -68,6 +68,7 @@ export function IngestDialog() {
                 <div className="mt-5 grid grid-cols-3 gap-2 rounded-xl bg-[var(--surface-elevated)] p-1">
                   {(["TEXT", "URL", "DOUYIN"] as const).map((value) => <button key={value} onClick={() => { setKind(value); setError(""); }} className={`rounded-lg px-3 py-2 text-sm ${kind === value ? "bg-[var(--surface)] font-medium shadow-sm" : "text-[var(--text-secondary)]"}`}>{value === "TEXT" ? "粘贴文本" : value === "URL" ? "网页链接" : "抖音视频"}</button>)}
                 </div>
+                <div className="mt-3 grid grid-cols-2 gap-2"><button type="button" disabled className="flex min-h-11 items-center justify-center gap-2 rounded-xl border bg-[var(--surface-muted)] text-sm text-[var(--text-secondary)]"><FileUp size={16} />上传文档 · 即将支持</button><button type="button" disabled className="flex min-h-11 items-center justify-center gap-2 rounded-xl border bg-[var(--surface-muted)] text-sm text-[var(--text-secondary)]"><ImagePlus size={16} />上传图片 · 即将支持</button></div>
                 <form action={submit} className="mt-5 grid gap-4">
                   {kind === "TEXT" ? <>
                     <label className="grid gap-1.5 text-sm">标题（可选）<input name="title" maxLength={200} className="h-10 rounded-[var(--radius)] border bg-transparent px-3" /></label>

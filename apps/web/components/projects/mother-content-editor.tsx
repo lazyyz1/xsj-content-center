@@ -17,6 +17,7 @@ export function MotherContentEditor({ projectId, initial, editable, onSaved, onS
   const pending = useRef<Snapshot | null>(null);
   const lastSaved = useRef<Snapshot>({ title: initial.title, body: initial.body, outline: initial.outline });
   const version = useRef(initial.version);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   function reportSelection(element: HTMLTextAreaElement) {
     const start = element.selectionStart;
@@ -67,12 +68,26 @@ export function MotherContentEditor({ projectId, initial, editable, onSaved, onS
   }, [title, body, outlineText, editable]);
 
   const characters = body.replace(/\s/g, "").length;
+  const outline = outlineText.split("\n").map((item) => item.trim()).filter(Boolean);
+
+  function locateSection(item: string) {
+    const element = bodyRef.current;
+    if (!element) return;
+    const exact = body.indexOf(item);
+    const keyword = item.replace(/^\d+[.、]\s*/u, "").replace(/[：:？?！!]/gu, "").trim();
+    const approximate = keyword ? body.indexOf(keyword) : -1;
+    const start = exact >= 0 ? exact : approximate >= 0 ? approximate : 0;
+    element.focus();
+    element.setSelectionRange(start, Math.min(body.length, start + (exact >= 0 ? item.length : keyword.length)));
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
   return (
-    <section className="flex min-h-[42rem] flex-col">
-      <div className="flex items-center justify-between gap-3 border-b pb-3"><div><h3 className="font-semibold">稿件</h3><p className="mt-1 text-xs text-[var(--text-secondary)]">直接编辑正文；选中文字后，右侧助手会提供局部操作。</p></div><div className="text-right text-xs"><p className={saveState === "FAILED" ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}>{labels[saveState]}</p><p className="mt-1 text-[var(--text-secondary)]">{characters} 字</p></div></div>
-      <input aria-label="口播稿标题" value={title} disabled={!editable} onChange={(event) => setTitle(event.target.value)} className="mt-4 h-14 border-0 bg-transparent text-2xl font-bold tracking-tight outline-none" placeholder="口播稿标题" />
-      <details className="mt-2 rounded-xl bg-[var(--surface-muted)] px-3 py-2"><summary className="text-sm font-medium text-[var(--text-secondary)]">查看和编辑大纲</summary><textarea aria-label="口播稿提纲" value={outlineText} disabled={!editable} onChange={(event) => setOutlineText(event.target.value)} rows={4} className="mt-2 w-full resize-y border-0 bg-transparent p-2 text-sm leading-6 outline-none" placeholder="提纲，每行一点" /></details>
-      <textarea aria-label="口播稿正文" value={body} disabled={!editable} onChange={(event) => { setBody(event.target.value); onSelectionChange?.(null); }} onSelect={(event) => reportSelection(event.currentTarget)} onKeyUp={(event) => reportSelection(event.currentTarget)} onMouseUp={(event) => reportSelection(event.currentTarget)} className="mt-3 min-h-[34rem] flex-1 resize-y rounded-2xl border border-transparent bg-white/55 p-5 text-[15px] leading-8 outline-none transition-colors hover:border-[var(--border)] focus:border-[var(--accent-border)] focus:bg-white" placeholder="从这里开始写口播稿。停止输入 800ms 后自动保存。" />
+    <section className="mother-editor-workspace">
+      <div className="mother-editor-status"><div><h3>稿件编辑器</h3><p>直接修改正文；选中文字后，右侧助手会切换到局部操作。</p></div><div><p className={saveState === "FAILED" ? "text-[var(--danger)]" : ""}>{labels[saveState]}</p><span>{characters} 字 · V{version.current}</span></div></div>
+      {outline.length ? <nav className="studio-outline-nav" aria-label="稿件分段导航">{outline.map((item, index) => <button key={`${item}-${index}`} type="button" onClick={() => locateSection(item)}><span>{index + 1}</span><strong>{item}</strong></button>)}</nav> : null}
+      <input aria-label="口播稿标题" value={title} disabled={!editable} onChange={(event) => setTitle(event.target.value)} className="mother-title-input" placeholder="口播稿标题" />
+      <details className="outline-editor"><summary>编辑大纲</summary><textarea aria-label="口播稿提纲" value={outlineText} disabled={!editable} onChange={(event) => setOutlineText(event.target.value)} rows={4} placeholder="提纲，每行一点" /></details>
+      <textarea ref={bodyRef} aria-label="口播稿正文" value={body} disabled={!editable} onChange={(event) => { setBody(event.target.value); onSelectionChange?.(null); }} onSelect={(event) => reportSelection(event.currentTarget)} onKeyUp={(event) => reportSelection(event.currentTarget)} onMouseUp={(event) => reportSelection(event.currentTarget)} className="mother-body-editor" placeholder="从这里开始写口播稿。停止输入 800ms 后自动保存。" />
       {error ? <p role="alert" className="mt-2 text-xs text-[var(--danger)]">{error}</p> : null}
     </section>
   );

@@ -26,7 +26,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
     db.contentTag.findMany({ where: { workspaceId: workspace.id }, orderBy: { name: "asc" } }),
     db.collection.findMany({ where: { workspaceId: workspace.id }, orderBy: { name: "asc" } }),
   ]);
-  const listView = query.view === "list";
+  const listView = query.view !== "card";
   const hasProcessing = items.some((item) => {
     const latestJob = item.ingestJobs[0];
     return item.status === "PENDING" || item.status === "PROCESSING" || latestJob?.status === "QUEUED" || latestJob?.status === "RUNNING";
@@ -38,7 +38,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
       <LibrarySubnav current="sources" />
       <header className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
         <div>
-          <h1 className="page-heading">资料</h1>
+          <h1 className="page-heading">资料中心</h1>
           <p className="page-description">集中管理 AI 可以理解并用于创作的视频、文档、链接和真实依据。</p>
         </div>
         <IngestDialog />
@@ -84,7 +84,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
       {items.length === 0 ? (
         <Card className="grid min-h-64 place-items-center p-8 text-center"><div><h2 className="font-semibold">还没有可用素材</h2><p className="mt-2 text-sm text-[var(--text-secondary)]">使用右上角“收录内容”添加第一条素材，或调整当前筛选条件。</p></div></Card>
       ) : (
-        <section aria-label="素材列表" className={listView ? "grid gap-3" : "grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"}>
+        <section aria-label="素材列表" className={listView ? "library-list" : "grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"}>
           {items.map((item) => {
             const latestJob = item.ingestJobs[0];
             const processing = getSourceProcessingState({
@@ -95,8 +95,8 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
             });
             const displayName = sourceDisplayName({ title: item.title, suggestedTitle: item.materialAnalyses[0]?.suggestedTitle, summary: item.materialAnalyses[0]?.summary, platformLabel: sourcePlatformLabels[item.sourcePlatform] || item.sourcePlatform, createdAt: item.createdAt });
             return (
-              <Card key={item.id} className={listView ? "flex flex-col gap-4 p-4 sm:flex-row sm:items-center" : "overflow-hidden"}>
-                <div className={listView ? "h-16 w-24 shrink-0 rounded-lg bg-[var(--surface-elevated)]" : "h-32 bg-[var(--surface-elevated)]"}>
+              <Card key={item.id} className={listView ? "library-list-row" : "overflow-hidden"}>
+                <div className={listView ? "library-list-cover" : "h-32 bg-[var(--surface-elevated)]"}>
                   {item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" className="h-full w-full rounded-[inherit] object-cover" /> : <div className="grid h-full place-items-center text-xs text-[var(--text-secondary)]">{item.sourcePlatform === "DOUYIN" ? <span className="inline-flex items-center gap-1"><Music2 size={16} />抖音</span> : sourceTypeLabels[item.sourceType] || item.sourceType}</div>}
                 </div>
                 <div className={listView ? "min-w-0 flex-1" : "p-4"}>

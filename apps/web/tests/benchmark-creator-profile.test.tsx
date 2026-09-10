@@ -122,7 +122,7 @@ describe("benchmark creator profile read model", () => {
 
   it("uses employee language and links sources back to the existing material detail", async () => {
     const source = await readFile(new URL("../components/discovery/benchmark-creator-profile.tsx", import.meta.url), "utf8");
-    for (const text of ["画像", "内容", "研究", "代表内容", "观点与精华", "AI 账号画像", "生成账号画像", "更新画像", "他大概是一个什么类型的博主", "他最近主要在拍什么", "他经常怎么选题", "他通常怎么讲、怎么证明", "他反复在讲什么", "我们可以学什么", "哪些不要直接照搬", "比较明确", "目前观察到", "当前研究内容还不足以判断", "视频怎么写", "账号研究", "常见内容模式", "我们已经留下了什么", "查看素材", "查看依据", "查看完整素材"]) expect(source).toContain(text);
+    for (const text of ["概览", "代表内容", "怎么做内容", "我们能学什么", "观点与精华", "AI 账号画像", "生成账号画像", "更新画像", "他大概是一个什么类型的博主", "他最近主要在拍什么", "他经常怎么选题", "他通常怎么讲、怎么证明", "他反复在讲什么", "哪些不要直接照搬", "比较明确", "目前观察到", "当前研究内容还不足以判断", "视频怎么写", "账号研究", "常见内容组合", "我们已经留下了什么", "查看素材", "查看依据", "查看完整素材"]) expect(source).toContain(text);
     expect(source).toContain("href={`/library/${source.id}`}");
     expect(source).toContain('role="dialog"');
     expect(source).toContain('role="tablist"');
@@ -134,7 +134,9 @@ describe("benchmark creator profile read model", () => {
 
   it("keeps the heavy research tools behind the research tab and defaults to the profile", async () => {
     const source = await readFile(new URL("../components/discovery/benchmark-workspace.tsx", import.meta.url), "utf8");
-    expect(source).toContain('useState<BenchmarkView>("PROFILE")');
+    expect(source).toContain('useState<BenchmarkView>("OVERVIEW")');
+    expect(source).toContain('view === "METHOD"');
+    expect(source).toContain('view === "LEARN"');
     expect(source).toContain('view === "CONTENT"');
     expect(source).toContain('view === "RESEARCH"');
     expect(source).toContain("<RepresentativeContent");
@@ -149,6 +151,6 @@ describe("benchmark creator profile read model", () => {
     if (!profile) throw new Error("empty profile missing");
     expect(profile).toMatchObject({ stats: { discovered: 0, collected: 0, studied: 0, distilled: 0, copywriting: 0 }, representativeSources: [], highlights: [], copywriting: [], accountResearch: null, playbooks: [], creatorProfile: null, savedMethods: [] });
     const source = await readFile(new URL("../components/discovery/benchmark-creator-profile.tsx", import.meta.url), "utf8");
-    for (const text of ["还没有收录这个博主的代表内容。", "这些内容还没有完成精华提炼。", "还没有完成账号层研究。", "暂时还没有形成可靠的内容模式判断", "还没有从这个博主的内容中保存方法。"]) expect(source).toContain(text);
+    for (const text of ["还没有收录这个博主的代表内容。", "这些内容还没有完成精华提炼。", "还没有完成账号层研究。", "暂时还没有形成可靠判断", "还没有从这个博主的内容中保存方法。"]) expect(source).toContain(text);
   });
 });

@@ -4,14 +4,13 @@
 
 import { Badge, Button, Card } from "@content-center/ui";
 import type { BenchmarkAnalysisOutput, BenchmarkPlaybookOutput, ExternalContent } from "@content-center/providers";
-import { BenchmarkCreatorContent, BenchmarkCreatorHeader, BenchmarkCreatorProfile, WorkspaceTabs, type BenchmarkView } from "@/components/discovery/benchmark-creator-profile";
+import { BenchmarkCreatorContent, BenchmarkCreatorHeader, BenchmarkCreatorLearn, BenchmarkCreatorMethod, BenchmarkCreatorProfile, WorkspaceTabs, type BenchmarkView } from "@/components/discovery/benchmark-creator-profile";
 import type { BenchmarkCreatorDetailDTO } from "@/server/discovery/benchmark-creator-read-model";
 import type { BenchmarkCandidateDTO, BenchmarkStudyDTO } from "@/server/discovery/benchmark-study-service";
 import { ArrowLeft, ArrowRight, BookmarkPlus, ChevronDown, FlaskConical, Loader2, RefreshCw, Search, Trash2, Video, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { BenchmarkTopicGenerator } from "./benchmark-topic-generator";
 
 type Work = Omit<ExternalContent, "rawProviderMetadata"> & { sourceItemId: string | null; inIdea: boolean };
 
@@ -32,7 +31,7 @@ function list(value: string | string[]) { return typeof value === "string" ? [va
 export function BenchmarkWorkspace({ profile, candidates, studies: initialStudies, canRefresh, canManage }: { profile: BenchmarkCreatorDetailDTO; candidates: BenchmarkCandidateDTO[]; studies: BenchmarkStudyDTO[]; canRefresh: boolean; canManage: boolean }) {
   const benchmark = profile.account;
   const router = useRouter();
-  const [view, setView] = useState<BenchmarkView>("PROFILE");
+  const [view, setView] = useState<BenchmarkView>("OVERVIEW");
   const [sort, setSort] = useState<"LATEST" | "POPULAR">("LATEST");
   const [items, setItems] = useState<Work[] | null>(null);
   const [studies, setStudies] = useState(initialStudies);
@@ -74,17 +73,19 @@ export function BenchmarkWorkspace({ profile, candidates, studies: initialStudie
   const visibleStudies = studies.filter((study) => !(study.kind === "PLAYBOOKS" && study.status === "FAILED"));
   const profileSelectionReady = canRefresh && selected.length >= 5 && selected.length <= 10 && selected.every((id) => candidates.find((candidate) => candidate.id === id)?.playbookReady);
   const profileProcessing = visibleStudies.some((study) => study.kind === "CREATOR_PROFILE" && study.status === "PROCESSING");
-  return <div className="benchmark-page"><div className="benchmark-topline"><Link href="/discovery" className="benchmark-back-link"><ArrowLeft size={16} /> 返回灵感研究</Link>{canManage ? <Button variant="secondary" className="benchmark-disable-button" onClick={() => void remove()}><Trash2 size={14} /> 停用对标</Button> : null}</div>
+  return <div className="benchmark-page"><div className="benchmark-topline"><Link href="/discovery" className="benchmark-back-link"><ArrowLeft size={16} /> 返回灵感研究</Link><div className="flex items-center gap-2"><Button variant="secondary" onClick={() => setView("RESEARCH")}><FlaskConical size={15} />选择代表内容与研究记录</Button>{canManage ? <Button variant="secondary" className="benchmark-disable-button" onClick={() => void remove()}><Trash2 size={14} /> 停用对标</Button> : null}</div></div>
     <div className="benchmark-layout"><main className="min-w-0"><BenchmarkCreatorHeader profile={profile} />
     <WorkspaceTabs value={view} onChange={setView} />
-    {view === "PROFILE" ? <BenchmarkCreatorProfile profile={profile} onShowContent={() => setView("CONTENT")} selectedProfileCount={selected.length} canGenerateProfile={profileSelectionReady} profileBusy={action === "profile" || profileProcessing} onShowResearch={() => setView("RESEARCH")} onGenerateProfile={() => void startStudy("CREATOR_PROFILE")} /> : null}
+    {view === "OVERVIEW" ? <BenchmarkCreatorProfile profile={profile} onShowContent={() => setView("CONTENT")} /> : null}
     {view === "CONTENT" ? <BenchmarkCreatorContent profile={profile} /> : null}
+    {view === "METHOD" ? <BenchmarkCreatorMethod profile={profile} selectedProfileCount={selected.length} canGenerateProfile={profileSelectionReady} profileBusy={action === "profile" || profileProcessing} onShowResearch={() => setView("RESEARCH")} onGenerateProfile={() => void startStudy("CREATOR_PROFILE")} /> : null}
+    {view === "LEARN" ? <BenchmarkCreatorLearn profile={profile} canGenerate={canRefresh && profile.creatorProfile?.schemaVersion === "benchmark-creator-profile-v4"} /> : null}
     {view === "RESEARCH" ? <div data-testid="benchmark-research-view" role="tabpanel" className="benchmark-research-panel benchmark-glass">
       <RepresentativeContent candidates={candidates} selected={selected} canStudy={canRefresh} action={action} onToggle={toggleCandidate} onClear={() => setSelected([])} onStart={(kind) => void startStudy(kind)} />
       <StudyHistory studies={visibleStudies} action={action} onSave={saveMethod} />
       {error ? <p role="alert" className="mt-4 text-sm text-[var(--danger)]">{error}</p> : null}{notice ? <p role="status" className="mt-4 flex flex-wrap items-center gap-3 text-sm text-[var(--success)]">{notice}<Link href="/library/methods" className="font-medium text-[var(--accent)]">查看我的方法</Link></p> : null}
       <AccountWorks sort={sort} setSort={setSort} items={items} busy={busy} canRefresh={canRefresh} action={action} onLoad={() => void load()} onCollect={(item) => void collect(item)} onCreate={(item) => void create(item)} />
-    </div> : null}</main><aside className="benchmark-topic-assistant"><Card className="benchmark-glass border-white/75 p-4"><p className="text-xs font-medium text-[var(--accent)]">研究助手</p><h2 className="mt-2 font-semibold">把对方的稳定特点，变成我们的选题</h2><p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">只借鉴内容方向和表达方法，不会把对方客户、数字或经历写成我们的事实。</p><div className="mt-4"><BenchmarkTopicGenerator sourceType="CREATOR_PROFILE" sourceId={benchmark.id} available={canRefresh && profile.creatorProfile?.schemaVersion === "benchmark-creator-profile-v4"} buttonLabel="看看我们能做什么题" unavailableMessage={canRefresh ? "当前还没有足够的博主研究结果。" : "当前权限只能查看。"} /></div></Card></aside></div>
+    </div> : null}</main></div>
   </div>;
 }
 

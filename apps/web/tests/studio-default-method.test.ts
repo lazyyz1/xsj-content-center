@@ -178,7 +178,7 @@ describe("published workspace default method in Studio", () => {
 
   it("shows compact employee actions and keeps the full method in the existing drawer", async () => {
     const component = await readFile(new URL("../components/projects/studio-default-method.tsx", import.meta.url), "utf8");
-    for (const label of ["鑫世界默认创作方法", "已自动应用", "查看完整方法", "现在最适合做", "根据当前内容状态推荐", "更多基础动作", "想选题", "改开头", "重写正文", "补案例", "加强证据", "改得更像人话", "精简一点", "换个表达", "检查事实风险", "按鑫世界方法优化", "应用前预览", "示例场景", "待补证据"]) expect(component).toContain(label);
+    for (const label of ["默认方法 V", "查看方法", "现在最适合做", "根据当前内容状态推荐", "更多动作", "想选题", "改开头", "重写正文", "补案例", "加强证据", "改得更像人话", "精简一点", "换个表达", "补依据", "检查事实风险", "按鑫世界方法优化", "应用前预览", "示例场景", "待补证据"]) expect(component).toContain(label);
     for (const forbidden of ["MethodVersion", "Provider", "Schema", "模型选择", "21 条 guideline"]) expect(component).not.toContain(forbidden);
   });
 });

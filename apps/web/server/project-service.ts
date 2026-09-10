@@ -73,7 +73,7 @@ export async function listProjects(workspaceId: string, query: ProjectListQuery)
         createdBy: { select: { name: true } },
         _count: { select: { sources: true, evidenceItems: true } },
         sources: { select: { sourceItem: { select: { materialAnalyses: { where: { status: "COMPLETED" }, take: 1, select: { id: true } } } } } },
-        creativeBrief: { select: { coreMessage: true } },
+        creativeBrief: { select: { coreMessage: true, metadata: true } },
         motherContent: { select: { body: true, version: true, confirmedVersion: true } },
         platformVariants: { select: { status: true } },
       },
