@@ -16,35 +16,54 @@
 - 不得顺手重构无关代码。
 - 不得为了“完整”一次新增几十个未验证模块。
 
-## 二、每阶段工作流程固定
+## 二、按风险分层验证
 
-每个阶段都必须严格执行：
+每个阶段必须先检查当前代码、阅读相关实现、确认边界，只修改当前阶段涉及的文件。验证强度按变更风险分层，不要求每个小改动机械运行全量测试。
 
-1. 先检查当前代码。
-2. 阅读与当前阶段有关的现有实现。
-3. 输出本阶段计划。
-4. 只修改本阶段涉及的代码。
-5. 执行 lint。
-6. 执行 typecheck。
-7. 执行 unit test。
-8. 执行 build。
-9. 有 E2E 时执行 E2E。
-10. 修完所有由本阶段引入的问题。
-11. 最后给出阶段报告。
+### 小视觉任务
 
-阶段报告必须包含：
+- 打开目标页面并检查相关状态。
+- 对涉及文件运行 relevant lint。
+- 运行目标 workspace typecheck。
+- 运行 `git diff --check` 并审阅实际 diff。
+
+### 普通功能改动
+
+- 运行与改动直接相关的 focused tests。
+- 运行目标 workspace typecheck。
+- 运行目标 workspace lint。
+
+### 阶段集成
+
+- 运行该阶段覆盖的 focused Vitest。
+- 运行 build。
+- 完成相关路由、状态和交互的 browser checks。
+
+### Final QA
+
+- full Vitest。
+- full typecheck。
+- lint。
+- build。
+- critical E2E。
+- 1440 / 1680 / 1920 Desktop visual QA。
+- 完整业务主链验收。
+
+只有当前阶段要求的验证全部通过，且没有把未验证结果写成完成，才允许宣布该阶段完成。
+
+阶段报告按实际变更包含：
 
 - 完成了什么
 - 修改了哪些文件
-- 新增了哪些数据库表
-- 新增了哪些 API
-- 新增了哪些页面
+- 新增了哪些数据库表（如适用）
+- 新增了哪些 API（如适用）
+- 新增了哪些页面（如适用）
 - 测试结果
 - 当前未完成事项
 - 下一阶段建议
 - 是否存在技术债
 
-没有通过测试，不允许宣布完成。
+未运行的测试必须明确写为“未运行”，不能用历史结果代替当前验证。
 
 ## 三、禁止假实现
 
@@ -176,22 +195,17 @@ API Key、Cookie、Token：
 - 显式 > 魔法行为
 - 小模块 > 巨型 Service
 
-## 十、当前动作
+## 十、当前 V1 Workbench 施工规则
 
-- 现在不要开发功能。
-- 先阅读当前 repository。
-- 如果这是空项目，则只输出当前目录情况。
-- 如果已经有代码，则审计：
-  - 技术栈
-  - 目录结构
-  - 数据库
-  - Auth
-  - 页面
-  - API
-  - Worker
-  - Storage
-  - 测试
-  - 部署方式
-- 创建 `docs/CODEX_RULES.md`，将以上规则写入该文件。
-- 完成后停止。
-- 不要执行下一阶段。
+- 当前产品目标、最终实施计划和 Pixel Visual Spec 决定 Workbench 的产品结构与视觉；历史文档和旧设计只作追溯。
+- `/dashboard` 是唯一 canonical Workbench。普通员工一级导航只有：开始创作、项目、研究、资产。
+- 不得为了前端重构重做已有后端、数据库、Provider 或 Adapter；只新增当前阶段明确缺失的能力。
+- 不得把 Model、Provider、Skill、Workflow、Node、AIRun、ApiUsage 等工程术语暴露给普通员工。
+- 不得恢复旧 Dashboard、旧 Studio 三栏、假方法、假候选、假 Skill 装配或页面级多个 AI 助手。
+- 普通员工只允许一个统一、上下文感知的 AI 协作层：当前 Workbench 的“鑫小助”。
+
+当前 V1 Workbench 施工的 Skill 边界：
+
+- `design-taste-frontend` 不得主导 Workbench。
+- `ui-ux-pro-max`、`finesse-ui`、`animate`、`ponytail` 只能作为质量门。
+- Skill 不得覆盖 Owner 产品目标、最终实施计划或 Pixel Visual Spec，不得据此新增功能、页面、依赖或视觉 token。

@@ -1,6 +1,6 @@
-# Studio 产品收敛
+# Studio 产品收敛（ARCHIVED / SUPERSEDED）
 
-> 已被 [Product Simplification V1](./product-simplification-v1.md) 取代。本文记录旧版 Studio 收敛方案，仅供历史追踪；默认产品路径不再展示创作依据、统一分析、独立创作方案确认、Deep Content 或右侧 AI 助手。
+> **ARCHIVED / SUPERSEDED：本文不得作为当前 V1 实施规范。** 已被 [Product Simplification V1](./product-simplification-v1.md) 及统一 Workbench 最终实施计划取代。本文仅供历史追踪；不要据此恢复旧 Studio、旧三栏、旧术语或页面级 AI 助手。
 
 ## 核心产品概念
 

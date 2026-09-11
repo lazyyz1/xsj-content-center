@@ -1,6 +1,6 @@
-# AI-first 核心母稿
+# AI-first 核心母稿（ARCHIVED / SUPERSEDED）
 
-> 默认产品路径已被 [Product Simplification V1](./product-simplification-v1.md) 取代。用户界面现称“我的口播稿”，生成上下文不再依赖 Unified Creative Analysis、完整 Transcript 或 Deep Content Package。
+> **ARCHIVED / SUPERSEDED：本文不得作为当前 V1 实施规范。** 默认产品路径已被 [Product Simplification V1](./product-simplification-v1.md) 及统一 Workbench 最终实施计划取代。用户界面现称“我的口播稿”；本文正文只保留为历史设计说明。
 
 ## 产品原则
 

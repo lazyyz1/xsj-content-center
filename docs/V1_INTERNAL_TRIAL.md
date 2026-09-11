@@ -1,4 +1,6 @@
-# V1 内部试用说明
+# V1 内部试用说明（ARCHIVED / SUPERSEDED）
+
+> **ARCHIVED / SUPERSEDED：这是旧内部试用记录，不得作为当前 V1 统一 Workbench 的实施规范或验收依据。** 当前产品方向以最新 Owner 目标、最终实施计划、Pixel Visual Spec 和 `V1_PRODUCT_ACCEPTANCE.md` 为准。以下正文仅供历史追溯。
 
 当前版本：`V1 Internal Trial`
 
