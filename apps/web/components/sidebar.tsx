@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpenCheck, ChevronDown, Files, FolderKanban, Home, Lightbulb, Menu, Send, Settings, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { ChevronDown, Files, FolderKanban, Home, Lightbulb, Menu, Settings, ShieldCheck, Sparkles, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
@@ -10,16 +10,13 @@ import { GlobalSearch } from "./global-search";
 const links = [
   { label: "开始创作", href: "/dashboard", icon: Home },
   { label: "项目", href: "/projects", icon: FolderKanban },
-  { label: "灵感研究", href: "/discovery", icon: Lightbulb },
-  { label: "资料", href: "/library", icon: Files },
-  { label: "方法", href: "/projects/methods", icon: BookOpenCheck },
-  { label: "发布", href: "/calendar", icon: Send },
+  { label: "研究", href: "/discovery", icon: Lightbulb },
+  { label: "资产", href: "/library", icon: Files },
 ] as const;
 
 function isActive(pathname: string, href: string) {
   if (href === "/dashboard") return pathname === href;
   if (href === "/projects") return pathname === href || (pathname.startsWith("/projects/") && !pathname.startsWith("/projects/methods"));
-  if (href === "/projects/methods") return pathname.startsWith("/projects/methods") || pathname.startsWith("/library/methods");
   return pathname.startsWith(href);
 }
 
