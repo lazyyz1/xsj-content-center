@@ -38,7 +38,7 @@ function Navigation({ pathname, mobile = false }: { pathname: string; mobile?: b
   </nav>;
 }
 
-export function Sidebar({ workspaceName, userName, isSystemAdmin = false }: { workspaceName: string; userName: string; isSystemAdmin?: boolean }) {
+export function Sidebar({ workspaceName, userName, isSystemAdmin = false, recentProjects = [] }: { workspaceName: string; userName: string; isSystemAdmin?: boolean; recentProjects?: Array<{ id: string; title: string; updatedAt: string }> }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   return <>
@@ -47,6 +47,7 @@ export function Sidebar({ workspaceName, userName, isSystemAdmin = false }: { wo
       <div className="flex h-full flex-col p-4">
         <Brand />
         <div className="mt-7"><Navigation pathname={pathname} /></div>
+        {recentProjects.length ? <section className="sidebar-recent"><header><span>最近工作</span><Link href="/projects">更多</Link></header>{recentProjects.map((project) => <Link key={project.id} href={`/dashboard?project=${project.id}`} title={project.title}><span>{project.title.slice(0, 1)}</span><div><strong>{project.title}</strong><small>{new Date(project.updatedAt).toLocaleDateString("zh-CN")}</small></div></Link>)}</section> : null}
         <div className="mt-auto rounded-2xl border border-white/75 bg-white/55 p-2 shadow-[var(--shadow-xs)]">
           <details className="group">
             <summary className="flex min-h-12 list-none items-center gap-3 rounded-xl px-2 hover:bg-white/75">

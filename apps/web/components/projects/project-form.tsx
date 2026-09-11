@@ -26,7 +26,7 @@ export function ProjectForm({ sourceItemId, initialIdea }: { sourceItemId?: stri
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.message || result.error || "无法创建项目");
-      router.push(`/projects/${result.id}/studio`);
+      router.push(`/dashboard?project=${result.id}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "无法创建项目");
     } finally {

@@ -34,7 +34,7 @@ export function BenchmarkTopicGenerator({ sourceType, sourceId, available, butto
   async function select(index: number) {
     if (!result) return;
     setSelecting(index); setError("");
-    try { const selected = await post(`/api/benchmark-topics/${result.runId}/select`, { topicIndex: index }); router.push(selected.studioPath || `/projects/${selected.projectId}/studio`); }
+    try { const selected = await post(`/api/benchmark-topics/${result.runId}/select`, { topicIndex: index }); router.push(`/dashboard?project=${selected.projectId}`); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "暂时无法进入创作。"); setSelecting(null); }
   }
 

@@ -65,7 +65,7 @@ export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt
 
   async function createContent() {
     setBusy(true); setError("");
-    try { const result = await request(`/api/source-items/${sourceId}/material-analysis/project`, "POST") as { projectId: string }; router.push(`/projects/${result.projectId}/studio`); }
+    try { const result = await request(`/api/source-items/${sourceId}/material-analysis/project`, "POST") as { projectId: string }; router.push(`/dashboard?project=${result.projectId}`); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "无法进入创作页面。"); setBusy(false); }
   }
 

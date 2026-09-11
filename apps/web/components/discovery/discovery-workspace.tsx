@@ -137,7 +137,7 @@ export function DiscoveryWorkspace({ configured, canWrite, canManageBenchmarks, 
     const key = `${item.platform}:${item.externalId}`; setBusyAction(`${key}:project`); setError("");
     try {
       const body = await jsonRequest("/api/discovery/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: externalContentPayload(item) }) });
-      router.push(`/projects/${body.projectId}/studio`);
+      router.push(`/dashboard?project=${body.projectId}`);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "创建项目失败。"); setBusyAction(null); }
   }
 
