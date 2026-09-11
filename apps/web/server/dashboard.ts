@@ -11,9 +11,6 @@ export async function getDashboardCounts(workspaceId: string) {
 }
 
 export async function getDashboardWork(workspaceId: string) {
-  const [projects, recommendations] = await Promise.all([
-    db.contentProject.findMany({ where: { workspaceId, status: { notIn: ["ARCHIVED", "APPROVED"] } }, orderBy: { updatedAt: "desc" }, take: 4, select: { id: true, title: true, status: true, updatedAt: true, _count: { select: { sources: true } } } }),
-    db.recommendationItem.findMany({ where: { workspaceId, status: { in: ["NEW", "SAVED"] } }, orderBy: [{ batch: { generatedAt: "desc" } }, { position: "asc" }], take: 5, select: { id: true, title: true, coreQuestion: true, contentIdeaId: true, projectId: true } }),
-  ]);
-  return { projects, recommendations };
+  const projects = await db.contentProject.findMany({ where: { workspaceId, status: { notIn: ["ARCHIVED", "APPROVED"] } }, orderBy: { updatedAt: "desc" }, take: 3, select: { id: true, title: true, updatedAt: true } });
+  return { projects };
 }
