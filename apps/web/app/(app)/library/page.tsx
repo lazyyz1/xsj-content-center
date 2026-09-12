@@ -1,122 +1,209 @@
-import { Badge, Card } from "@content-center/ui";
-import { LayoutGrid, List, Music2, Search } from "lucide-react";
+/* finesse · register=product · shell=purpose-led-content-asset-library · palette=continued-cobalt-cool-slate · density=5 */
+import type { LucideIcon } from "lucide-react";
+import { AudioLines, FileText, ImageIcon, Link2, Mic2, Search, Video } from "lucide-react";
 import Link from "next/link";
 import { IngestDialog } from "@/components/library/ingest-dialog";
+import { LibraryCardAction, LibraryCardMenu } from "@/components/library/library-card-controls";
 import { LibraryPoller } from "@/components/library/library-poller";
-import { RetryIngestButton } from "@/components/library/retry-ingest-button";
-import { LibrarySubnav } from "@/components/library/library-subnav";
+import { sourcePlatformLabels } from "@/lib/content-labels";
+import { sourceDisplayName } from "@/lib/content-production";
 import { getSourceProcessingState } from "@/lib/source-processing-state";
-import { sourcePlatformLabels, sourceStatusLabels, sourceTypeLabels } from "@/lib/content-labels";
 import { requireWorkspace } from "@/server/access";
 import { listLibrarySources, type LibraryQuery } from "@/server/library";
-import { db } from "@content-center/db";
-import { sourceDisplayName } from "@/lib/content-production";
 
-function queryHref(query: LibraryQuery, updates: Record<string, string>) {
+type Source = Awaited<ReturnType<typeof listLibrarySources>>["items"][number];
+type LibraryView = "ALL" | "RECENT" | "CREATION" | "RESEARCH";
+
+const typeLabels: Record<string, string> = {
+  VIDEO: "视频",
+  DOCUMENT: "文档",
+  URL: "链接",
+  TEXT: "文字资料",
+  AUDIO: "音频",
+  IMAGE: "图片",
+};
+const typeIcons: Record<string, LucideIcon> = {
+  VIDEO: Video,
+  DOCUMENT: FileText,
+  URL: Link2,
+  TEXT: Mic2,
+  AUDIO: AudioLines,
+  IMAGE: ImageIcon,
+};
+
+function queryHref(query: LibraryQuery & { view?: string }, updates: Record<string, string>) {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries({ ...query, ...updates })) if (value) params.set(key, value);
   return `/library?${params.toString()}`;
 }
 
-export default async function LibraryPage({ searchParams }: { searchParams: Promise<LibraryQuery & { view?: string }> }) {
-  const { workspace } = await requireWorkspace();
-  const query = await searchParams;
-  const [{ items, total, page, pages }, tags, collections] = await Promise.all([
-    listLibrarySources(workspace.id, query),
-    db.contentTag.findMany({ where: { workspaceId: workspace.id }, orderBy: { name: "asc" } }),
-    db.collection.findMany({ where: { workspaceId: workspace.id }, orderBy: { name: "asc" } }),
-  ]);
-  const listView = query.view !== "card";
-  const hasProcessing = items.some((item) => {
-    const latestJob = item.ingestJobs[0];
-    return item.status === "PENDING" || item.status === "PROCESSING" || latestJob?.status === "QUEUED" || latestJob?.status === "RUNNING";
-  });
+function visualVariant(item: Source) {
+  let hash = 0;
+  for (const character of `${item.id}:${item.title ?? ""}`) hash = (hash * 31 + character.charCodeAt(0)) | 0;
+  return Math.abs(hash) % 4;
+}
 
-  return (
-    <>
-      <LibraryPoller active={hasProcessing} />
-      <LibrarySubnav current="sources" />
-      <header className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
-        <div>
-          <h1 className="page-heading">资料中心</h1>
-          <p className="page-description">集中管理 AI 可以理解并用于创作的视频、文档、链接和真实依据。</p>
-        </div>
-        <IngestDialog />
+function processingState(item: Source) {
+  return getSourceProcessingState({ sourceStatus: item.status, hasTranscript: Boolean(item.transcript), assets: item.assets, jobs: item.ingestJobs });
+}
+
+function hasResearch(item: Source) {
+  return Boolean(item.materialAnalyses[0]);
+}
+
+function employeeStatus(item: Source) {
+  const processing = processingState(item);
+  if (hasResearch(item)) return "已整理重点";
+  if (item.status === "ARCHIVED") return "已归档";
+  if (item.status === "FAILED") return "需要处理";
+  if (processing.busy) return item.sourceType === "VIDEO" ? processing.libraryLabel : "正在整理";
+  if (item.transcript) return "已有文字稿";
+  return "待继续研究";
+}
+
+function employeeType(item: Source) {
+  return typeLabels[item.sourceType] || "资料";
+}
+
+function employeePlatform(item: Source) {
+  return item.sourcePlatform === "GENERIC" ? "手动添加" : sourcePlatformLabels[item.sourcePlatform] || "其他来源";
+}
+
+function sourceTitle(item: Source) {
+  return sourceDisplayName({
+    title: item.title,
+    suggestedTitle: item.materialAnalyses[0]?.suggestedTitle,
+    summary: item.materialAnalyses[0]?.summary,
+    platformLabel: employeePlatform(item),
+    createdAt: item.createdAt,
+  });
+}
+
+function sourceSummary(item: Source) {
+  if (item.materialAnalyses[0]?.summary) return item.materialAnalyses[0].summary;
+  if (item.author) return `来自 ${item.author} 的${employeeType(item)}。`;
+  return "尚未整理摘要，进入详情查看原始内容。";
+}
+
+function joinedAt(date: Date) {
+  return `加入于：${date.toLocaleDateString("zh-CN", { year: "numeric", month: "numeric", day: "numeric" })}`;
+}
+
+function primaryMode(item: Source, canManage: boolean): "CREATE" | "RESEARCH" | "DETAIL" | "PROGRESS" {
+  if (hasResearch(item)) return canManage ? "CREATE" : "DETAIL";
+  if (item.status === "FAILED" || item.status === "ARCHIVED") return "DETAIL";
+  if (processingState(item).busy) return "PROGRESS";
+  return "RESEARCH";
+}
+
+function LibraryCard({ item, canManage }: { item: Source; canManage: boolean }) {
+  const Icon = typeIcons[item.sourceType] || FileText;
+  const title = sourceTitle(item);
+  const href = `/library/${item.id}`;
+  return <article className={`project-library-card library-asset-card is-${item.sourceType.toLowerCase()}`}>
+    <div className="project-card-cover-wrap">
+      <div className={`library-asset-cover visual-${visualVariant(item)} ${item.thumbnailUrl ? "has-thumbnail" : ""}`}>
+        {item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" /> : null}
+        <span aria-hidden="true"><Icon size={23} /></span>
+        <i aria-hidden="true" />
+        <strong>{employeeStatus(item)}</strong>
+      </div>
+      {canManage ? <LibraryCardMenu sourceId={item.id} title={title} archived={item.status === "ARCHIVED"} /> : null}
+    </div>
+    <div className="project-library-card-body">
+      <h3><Link href={href}>{title}</Link></h3>
+      <p>{sourceSummary(item)}</p>
+      <div className="library-asset-meta"><span>{employeeType(item)} · {employeePlatform(item)}</span>{item.author ? <span>{item.author}</span> : null}</div>
+      <footer>
+        <time dateTime={item.createdAt.toISOString()}>{joinedAt(item.createdAt)}</time>
+        <LibraryCardAction sourceId={item.id} href={href} mode={primaryMode(item, canManage)} />
+      </footer>
+    </div>
+  </article>;
+}
+
+function CreationCard({ item }: { item: Source }) {
+  const Icon = typeIcons[item.sourceType] || FileText;
+  const title = sourceTitle(item);
+  return <article className="library-creation-card">
+    <span aria-hidden="true"><Icon size={18} /></span>
+    <div><h3>{title}</h3><p>{employeeType(item)} · {employeePlatform(item)}</p></div>
+    <LibraryCardAction sourceId={item.id} href={`/library/${item.id}`} mode="CREATE" />
+  </article>;
+}
+
+function LibraryEmpty({ view, search, canManage, query }: { view: LibraryView; search: string; canManage: boolean; query: LibraryQuery & { view?: string } }) {
+  const title = search ? "没有找到相关资料"
+    : view === "CREATION" ? "暂时没有可以直接用于创作的资料"
+      : view === "RESEARCH" ? "暂时没有待继续研究的资料"
+        : view === "RECENT" ? "暂时没有最近加入的资料"
+          : "还没有资料";
+  return <section className="project-library-empty library-empty">
+    <span><FileText size={24} /></span>
+    <h2>{title}</h2>
+    <p>{search ? "可以换一个关键词，或清除搜索后查看全部资料。" : "从一个视频、文档或链接开始积累你的创作资产。"}</p>
+    <div>{search ? <Link className="library-empty-link" href={queryHref(query, { search: "", page: "1" })}>清除搜索</Link> : canManage ? <IngestDialog /> : null}</div>
+  </section>;
+}
+
+export default async function LibraryPage({ searchParams }: { searchParams: Promise<LibraryQuery & { view?: string }> }) {
+  const { workspace, role } = await requireWorkspace();
+  const query = await searchParams;
+  const view = typeof query.view === "string" && ["ALL", "RECENT", "CREATION", "RESEARCH"].includes(query.view) ? query.view as LibraryView : "RECENT";
+  const result = await listLibrarySources(workspace.id, { ...query, pageSize: "50" });
+  const items = query.status === "ARCHIVED" ? result.items : result.items.filter((item) => item.status !== "ARCHIVED");
+  const newest = [...items].sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
+  const recentIds = new Set(newest.slice(0, 4).map(({ id }) => id));
+  const creationItems = items.filter(hasResearch);
+  const researchItems = items.filter((item) => !hasResearch(item) && item.status !== "ARCHIVED");
+  const visibleItems = view === "ALL" ? items
+    : view === "RECENT" ? items.filter(({ id }) => recentIds.has(id))
+      : view === "CREATION" ? creationItems
+        : researchItems;
+  const hasProcessing = items.some((item) => processingState(item).busy);
+  const canManage = role !== "VIEWER";
+  const sectionTitle = view === "ALL" ? "全部资料" : view === "RECENT" ? "最近加入" : view === "CREATION" ? "可用于创作" : "待继续研究";
+
+  return <>
+    <LibraryPoller active={hasProcessing} />
+    <div className="project-library-page library-page">
+      <header className="project-library-header">
+        <div><h1>资料</h1><p>把视频、文档、链接和案例整理成可调用的内容资产</p></div>
+        <div className="library-header-actions"><Link href="/library/methods">已保存的方法</Link>{canManage ? <IngestDialog /> : null}</div>
       </header>
 
-      <Card className="mb-5 border-white/75 bg-white/68 p-4">
-        <form className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" method="get">
-          <label className="flex h-10 items-center gap-2 rounded-[var(--radius)] border bg-[var(--surface)] px-3 sm:col-span-2">
-            <Search size={16} className="text-[var(--text-secondary)]" />
-            <input name="search" defaultValue={query.search} aria-label="搜索素材" placeholder="搜索标题、作者或正文" className="min-w-0 flex-1 border-0 bg-transparent text-sm outline-none" />
-          </label>
-          <select name="sourcePlatform" defaultValue={query.sourcePlatform ?? ""} aria-label="平台筛选" className="h-10 rounded-[var(--radius)] border bg-[var(--surface)] px-3 text-sm">
-            <option value="">全部平台</option>{Object.entries(sourcePlatformLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      <div className="project-library-commandbar library-commandbar">
+        <nav aria-label="资料用途">{([ ["ALL", "全部"], ["RECENT", "最近加入"], ["CREATION", "可用于创作"], ["RESEARCH", "待继续研究"] ] as const).map(([value, label]) => <Link key={value} href={queryHref(query, { view: value, page: "1" })} aria-current={view === value ? "page" : undefined}>{label}</Link>)}</nav>
+        <form method="get">
+          <input type="hidden" name="view" value={view} />
+          {query.sourcePlatform ? <input type="hidden" name="sourcePlatform" value={query.sourcePlatform} /> : null}
+          {query.sourceType ? <input type="hidden" name="sourceType" value={query.sourceType} /> : null}
+          {query.status ? <input type="hidden" name="status" value={query.status} /> : null}
+          {query.tag ? <input type="hidden" name="tag" value={query.tag} /> : null}
+          {query.collection ? <input type="hidden" name="collection" value={query.collection} /> : null}
+          <label><Search size={16} /><input name="search" defaultValue={query.search} aria-label="搜索资料" placeholder="搜索资料" /></label>
+          <select name="sort" defaultValue={query.sort || "newest"} aria-label="资料排序">
+            <option value="newest">最近加入</option>
+            <option value="oldest">最早加入</option>
+            <option value="title">名称排序</option>
           </select>
-          <select name="sourceType" defaultValue={query.sourceType ?? ""} aria-label="类型筛选" className="h-10 rounded-[var(--radius)] border bg-[var(--surface)] px-3 text-sm">
-            <option value="">全部类型</option><option value="TEXT">文本</option><option value="URL">网页</option><option value="VIDEO">视频</option><option value="AUDIO">音频</option><option value="IMAGE">图片</option><option value="DOCUMENT">文档</option>
-          </select>
-          <select name="status" defaultValue={query.status ?? ""} aria-label="状态筛选" className="h-10 rounded-[var(--radius)] border bg-[var(--surface)] px-3 text-sm">
-            <option value="">全部状态</option><option value="PENDING">待处理</option><option value="PROCESSING">处理中</option><option value="READY">已完成</option><option value="FAILED">失败</option><option value="ARCHIVED">已归档</option>
-          </select>
-          <select name="tag" defaultValue={query.tag ?? ""} aria-label="标签筛选" className="h-10 rounded-[var(--radius)] border bg-[var(--surface)] px-3 text-sm">
-            <option value="">全部标签</option>{tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
-          </select>
-          <select name="collection" defaultValue={query.collection ?? ""} aria-label="素材集筛选" className="h-10 rounded-[var(--radius)] border bg-[var(--surface)] px-3 text-sm">
-            <option value="">全部素材集</option>{collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}
-          </select>
-          <div className="flex gap-2">
-            <select name="sort" defaultValue={query.sort ?? "newest"} aria-label="排序" className="h-10 rounded-[var(--radius)] border bg-[var(--surface)] px-3 text-sm">
-              <option value="newest">最新</option><option value="oldest">最早</option><option value="title">标题</option>
-            </select>
-            <button className="h-10 rounded-[var(--radius)] bg-[var(--text-primary)] px-4 text-sm text-white">筛选</button>
-          </div>
+          <button type="submit">应用</button>
         </form>
-        <div className="mt-3 flex items-center justify-between border-t pt-3 text-xs text-[var(--text-secondary)]">
-          <span>共 {total} 条素材</span>
-          <div className="flex gap-1">
-            <Link aria-label="卡片视图" href={queryHref(query, { view: "card" })} className="rounded-md p-2 hover:bg-[var(--surface-elevated)]"><LayoutGrid size={16} /></Link>
-            <Link aria-label="列表视图" href={queryHref(query, { view: "list" })} className="rounded-md p-2 hover:bg-[var(--surface-elevated)]"><List size={16} /></Link>
-          </div>
-        </div>
-      </Card>
+      </div>
 
-      {items.length === 0 ? (
-        <Card className="grid min-h-64 place-items-center p-8 text-center"><div><h2 className="font-semibold">还没有可用素材</h2><p className="mt-2 text-sm text-[var(--text-secondary)]">使用右上角“收录内容”添加第一条素材，或调整当前筛选条件。</p></div></Card>
-      ) : (
-        <section aria-label="素材列表" className={listView ? "library-list" : "grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"}>
-          {items.map((item) => {
-            const latestJob = item.ingestJobs[0];
-            const processing = getSourceProcessingState({
-              sourceStatus: item.status,
-              hasTranscript: Boolean(item.transcript),
-              assets: item.assets,
-              jobs: item.ingestJobs,
-            });
-            const displayName = sourceDisplayName({ title: item.title, suggestedTitle: item.materialAnalyses[0]?.suggestedTitle, summary: item.materialAnalyses[0]?.summary, platformLabel: sourcePlatformLabels[item.sourcePlatform] || item.sourcePlatform, createdAt: item.createdAt });
-            return (
-              <Card key={item.id} className={listView ? "library-list-row" : "overflow-hidden"}>
-                <div className={listView ? "library-list-cover" : "h-32 bg-[var(--surface-elevated)]"}>
-                  {item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" className="h-full w-full rounded-[inherit] object-cover" /> : <div className="grid h-full place-items-center text-xs text-[var(--text-secondary)]">{item.sourcePlatform === "DOUYIN" ? <span className="inline-flex items-center gap-1"><Music2 size={16} />抖音</span> : sourceTypeLabels[item.sourceType] || item.sourceType}</div>}
-                </div>
-                <div className={listView ? "min-w-0 flex-1" : "p-4"}>
-                  <div className="mb-2 flex flex-wrap gap-1.5"><Badge>{sourcePlatformLabels[item.sourcePlatform] || item.sourcePlatform}</Badge><Badge>{sourceTypeLabels[item.sourceType] || item.sourceType}</Badge><Badge>{item.sourceType === "VIDEO" ? processing.libraryLabel : sourceStatusLabels[item.status] || item.status}</Badge></div>
-                  <Link href={`/library/${item.id}`} className="line-clamp-2 font-semibold hover:text-[var(--accent)]">{displayName}</Link>
-                  <p className="mt-2 truncate text-xs text-[var(--text-secondary)]">{item.author || "未知作者"} · {item.createdAt.toLocaleString("zh-CN")}</p>
-                  <div className="mt-3 flex flex-wrap gap-1">{item.tags.map(({ tag }) => <span key={tag.id} className="rounded-full bg-[var(--surface-elevated)] px-2 py-1 text-xs">#{tag.name}</span>)}</div>
-                  {item.status === "FAILED" && latestJob ? <div className="mt-3 rounded-lg bg-red-50 p-3 text-xs text-[var(--danger)]"><p>{latestJob.errorMessage || "采集失败"}</p><RetryIngestButton jobId={latestJob.id} /></div> : null}
-                </div>
-              </Card>
-            );
-          })}
-        </section>
-      )}
+      <div className="project-library-content">
+        {visibleItems.length ? <section className="project-library-section" aria-labelledby="library-section-title">
+          <header><h2 id="library-section-title">{sectionTitle}</h2><span>{visibleItems.length} 条资料</span></header>
+          <div className="project-library-grid library-asset-grid">{visibleItems.map((item) => <LibraryCard key={item.id} item={item} canManage={canManage} />)}</div>
+        </section> : <LibraryEmpty view={view} search={query.search?.trim() || ""} canManage={canManage} query={query} />}
 
-      <nav aria-label="分页" className="mt-6 flex items-center justify-between text-sm">
-        <Link aria-disabled={page <= 1} className={page <= 1 ? "pointer-events-none opacity-40" : "text-[var(--accent)]"} href={queryHref(query, { page: String(page - 1) })}>上一页</Link>
-        <span className="text-[var(--text-secondary)]">第 {page} / {pages} 页</span>
-        <Link aria-disabled={page >= pages} className={page >= pages ? "pointer-events-none opacity-40" : "text-[var(--accent)]"} href={queryHref(query, { page: String(page + 1) })}>下一页</Link>
-      </nav>
-    </>
-  );
+        {(view === "ALL" || view === "RECENT") && canManage && creationItems.length ? <section className="project-library-section library-creation-section" aria-labelledby="library-creation-title">
+          <header><h2 id="library-creation-title">可直接用于创作</h2><span>{creationItems.length} 条资料</span></header>
+          <div className="library-creation-grid">{creationItems.slice(0, 4).map((item) => <CreationCard key={item.id} item={item} />)}</div>
+        </section> : null}
+      </div>
+
+      {result.pages > 1 ? <nav aria-label="分页" className="project-library-pagination"><Link aria-disabled={result.page <= 1} className={result.page <= 1 ? "is-disabled" : ""} href={queryHref(query, { page: String(result.page - 1) })}>上一页</Link><span>第 {result.page} / {result.pages} 页</span><Link aria-disabled={result.page >= result.pages} className={result.page >= result.pages ? "is-disabled" : ""} href={queryHref(query, { page: String(result.page + 1) })}>下一页</Link></nav> : null}
+    </div>
+  </>;
 }

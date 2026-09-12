@@ -107,10 +107,10 @@ describe("workspace default content method foundation", () => {
     await expect(updateMethodStatus({ workspaceId, ownerUserId: ownerId, methodId: (await getDefaultContentMethod({ workspaceId })).assetId!, status: "DISABLED" })).rejects.toMatchObject({ code: "METHOD_INVALID" });
   });
 
-  it("uses employee language and hides engineering codes in the existing creator-method page", async () => {
+  it("uses the current method-center language and hides engineering codes", async () => {
     const component = await readFile(new URL("../components/projects/default-content-method.tsx", import.meta.url), "utf8");
     const page = await readFile(new URL("../app/(app)/projects/methods/page.tsx", import.meta.url), "utf8");
-    for (const text of ["鑫世界默认创作方法", "当前版本", "我们主要给谁做内容", "什么样的选题优先做", "开头怎么进入", "正文怎么讲", "案例和数据怎么用", "怎么收尾", "哪些事情不要做", "查看依据", "历史版本", "生成 V1 候选稿", "创建新版本", "确认并发布", "重新生成候选稿"]) expect(`${component}${page}`).toContain(text);
+    for (const text of ["鑫世界默认创作方式", "当前使用", "我们主要给谁做内容", "什么样的选题优先做", "开头怎么进入", "正文怎么讲", "案例和数据怎么用", "怎么收尾", "哪些事情不要做", "查看依据", "历史记录", "开始设置", "开始调整", "设为当前使用", "重新整理"]) expect(`${component}${page}`).toContain(text);
     expect(component).toContain("previous.find((item) => item.text === text)?.sourceRefs ?? []");
     for (const text of [">MethodVersion<", ">SourceRef<", ">EvidenceRef<", ">Schema<", ">Provider<", ">Signal<", ">Claim<", ">WorkspaceId<"]) expect(component).not.toContain(text);
   });

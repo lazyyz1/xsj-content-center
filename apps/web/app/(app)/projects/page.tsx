@@ -1,33 +1,19 @@
-/* finesse · register=product · shell=continue-first-project-workbench · palette=continued-cool-slate-cobalt · density=7 */
-import { Badge, Button, Card } from "@content-center/ui";
-import { ArrowRight, Clock3, FileText, Plus, Search, SlidersHorizontal } from "lucide-react";
+/* finesse · register=product · shell=cover-led-creative-project-library · palette=continued-cobalt-cool-slate · density=5 */
+import { Button } from "@content-center/ui";
+import { ArrowRight, FileText, FolderOpen, Plus, Search } from "lucide-react";
 import Link from "next/link";
+import { ProjectCardMenu } from "@/components/projects/project-card-menu";
 import { requireWorkspace } from "@/server/access";
 import { listProjects, type ProjectListQuery } from "@/server/project-service";
-import { ProjectArchiveButton } from "@/components/projects/project-archive-button";
 
 type ListedProject = Awaited<ReturnType<typeof listProjects>>["items"][number];
+type EmployeeState = { key: "ACTIVE" | "UNSTARTED" | "DONE"; label: "进行中" | "未开始" | "已结束" };
+type ProjectView = "ALL" | EmployeeState["key"];
 
-function employeeState(item: ListedProject) {
-  if (item.status === "APPROVED" || item.status === "ARCHIVED") return { label: "已结束", tone: "project-state-done" };
-  if (item.status === "DRAFT" && !item.motherContent?.body.trim() && !item.creativeBrief?.coreMessage.trim()) return { label: "未开始", tone: "project-state-new" };
-  return { label: "进行中", tone: "project-state-active" };
-}
-
-function projectSource(item: ListedProject) {
-  const metadata = item.creativeBrief?.metadata;
-  const handoff = metadata && typeof metadata === "object" && !Array.isArray(metadata) && "handoff" in metadata ? metadata.handoff : null;
-  if (handoff === "BENCHMARK_TOPIC") return "博主选题";
-  if (item._count.sources) return "资料";
-  if (item.creativeBrief?.coreMessage) return "首页想法";
-  return "自建项目";
-}
-
-function projectNextLabel(item: ListedProject) {
-  const metadata = item.creativeBrief?.metadata;
-  const handoff = metadata && typeof metadata === "object" && !Array.isArray(metadata) && "handoff" in metadata ? metadata.handoff : null;
-  if (handoff === "BENCHMARK_TOPIC" && item.nextAction.key === "ADD_REFERENCE") return "完善选题与依据";
-  return item.nextAction.label;
+function employeeState(item: ListedProject): EmployeeState {
+  if (item.status === "APPROVED" || item.status === "ARCHIVED") return { key: "DONE", label: "已结束" };
+  if (item.status === "DRAFT" && !item.motherContent?.body.trim() && !item.creativeBrief?.coreMessage.trim()) return { key: "UNSTARTED", label: "未开始" };
+  return { key: "ACTIVE", label: "进行中" };
 }
 
 function queryHref(query: ProjectListQuery, updates: Record<string, string>) {
@@ -36,32 +22,161 @@ function queryHref(query: ProjectListQuery, updates: Record<string, string>) {
   return `/projects?${params.toString()}`;
 }
 
+function coverVariant(item: ListedProject) {
+  let hash = 0;
+  for (const character of `${item.id}:${item.title}`) hash = (hash * 31 + character.charCodeAt(0)) | 0;
+  return Math.abs(hash) % 6;
+}
+
+function sortProjects(items: ListedProject[], sort: string | undefined) {
+  return [...items].sort((left, right) => {
+    if (sort === "created") return right.createdAt.getTime() - left.createdAt.getTime();
+    if (sort === "name") return left.title.localeCompare(right.title, "zh-CN");
+    return right.updatedAt.getTime() - left.updatedAt.getTime();
+  });
+}
+
+function isToday(date: Date) {
+  const today = new Date();
+  return date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() === today.getDate();
+}
+
+function editedAt(date: Date) {
+  return isToday(date)
+    ? `最近编辑：今天 ${date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })}`
+    : `最近编辑：${date.toLocaleDateString("zh-CN", { year: "numeric", month: "numeric", day: "numeric" })}`;
+}
+
+function createdAt(date: Date) {
+  return `创建于：${date.toLocaleDateString("zh-CN", { year: "numeric", month: "numeric", day: "numeric" })}`;
+}
+
+function projectSummary(item: ListedProject) {
+  return item.description || item.goal || item.creativeBrief?.coreMessage || "从一个想法开始，把它继续写成完整内容。";
+}
+
+function ProjectCover({ item, state, compact = false }: { item: ListedProject; state: EmployeeState; compact?: boolean }) {
+  return <div className={`project-library-cover cover-${coverVariant(item)} ${compact ? "is-compact" : ""}`}>
+    <span className="project-cover-sheet" aria-hidden="true"><FileText size={compact ? 17 : 23} /></span>
+    <strong aria-hidden="true">{item.title.slice(0, 1).toUpperCase()}</strong>
+    <i aria-hidden="true" />
+    <em>{state.label}</em>
+  </div>;
+}
+
+function ProjectCard({ item, canEdit }: { item: ListedProject; canEdit: boolean }) {
+  const state = employeeState(item);
+  const href = `/dashboard?project=${item.id}`;
+  const action = state.key === "UNSTARTED" ? "开始创作" : "继续创作";
+  return <article className={`project-library-card is-${state.key.toLowerCase()}`}>
+    <div className="project-card-cover-wrap">
+      <ProjectCover item={item} state={state} />
+      {canEdit ? <ProjectCardMenu projectId={item.id} title={item.title} ended={false} /> : null}
+    </div>
+    <div className="project-library-card-body">
+      <h3><Link href={href}>{item.title}</Link></h3>
+      <p>{projectSummary(item)}</p>
+      <footer>
+        <time dateTime={item.updatedAt.toISOString()}>{state.key === "UNSTARTED" ? createdAt(item.createdAt) : editedAt(item.updatedAt)}</time>
+        <Link className="project-card-primary" href={href}>{action}<ArrowRight size={15} /></Link>
+      </footer>
+    </div>
+  </article>;
+}
+
+function EndedProjectCard({ item, canEdit }: { item: ListedProject; canEdit: boolean }) {
+  const href = `/dashboard?project=${item.id}`;
+  return <article className="project-ended-card">
+    <ProjectCover item={item} state={{ key: "DONE", label: "已结束" }} compact />
+    <div>
+      <span>已结束</span>
+      <h3><Link href={href}>{item.title}</Link></h3>
+      <time dateTime={item.updatedAt.toISOString()}>{editedAt(item.updatedAt)}</time>
+    </div>
+    {canEdit ? <ProjectCardMenu projectId={item.id} title={item.title} ended /> : null}
+    <ArrowRight className="project-ended-arrow" size={16} aria-hidden="true" />
+  </article>;
+}
+
+function NewProjectCard() {
+  return <Link href="/projects/new" className="project-new-card"><span><Plus size={20} /></span><strong>新建项目</strong><small>从一个想法开始创作</small></Link>;
+}
+
+function ProjectSection({ title, items, canEdit, ended = false, addNew = false }: { title: string; items: ListedProject[]; canEdit: boolean; ended?: boolean; addNew?: boolean }) {
+  if (!items.length) return null;
+  return <section className={`project-library-section ${ended ? "is-ended" : ""}`} aria-labelledby={`project-section-${ended ? "done" : title}`}>
+    <header><h2 id={`project-section-${ended ? "done" : title}`}>{title}</h2><span>{items.length} 个项目</span></header>
+    <div className={ended ? "project-ended-grid" : "project-library-grid"}>
+      {items.map((item) => ended ? <EndedProjectCard key={item.id} item={item} canEdit={canEdit} /> : <ProjectCard key={item.id} item={item} canEdit={canEdit} />)}
+      {addNew && canEdit ? <NewProjectCard /> : null}
+    </div>
+  </section>;
+}
+
+function ProjectEmpty({ view, hasProjects, search, canEdit, query }: { view: ProjectView; hasProjects: boolean; search: string; canEdit: boolean; query: ProjectListQuery }) {
+  const title = search ? "没有找到相关项目"
+    : !hasProjects ? "还没有项目，从一个想法开始吧"
+      : view === "ACTIVE" ? "暂时没有正在进行的项目"
+        : view === "UNSTARTED" ? "暂时没有未开始的项目"
+          : view === "DONE" ? "暂时没有已结束的项目"
+            : "当前没有可展示的项目";
+  const description = search ? "可以换一个关键词，或清除搜索后查看全部项目。" : "项目会按当前状态出现在这里。";
+  return <section className="project-library-empty">
+    <span><FolderOpen size={24} /></span>
+    <h2>{title}</h2>
+    <p>{description}</p>
+    <div>{search ? <Button variant="secondary" asChild><Link href={queryHref(query, { search: "", page: "1" })}>清除搜索</Link></Button> : null}{canEdit && !hasProjects ? <Button asChild><Link href="/projects/new"><Plus size={16} />新建项目</Link></Button> : null}</div>
+  </section>;
+}
+
 export default async function ProjectsPage({ searchParams }: { searchParams: Promise<ProjectListQuery> }) {
   const { workspace, role } = await requireWorkspace();
   const query = await searchParams;
-  const { items, total, page, pages } = await listProjects(workspace.id, query);
-  const continueItems = items.filter((item) => employeeState(item).label !== "已结束").slice(0, 4);
-  const view = typeof query.status === "string" && ["UNSTARTED", "ACTIVE", "DONE"].includes(query.status) ? query.status : "ALL";
-  const visibleItems = items.filter((item) => view === "ALL" || view === "UNSTARTED" && employeeState(item).label === "未开始" || view === "ACTIVE" && employeeState(item).label === "进行中" || view === "DONE" && employeeState(item).label === "已结束");
-  const counts = { ALL: items.length, UNSTARTED: items.filter((item) => employeeState(item).label === "未开始").length, ACTIVE: items.filter((item) => employeeState(item).label === "进行中").length, DONE: items.filter((item) => employeeState(item).label === "已结束").length };
-  return <div className="projects-workspace">
-    <header className="projects-v2-header page-hero-row">
-      <div><h1 className="page-heading">项目</h1><p className="page-description">查看正在推进的内容，清楚知道下一步该做什么。</p></div>
-      {role !== "VIEWER" ? <Button asChild><Link href="/projects/new"><Plus size={17} />新建项目</Link></Button> : null}
+  const view = typeof query.status === "string" && ["ALL", "ACTIVE", "UNSTARTED", "DONE"].includes(query.status) ? query.status as ProjectView : "ACTIVE";
+  const result = await listProjects(workspace.id, { ...query, status: undefined, pageSize: "50" });
+  const items = sortProjects(result.items, query.sort);
+  const groups = {
+    ACTIVE: items.filter((item) => employeeState(item).key === "ACTIVE"),
+    UNSTARTED: items.filter((item) => employeeState(item).key === "UNSTARTED"),
+    DONE: items.filter((item) => employeeState(item).key === "DONE"),
+  };
+  const visibleItems = view === "ALL" ? items : groups[view];
+  const canEdit = role !== "VIEWER";
+  const hasProjects = result.total > 0 || Boolean(query.search);
+
+  return <div className="project-library-page">
+    <header className="project-library-header">
+      <div><h1>项目</h1><p>管理你的创作项目，随时继续正在进行的内容</p></div>
+      {canEdit ? <Button asChild><Link href="/projects/new"><Plus size={17} />新建项目</Link></Button> : null}
     </header>
-    <nav className="project-state-filters" aria-label="项目状态筛选">{([[["ALL", "全部项目"], ["UNSTARTED", "未开始"], ["ACTIVE", "进行中"], ["DONE", "已结束"]]] as const)[0].map(([value, label]) => <Link key={value} aria-current={view === value ? "page" : undefined} href={queryHref(query, { status: value === "ALL" ? "" : value, page: "1" })}>{label}<span>{counts[value]}</span></Link>)}<Link className="project-more-filter" href={queryHref(query, { status: "ARCHIVED", page: "1" })}><SlidersHorizontal size={14} />归档项目</Link></nav>
-    {query.review === "pending" ? <div className="mb-5 flex items-center justify-between gap-4 rounded-2xl border bg-white/68 p-4 text-sm"><span>当前仅显示有平台内容待人工审核的项目。</span><Link href="/projects" className="shrink-0 font-medium text-[var(--accent)]">清除筛选</Link></div> : null}
-    {continueItems.length ? <section aria-labelledby="continue-projects" className="mb-8">
-      <div className="section-heading-row"><div><h2 id="continue-projects">继续创作</h2><p>从你最近的项目继续，保持创作节奏。</p></div><span>{continueItems.length} 个项目</span></div>
-      <div className="project-focus-grid">{continueItems.map((item) => { const state = employeeState(item); return <Card key={item.id} className="project-focus-card"><div className="project-focus-visual"><FileText size={24} /><Badge className={state.tone}>{state.label}</Badge></div><h3><Link href={`/dashboard?project=${item.id}`}>{item.title}</Link></h3><p>{item.description || item.goal || item.creativeBrief?.coreMessage || "继续完善这项内容。"}</p><div className="project-focus-meta"><span>来自 <b>{projectSource(item)}</b></span><time><Clock3 size={13} />{item.updatedAt.toLocaleDateString("zh-CN")}</time></div><div className="project-focus-next"><span><small>下一步</small>{projectNextLabel(item)}</span><Button asChild><Link href={`/dashboard?project=${item.id}`}>继续工作<ArrowRight size={15} /></Link></Button></div></Card>; })}</div>
-    </section> : null}
-    <section aria-labelledby="all-projects">
-      <div className="section-heading-row"><div><h2 id="all-projects">全部项目</h2><p>查看和管理你的所有创作项目。</p></div><span>共 {total} 个</span></div>
-      <Card className="project-list-shell">
-        <form method="get" className="project-list-toolbar"><label><Search size={17} /><input name="search" defaultValue={query.search} aria-label="搜索项目" placeholder="搜索项目名称、主题或关键词" /></label><select name="sort" defaultValue={query.sort || "newest"} aria-label="项目排序"><option value="newest">最新更新</option><option value="oldest">最早创建</option></select><button>筛选</button></form>
-        {visibleItems.length ? <><div className="project-list-head"><span>项目名称</span><span>状态</span><span>来源</span><span>最近更新</span><span>下一步</span><span>操作</span></div><div className="project-compact-list">{visibleItems.map((item) => { const state = employeeState(item); return <article key={item.id}><span className="project-list-icon"><FileText size={18} /></span><div className="min-w-0"><Link href={`/dashboard?project=${item.id}`}>{item.title}</Link></div><Badge className={state.tone}>{state.label}</Badge><span className="project-source-label">{projectSource(item)}</span><time>{item.updatedAt.toLocaleDateString("zh-CN")}</time><span className="project-list-next">{projectNextLabel(item)}</span>{state.label === "已结束" ? <div className="project-row-actions"><Link className="project-list-action" href={`/dashboard?project=${item.id}`}>查看</Link>{role !== "VIEWER" ? <ProjectArchiveButton projectId={item.id} /> : null}</div> : <Link className="project-list-action" href={`/dashboard?project=${item.id}`}>继续工作<ArrowRight size={15} /></Link>}</article>; })}</div></> : <div className="empty-state"><h2>{items.length ? "当前筛选下没有项目" : "还没有创作项目"}</h2><p>可以调整筛选，或开始一个新的内容项目。</p>{role !== "VIEWER" ? <Button asChild><Link href="/projects/new">开始一个新项目</Link></Button> : null}</div>}
-      </Card>
-    </section>
-    <nav aria-label="分页" className="mt-6 flex items-center justify-between text-sm"><Link aria-disabled={page <= 1} className={page <= 1 ? "pointer-events-none opacity-40" : "text-[var(--accent)]"} href={queryHref(query, { page: String(page - 1) })}>上一页</Link><span className="text-[var(--text-secondary)]">第 {page} / {pages} 页</span><Link aria-disabled={page >= pages} className={page >= pages ? "pointer-events-none opacity-40" : "text-[var(--accent)]"} href={queryHref(query, { page: String(page + 1) })}>下一页</Link></nav>
+
+    <div className="project-library-commandbar">
+      <nav aria-label="项目状态">{([ ["ALL", "全部"], ["ACTIVE", "进行中"], ["UNSTARTED", "未开始"], ["DONE", "已结束"] ] as const).map(([value, label]) => <Link key={value} href={queryHref(query, { status: value, page: "1" })} aria-current={view === value ? "page" : undefined}>{label}</Link>)}</nav>
+      <form method="get">
+        <input type="hidden" name="status" value={view} />
+        {query.review ? <input type="hidden" name="review" value={query.review} /> : null}
+        <label><Search size={16} /><input name="search" defaultValue={query.search} aria-label="搜索项目" placeholder="搜索项目" /></label>
+        <select name="sort" defaultValue={query.sort || "updated"} aria-label="项目排序">
+          <option value="updated">最近编辑</option>
+          <option value="created">最近创建</option>
+          <option value="name">名称排序</option>
+        </select>
+        <button type="submit">应用</button>
+      </form>
+    </div>
+
+    {query.review === "pending" ? <div className="project-library-notice"><span>当前仅显示有平台内容待人工审核的项目。</span><Link href="/projects">清除筛选</Link></div> : null}
+
+    <div className="project-library-content">
+      {visibleItems.length ? view === "ALL" ? <>
+        <ProjectSection title="进行中" items={groups.ACTIVE} canEdit={canEdit} addNew={!query.search} />
+        <ProjectSection title="未开始" items={groups.UNSTARTED} canEdit={canEdit} />
+        <ProjectSection title="已结束" items={groups.DONE} canEdit={canEdit} ended />
+      </> : view === "DONE" ? <ProjectSection title="已结束" items={groups.DONE} canEdit={canEdit} ended />
+        : <ProjectSection title={view === "ACTIVE" ? "进行中" : "未开始"} items={groups[view]} canEdit={canEdit} addNew={view === "ACTIVE" && !query.search} />
+        : <ProjectEmpty view={view} hasProjects={hasProjects} search={query.search?.trim() || ""} canEdit={canEdit} query={query} />}
+    </div>
+
+    {result.pages > 1 ? <nav aria-label="分页" className="project-library-pagination"><Link aria-disabled={result.page <= 1} className={result.page <= 1 ? "is-disabled" : ""} href={queryHref(query, { page: String(result.page - 1) })}>上一页</Link><span>第 {result.page} / {result.pages} 页</span><Link aria-disabled={result.page >= result.pages} className={result.page >= result.pages ? "is-disabled" : ""} href={queryHref(query, { page: String(result.page + 1) })}>下一页</Link></nav> : null}
   </div>;
 }
