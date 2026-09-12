@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -63,6 +64,13 @@ const project = await db.contentProject.create({ data: { workspaceId: workspaceA
     expect(channels.normalize(channels.validate(outputs.WECHAT_CHANNELS))).toMatchObject({ summary: outputs.WECHAT_CHANNELS.description });
     expect(official.normalize(official.validate(outputs.WECHAT_OFFICIAL))).toMatchObject({ metadata: { outline: outputs.WECHAT_OFFICIAL.outline } });
     expect(() => new DouyinPlatformAdapter().validate({ ...outputs.DOUYIN, body: "" })).toThrow();
+  });
+
+  it("keeps raw platform JSON fields out of the employee editor", async () => {
+    const component = await readFile(new URL("../components/projects/platform-content-factory.tsx", import.meta.url), "utf8");
+    for (const label of ["平台扩展字段", "拍摄 / 配图计划 JSON", "候选标题 / 版本 / 大纲 JSON"]) expect(component).not.toContain(label);
+    expect(component).toContain("mediaPlan: JSON.stringify");
+    expect(component).toContain("metadata: JSON.stringify");
   });
 
   it("selects a Workspace platform template before the system default", async () => {

@@ -55,22 +55,22 @@ function projectSummary(item: ListedProject) {
   return item.description || item.goal || item.creativeBrief?.coreMessage || "从一个想法开始，把它继续写成完整内容。";
 }
 
-function ProjectCover({ item, state, compact = false }: { item: ListedProject; state: EmployeeState; compact?: boolean }) {
+function ProjectCover({ item, state, compact = false, showStatus = true }: { item: ListedProject; state: EmployeeState; compact?: boolean; showStatus?: boolean }) {
   return <div className={`project-library-cover cover-${coverVariant(item)} ${compact ? "is-compact" : ""}`}>
     <span className="project-cover-sheet" aria-hidden="true"><FileText size={compact ? 17 : 23} /></span>
     <strong aria-hidden="true">{item.title.slice(0, 1).toUpperCase()}</strong>
     <i aria-hidden="true" />
-    <em>{state.label}</em>
+    {showStatus ? <em>{state.label}</em> : null}
   </div>;
 }
 
-function ProjectCard({ item, canEdit }: { item: ListedProject; canEdit: boolean }) {
+function ProjectCard({ item, canEdit, showStatus }: { item: ListedProject; canEdit: boolean; showStatus: boolean }) {
   const state = employeeState(item);
   const href = `/dashboard?project=${item.id}`;
   const action = state.key === "UNSTARTED" ? "开始创作" : "继续创作";
   return <article className={`project-library-card is-${state.key.toLowerCase()}`}>
     <div className="project-card-cover-wrap">
-      <ProjectCover item={item} state={state} />
+      <ProjectCover item={item} state={state} showStatus={showStatus} />
       {canEdit ? <ProjectCardMenu projectId={item.id} title={item.title} ended={false} /> : null}
     </div>
     <div className="project-library-card-body">
@@ -84,12 +84,12 @@ function ProjectCard({ item, canEdit }: { item: ListedProject; canEdit: boolean 
   </article>;
 }
 
-function EndedProjectCard({ item, canEdit }: { item: ListedProject; canEdit: boolean }) {
+function EndedProjectCard({ item, canEdit, showStatus }: { item: ListedProject; canEdit: boolean; showStatus: boolean }) {
   const href = `/dashboard?project=${item.id}`;
   return <article className="project-ended-card">
-    <ProjectCover item={item} state={{ key: "DONE", label: "已结束" }} compact />
+    <ProjectCover item={item} state={{ key: "DONE", label: "已结束" }} compact showStatus={showStatus} />
     <div>
-      <span>已结束</span>
+      {showStatus ? <span>已结束</span> : null}
       <h3><Link href={href}>{item.title}</Link></h3>
       <time dateTime={item.updatedAt.toISOString()}>{editedAt(item.updatedAt)}</time>
     </div>
@@ -98,17 +98,12 @@ function EndedProjectCard({ item, canEdit }: { item: ListedProject; canEdit: boo
   </article>;
 }
 
-function NewProjectCard() {
-  return <Link href="/projects/new" className="project-new-card"><span><Plus size={20} /></span><strong>新建项目</strong><small>从一个想法开始创作</small></Link>;
-}
-
-function ProjectSection({ title, items, canEdit, ended = false, addNew = false }: { title: string; items: ListedProject[]; canEdit: boolean; ended?: boolean; addNew?: boolean }) {
+function ProjectSection({ title, items, canEdit, ended = false, showStatus = false }: { title: string; items: ListedProject[]; canEdit: boolean; ended?: boolean; showStatus?: boolean }) {
   if (!items.length) return null;
   return <section className={`project-library-section ${ended ? "is-ended" : ""}`} aria-labelledby={`project-section-${ended ? "done" : title}`}>
     <header><h2 id={`project-section-${ended ? "done" : title}`}>{title}</h2><span>{items.length} 个项目</span></header>
     <div className={ended ? "project-ended-grid" : "project-library-grid"}>
-      {items.map((item) => ended ? <EndedProjectCard key={item.id} item={item} canEdit={canEdit} /> : <ProjectCard key={item.id} item={item} canEdit={canEdit} />)}
-      {addNew && canEdit ? <NewProjectCard /> : null}
+      {items.map((item) => ended ? <EndedProjectCard key={item.id} item={item} canEdit={canEdit} showStatus={showStatus} /> : <ProjectCard key={item.id} item={item} canEdit={canEdit} showStatus={showStatus} />)}
     </div>
   </section>;
 }
@@ -169,11 +164,11 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
 
     <div className="project-library-content">
       {visibleItems.length ? view === "ALL" ? <>
-        <ProjectSection title="进行中" items={groups.ACTIVE} canEdit={canEdit} addNew={!query.search} />
-        <ProjectSection title="未开始" items={groups.UNSTARTED} canEdit={canEdit} />
-        <ProjectSection title="已结束" items={groups.DONE} canEdit={canEdit} ended />
+        <ProjectSection title="进行中" items={groups.ACTIVE} canEdit={canEdit} showStatus />
+        <ProjectSection title="未开始" items={groups.UNSTARTED} canEdit={canEdit} showStatus />
+        <ProjectSection title="已结束" items={groups.DONE} canEdit={canEdit} ended showStatus />
       </> : view === "DONE" ? <ProjectSection title="已结束" items={groups.DONE} canEdit={canEdit} ended />
-        : <ProjectSection title={view === "ACTIVE" ? "进行中" : "未开始"} items={groups[view]} canEdit={canEdit} addNew={view === "ACTIVE" && !query.search} />
+        : <ProjectSection title={view === "ACTIVE" ? "进行中" : "未开始"} items={groups[view]} canEdit={canEdit} />
         : <ProjectEmpty view={view} hasProjects={hasProjects} search={query.search?.trim() || ""} canEdit={canEdit} query={query} />}
     </div>
 

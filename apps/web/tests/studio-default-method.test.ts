@@ -178,7 +178,17 @@ describe("published workspace default method in Studio", () => {
 
   it("shows compact employee actions and keeps the full method in the existing drawer", async () => {
     const component = await readFile(new URL("../components/projects/studio-default-method.tsx", import.meta.url), "utf8");
-    for (const label of ["默认方法 V", "查看方法", "现在最适合做", "根据当前内容状态推荐", "更多动作", "想选题", "改开头", "重写正文", "补案例", "加强证据", "改得更像人话", "精简一点", "换个表达", "补依据", "检查事实风险", "按鑫世界方法优化", "应用前预览", "示例场景", "待补证据"]) expect(component).toContain(label);
-    for (const forbidden of ["MethodVersion", "Provider", "Schema", "模型选择", "21 条 guideline"]) expect(component).not.toContain(forbidden);
+    for (const label of ["当前稿件 · 默认创作方式", "查看方法", "现在最适合做", "根据当前内容状态推荐", "更多动作", "想选题", "改开头", "重写正文", "补案例", "加强证据", "改得更像人话", "精简一点", "换个表达", "补依据", "检查事实风险", "按鑫世界方法优化", "应用前预览", "示例场景", "待补证据"]) expect(component).toContain(label);
+    for (const forbidden of ["默认方法 V", "稿件 V", "MethodVersion", "Provider", "Schema", "模型选择", "21 条 guideline"]) expect(component).not.toContain(forbidden);
+  });
+
+  it("keeps Phase 9A canvas controls business-facing and context-aware", async () => {
+    const canvas = await readFile(new URL("../components/projects/content-canvas.tsx", import.meta.url), "utf8");
+    const assistant = await readFile(new URL("../components/projects/studio-default-method.tsx", import.meta.url), "utf8");
+    for (const label of ["添加到画布", "参考素材", "我方依据", "创作目标", "方法", "当前稿件", "AI 建议", "适配画布", "小地图"]) expect(canvas).toContain(label);
+    for (const label of ["管理参考素材", "查看我方依据", "换一个方法", "继续编辑", "查看相关稿件", "针对当前卡片"]) expect(assistant).toContain(label);
+    expect(canvas).toContain("edges={[]}");
+    expect(canvas).toContain("nodesConnectable={false}");
+    expect(canvas).toContain("zoomOnDoubleClick={false}");
   });
 });

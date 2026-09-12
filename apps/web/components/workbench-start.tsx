@@ -42,7 +42,7 @@ export function WorkbenchStart({ projects, canCreate }: { projects: RecentProjec
 
   const starts = [
     { title: "从研究开始", description: "从真实内容里找到新的方向", href: "/discovery", icon: Lightbulb, tone: "research" },
-    { title: "从资产开始", description: "使用已有资料快速开始创作", href: "/library", icon: Layers3, tone: "assets" },
+    { title: "从资料开始", description: "使用已有资料快速开始创作", href: "/library", icon: Layers3, tone: "assets" },
     { title: "继续最近工作", description: "回到上一次的创作现场", href: projects.length ? "#recent-work" : "/projects", icon: Clock3, tone: "recent" },
   ] as const;
 

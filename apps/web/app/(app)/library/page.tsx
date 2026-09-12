@@ -51,13 +51,12 @@ function hasResearch(item: Source) {
   return Boolean(item.materialAnalyses[0]);
 }
 
-function employeeStatus(item: Source) {
+function employeeStatus(item: Source): string | null {
   const processing = processingState(item);
-  if (hasResearch(item)) return "已整理重点";
   if (item.status === "ARCHIVED") return "已归档";
   if (item.status === "FAILED") return "需要处理";
   if (processing.busy) return item.sourceType === "VIDEO" ? processing.libraryLabel : "正在整理";
-  if (item.transcript) return "已有文字稿";
+  if (hasResearch(item) || item.transcript) return null;
   return "待继续研究";
 }
 
@@ -100,13 +99,14 @@ function LibraryCard({ item, canManage }: { item: Source; canManage: boolean }) 
   const Icon = typeIcons[item.sourceType] || FileText;
   const title = sourceTitle(item);
   const href = `/library/${item.id}`;
+  const status = employeeStatus(item);
   return <article className={`project-library-card library-asset-card is-${item.sourceType.toLowerCase()}`}>
     <div className="project-card-cover-wrap">
       <div className={`library-asset-cover visual-${visualVariant(item)} ${item.thumbnailUrl ? "has-thumbnail" : ""}`}>
         {item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" /> : null}
         <span aria-hidden="true"><Icon size={23} /></span>
         <i aria-hidden="true" />
-        <strong>{employeeStatus(item)}</strong>
+        {status ? <strong>{status}</strong> : null}
       </div>
       {canManage ? <LibraryCardMenu sourceId={item.id} title={title} archived={item.status === "ARCHIVED"} /> : null}
     </div>
@@ -141,7 +141,7 @@ function LibraryEmpty({ view, search, canManage, query }: { view: LibraryView; s
   return <section className="project-library-empty library-empty">
     <span><FileText size={24} /></span>
     <h2>{title}</h2>
-    <p>{search ? "可以换一个关键词，或清除搜索后查看全部资料。" : "从一个视频、文档或链接开始积累你的创作资产。"}</p>
+    <p>{search ? "可以换一个关键词，或清除搜索后查看全部资料。" : "从一个视频、文档或链接开始积累你的创作资料。"}</p>
     <div>{search ? <Link className="library-empty-link" href={queryHref(query, { search: "", page: "1" })}>清除搜索</Link> : canManage ? <IngestDialog /> : null}</div>
   </section>;
 }
@@ -168,7 +168,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
     <LibraryPoller active={hasProcessing} />
     <div className="project-library-page library-page">
       <header className="project-library-header">
-        <div><h1>资料</h1><p>把视频、文档、链接和案例整理成可调用的内容资产</p></div>
+        <div><h1>资料</h1><p>把视频、文档、链接和案例整理成创作时可调用的资料</p></div>
         <div className="library-header-actions"><Link href="/library/methods">已保存的方法</Link>{canManage ? <IngestDialog /> : null}</div>
       </header>
 

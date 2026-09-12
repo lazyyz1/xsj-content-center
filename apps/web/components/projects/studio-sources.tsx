@@ -3,7 +3,7 @@
 import { Badge, Button } from "@content-center/ui";
 import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { sourcePlatformLabels, sourceTypeLabels } from "@/lib/content-labels";
 import type { MaterialAnalysisOutput } from "@/server/material-analysis/schemas";
 import { StudioDrawer } from "./studio-drawer";
@@ -13,12 +13,13 @@ type AvailableSource = { id: string; title: string | null; displayName: string; 
 
 async function request(url: string, method: string, body?: unknown) { const response = await fetch(url, { method, headers: body ? { "content-type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined }); const result = await response.json().catch(() => ({})); if (!response.ok) throw new Error(result.message || result.error || "操作失败"); }
 
-export function StudioSources({ projectId, sources, availableSources, editable, onUse }: { projectId: string; sources: ProjectSource[]; availableSources: AvailableSource[]; editable: boolean; onUse: (content: string) => void }) {
+export function StudioSources({ projectId, sources, availableSources, editable, manageRequest = 0, onManageRequestHandled, onUse }: { projectId: string; sources: ProjectSource[]; availableSources: AvailableSource[]; editable: boolean; manageRequest?: number; onManageRequestHandled?: () => void; onUse: (content: string) => void }) {
   const router = useRouter();
   const [drawer, setDrawer] = useState<{ type: "SOURCE"; id: string } | { type: "MANAGE" } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const selected = drawer?.type === "SOURCE" ? sources.find(({ sourceItem }) => sourceItem.id === drawer.id) : null;
+  useEffect(() => { if (manageRequest && editable) { setDrawer({ type: "MANAGE" }); onManageRequestHandled?.(); } }, [editable, manageRequest, onManageRequestHandled]);
   async function action(work: () => Promise<void>) { setBusy(true); setError(""); try { await work(); setDrawer(null); router.refresh(); } catch (cause) { setError(cause instanceof Error ? cause.message : "操作失败"); } finally { setBusy(false); } }
 
   return <section aria-labelledby="reference-materials-title">

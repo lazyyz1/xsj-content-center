@@ -11,7 +11,7 @@ const links = [
   { label: "开始创作", href: "/dashboard", icon: Home },
   { label: "项目", href: "/projects", icon: FolderKanban },
   { label: "研究", href: "/discovery", icon: Lightbulb },
-  { label: "资产", href: "/library", icon: Files },
+  { label: "资料", href: "/library", icon: Files },
   { label: "方法", href: "/library/methods", icon: BookOpenCheck },
 ] as const;
 

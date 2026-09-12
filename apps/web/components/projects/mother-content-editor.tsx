@@ -88,7 +88,7 @@ export function MotherContentEditor({ projectId, initial, editable, onSaved, onS
   }
   return (
     <section className="mother-editor-workspace">
-      <div className="mother-editor-status"><div><h3>正文编辑</h3><p>选中文字可调用 AI 局部优化，应用前会先预览。</p></div><div><p className={saveState === "FAILED" ? "text-[var(--danger)]" : ""}><FileCheck2 size={14} />{labels[saveState]}</p><span>{characters} 字 · V{version.current}</span></div></div>
+      <div className="mother-editor-status"><div><h3>正文编辑</h3><p>选中文字可调用 AI 局部优化，应用前会先预览。</p></div><div><p className={saveState === "FAILED" ? "text-[var(--danger)]" : ""}><FileCheck2 size={14} />{labels[saveState]}</p><span>{characters} 字 · {labels[saveState]}</span></div></div>
       {outline.length ? <nav className="studio-outline-nav" aria-label="稿件分段导航">{outline.map((item, index) => <button key={`${item}-${index}`} type="button" onClick={() => locateSection(item)}><span>{index + 1}</span><strong>{item}</strong></button>)}</nav> : null}
       <input aria-label="口播稿标题" value={title} disabled={!editable} onChange={(event) => setTitle(event.target.value)} className="mother-title-input" placeholder="口播稿标题" />
       <div className="mother-document-toolbar"><span>正文</span><i /><span>自动保存已开启</span><span className="ml-auto">选中文字后可局部优化</span></div>

@@ -17,8 +17,10 @@ import {
   BookOpenCheck,
   FileText,
   Lightbulb,
+  Map,
   Maximize2,
   Minus,
+  MousePointer2,
   PanelRightOpen,
   PencilLine,
   Plus,
@@ -39,7 +41,9 @@ import {
   type ReactNode,
 } from "react";
 
-type CardKind = "brief" | "sources" | "facts" | "methods" | "suggestion" | "draft";
+export type CardKind = "brief" | "sources" | "facts" | "methods" | "suggestion" | "draft";
+export type CanvasContextKind = Extract<CardKind, "brief" | "sources" | "facts" | "methods">;
+export type CanvasAssistantContext = { focus: CardKind | null; openContext: (kind: CanvasContextKind) => void; openDraft: () => void };
 type CardData = {
   kind: CardKind;
   title: string;
@@ -66,6 +70,21 @@ const icons = {
   suggestion: Sparkles,
   draft: PencilLine,
 } as const;
+
+const addGroups = [
+  { label: "内容", items: [
+    { kind: "sources", title: "参考素材", description: "从已有资料中选择" },
+    { kind: "facts", title: "我方依据", description: "查看已确认的真实依据" },
+  ] },
+  { label: "创作", items: [
+    { kind: "brief", title: "创作目标", description: "定位并查看唯一目标" },
+    { kind: "methods", title: "方法", description: "从当前可用方法中选择" },
+    { kind: "draft", title: "当前稿件", description: "打开唯一当前稿件" },
+  ] },
+  { label: "AI", items: [
+    { kind: "suggestion", title: "AI 建议", description: "查看当前已有建议" },
+  ] },
+] as const;
 
 function PlatformSelect({ onPlatform }: { onPlatform?: (platform: string) => void }) {
   return (
@@ -106,7 +125,6 @@ function CanvasCard({ data, selected }: NodeProps<CanvasNode>) {
       {isDraft ? (
         <>
           <div className="canvas-draft-meta">
-            <span>V{data.draft?.version || 0}</span>
             <span>{data.draft?.characters || 0} 字</span>
             <span>{data.draft?.status}</span>
           </div>
@@ -164,11 +182,54 @@ function CanvasToolbar({
         <button type="button" onClick={() => void fitView({ padding: 0.14, duration: motionSafe ? 240 : 0 })} aria-label="适应视图"><Maximize2 size={17} /></button>
         <button type="button" onClick={() => void zoomIn({ duration: motionSafe ? 160 : 0 })} aria-label="放大画布"><Plus size={17} /></button>
         <i aria-hidden="true" />
-        <button type="button" className="canvas-add-button" onClick={onAdd}><Plus size={17} />添加卡片</button>
+        <button type="button" className="canvas-add-button" onClick={onAdd} aria-haspopup="dialog"><Plus size={17} />添加卡片</button>
         {!assistantOpen ? <button type="button" onClick={onOpenAssistant} aria-label="展开鑫小助"><PanelRightOpen size={18} /></button> : null}
       </nav>
     </header>
   );
+}
+
+function CanvasChrome({
+  addOpen,
+  miniMapOpen,
+  onAdd,
+  onCloseAdd,
+  onChoose,
+  onSelectMode,
+  onToggleMiniMap,
+}: {
+  addOpen: boolean;
+  miniMapOpen: boolean;
+  onAdd: () => void;
+  onCloseAdd: () => void;
+  onChoose: (kind: CardKind) => void;
+  onSelectMode: () => void;
+  onToggleMiniMap: () => void;
+}) {
+  const { fitView } = useReactFlow();
+  const motionSafe = typeof window === "undefined" || !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const choose = (kind: CardKind) => {
+    onChoose(kind);
+    if (kind !== "draft") window.requestAnimationFrame(() => void fitView({ nodes: [{ id: kind }], padding: 0.55, maxZoom: 1.05, duration: motionSafe ? 180 : 0 }));
+  };
+
+  return <>
+    <nav className="canvas-bottom-toolbar" aria-label="画布工具">
+      <button type="button" className="is-primary" onClick={onAdd} aria-expanded={addOpen} aria-haspopup="dialog" title="添加到画布"><Plus size={18} /><span>添加</span></button>
+      <button type="button" aria-pressed="true" onClick={onSelectMode} title="选择卡片"><MousePointer2 size={17} /><span>选择</span></button>
+      <button type="button" onClick={() => void fitView({ padding: 0.14, duration: motionSafe ? 240 : 0 })} title="适配画布"><Maximize2 size={17} /><span>适配画布</span></button>
+      <button type="button" aria-pressed={miniMapOpen} onClick={onToggleMiniMap} title={miniMapOpen ? "隐藏小地图" : "显示小地图"}><Map size={17} /><span>小地图</span></button>
+    </nav>
+
+    {addOpen ? <div className="canvas-add-layer">
+      <button type="button" tabIndex={-1} aria-label="关闭添加到画布菜单" onClick={onCloseAdd} />
+      <aside role="dialog" aria-modal="false" aria-labelledby="canvas-add-title">
+        <header><strong id="canvas-add-title">添加到画布</strong><button type="button" aria-label="关闭菜单" onClick={onCloseAdd}><X size={17} /></button></header>
+        {addGroups.map((group) => <section key={group.label}><h3>{group.label}</h3><div>{group.items.map((item, index) => { const Icon = icons[item.kind]; return <button type="button" key={item.kind} autoFocus={group.label === "内容" && index === 0} onClick={() => choose(item.kind)}><span aria-hidden="true"><Icon size={17} /></span><span><strong>{item.title}</strong><small>{item.description}</small></span></button>; })}</div></section>)}
+      </aside>
+    </div> : null}
+  </>;
 }
 
 type CanvasSurfaceProps = {
@@ -183,13 +244,14 @@ type CanvasSurfaceProps = {
   draftToolbar: ReactNode;
   draftEditor: ReactNode;
   contextTools: ReactNode;
-  assistant: ReactNode;
+  assistant: ReactNode | ((context: CanvasAssistantContext) => ReactNode);
   assistantOpen: boolean;
   onAssistantOpen: (open: boolean) => void;
+  onContextKindChange?: (kind: CanvasContextKind) => void;
   onPlatform: (platform: string) => void;
 };
 
-const DEFAULT_VIEWPORT: Viewport = { x: 18, y: 48, zoom: 0.86 };
+const DEFAULT_VIEWPORT: Viewport = { x: 18, y: 48, zoom: 0.92 };
 const MIN_CANVAS_WIDTH = 340;
 const MIN_ASSISTANT_WIDTH = 260;
 const MAX_ASSISTANT_WIDTH = 520;
@@ -214,10 +276,13 @@ function CanvasSurface({
   assistant,
   assistantOpen,
   onAssistantOpen,
+  onContextKindChange,
   onPlatform,
 }: CanvasSurfaceProps) {
   const [focused, setFocused] = useState(false);
-  const [toolsOpen, setToolsOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [miniMapOpen, setMiniMapOpen] = useState(true);
   const [assistantWidth, setAssistantWidth] = useState<number | null>(null);
   const [isResizing, setIsResizing] = useState(false);
   const workbenchRef = useRef<HTMLDivElement>(null);
@@ -243,14 +308,14 @@ function CanvasSurface({
   const templateNodes = useMemo<CanvasNode[]>(() => {
     const positions = savedLayout.nodes ?? {};
     const item = (id: string, position: { x: number; y: number }, data: CardData): CanvasNode => ({ id, type: "card", position: positions[id] ?? position, data });
-    const openContext = () => setToolsOpen(true);
+    const openContext = (kind: CanvasContextKind) => () => { onContextKindChange?.(kind); setContextOpen(true); };
     const openAssistant = () => onAssistantOpen(true);
 
     return [
-      item("brief", { x: 48, y: 42 }, { kind: "brief", title: "创作目标", lines: brief, actionLabel: "查看目标", onAction: openContext }),
-      item("sources", { x: 22, y: 266 }, { kind: "sources", title: "参考素材", lines: sources, meta: `${sources.length} 条`, actionLabel: "管理素材", onAction: openContext }),
-      item("facts", { x: 30, y: 520 }, { kind: "facts", title: "我方依据", lines: facts, meta: `${facts.length} 条`, actionLabel: "核对依据", onAction: openContext }),
-      item("methods", { x: 410, y: 58 }, { kind: "methods", title: "方法", lines: methods, meta: `${methods.length} 个`, actionLabel: "选择方法", onAction: openContext }),
+      item("brief", { x: 48, y: 42 }, { kind: "brief", title: "创作目标", lines: brief, actionLabel: "查看目标", onAction: openContext("brief") }),
+      item("sources", { x: 22, y: 266 }, { kind: "sources", title: "参考素材", lines: sources, meta: `${sources.length} 条`, actionLabel: "管理素材", onAction: openContext("sources") }),
+      item("facts", { x: 30, y: 520 }, { kind: "facts", title: "我方依据", lines: facts, meta: `${facts.length} 条`, actionLabel: "核对依据", onAction: openContext("facts") }),
+      item("methods", { x: 410, y: 58 }, { kind: "methods", title: "方法", lines: methods, meta: `${methods.length} 个`, actionLabel: "选择方法", onAction: openContext("methods") }),
       item("draft", { x: 350, y: 292 }, {
         kind: "draft",
         title: draft.title || "未命名稿件",
@@ -268,10 +333,11 @@ function CanvasSurface({
         onAction: openAssistant,
       }),
     ];
-  }, [brief, draft, facts, methods, onAssistantOpen, onPlatform, savedLayout.nodes, sources, suggestions]);
+  }, [brief, draft, facts, methods, onAssistantOpen, onContextKindChange, onPlatform, savedLayout.nodes, sources, suggestions]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(templateNodes);
   const selectedNode = nodes.find((node) => node.selected);
+  const selectedKind = selectedNode?.data.kind ?? null;
   const currentFocus = focused ? `稿件｜${draft.title || "未命名稿件"}` : selectedNode?.data.title ?? "画布";
 
   useEffect(() => {
@@ -313,6 +379,15 @@ function CanvasSurface({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [focused]);
+
+  useEffect(() => {
+    if (!addOpen) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setAddOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [addOpen]);
 
   const persistAssistantWidth = useCallback((width: number) => {
     window.localStorage.setItem(PANE_STORAGE_KEY, String(Math.round(width)));
@@ -363,6 +438,16 @@ function CanvasSurface({
     window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>("[data-draft-edit]")?.focus());
   };
 
+  const openContext = (kind: CanvasContextKind) => { onContextKindChange?.(kind); setContextOpen(true); };
+
+  const chooseCard = (kind: CardKind) => {
+    setNodes((current) => current.map((node) => ({ ...node, selected: node.id === kind })));
+    setAddOpen(false);
+    onAssistantOpen(true);
+    if (kind === "draft") setFocused(true);
+    else if (kind !== "suggestion") openContext(kind);
+  };
+
   const paneStyle = {
     "--assistant-width": assistantOpen ? (assistantWidth ? `${assistantWidth}px` : "30%") : "0px",
   } as CSSProperties;
@@ -371,21 +456,25 @@ function CanvasSurface({
     <div ref={workbenchRef} className={`content-workbench ${assistantOpen ? "" : "assistant-closed"} ${isResizing ? "is-resizing" : ""}`} style={paneStyle}>
       <section className="content-canvas" aria-label="内容画布">
         <ReactFlowProvider>
-          <CanvasToolbar projectTitle={projectTitle} saved={draft.updated} assistantOpen={assistantOpen} onAdd={() => setToolsOpen(true)} onOpenAssistant={() => onAssistantOpen(true)} />
+          <CanvasToolbar projectTitle={projectTitle} saved={draft.updated} assistantOpen={assistantOpen} onAdd={() => setAddOpen(true)} onOpenAssistant={() => onAssistantOpen(true)} />
           <ReactFlow
             nodes={nodes}
             edges={[]}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
+            onNodeClick={() => onAssistantOpen(true)}
+            onPaneClick={(event) => { if (event.detail === 2) setAddOpen(true); }}
             onMoveEnd={(_, next) => setViewport(next)}
             defaultViewport={viewport}
-            minZoom={0.4}
+            minZoom={0.72}
             maxZoom={1.8}
             nodesConnectable={false}
+            zoomOnDoubleClick={false}
           >
             <Background gap={24} size={1} color="#d9e2ef" />
-            <MiniMap pannable zoomable nodeStrokeWidth={2} />
+            {miniMapOpen ? <MiniMap pannable zoomable nodeStrokeWidth={2} ariaLabel="画布小地图" /> : null}
           </ReactFlow>
+          <CanvasChrome addOpen={addOpen} miniMapOpen={miniMapOpen} onAdd={() => setAddOpen(true)} onCloseAdd={() => setAddOpen(false)} onChoose={chooseCard} onSelectMode={() => { setAddOpen(false); setNodes((current) => current.map((node) => ({ ...node, selected: false }))); }} onToggleMiniMap={() => setMiniMapOpen((current) => !current)} />
         </ReactFlowProvider>
 
         {focused ? (
@@ -393,7 +482,7 @@ function CanvasSurface({
             <section>
               <header>
                 <button type="button" autoFocus onClick={closeFocus}><X size={17} />返回画布</button>
-                <div><strong>{draft.title || "未命名稿件"}</strong><span>V{draft.version || 0} · {draft.updated}</span></div>
+                <div><strong>{draft.title || "未命名稿件"}</strong><span>{draft.updated}</span></div>
                 <div className="draft-focus-actions">{draftToolbar}<PlatformSelect onPlatform={onPlatform} /></div>
               </header>
               <div className="draft-focus-editor">{draftEditor}</div>
@@ -432,18 +521,18 @@ function CanvasSurface({
             <span>引用 · {referenceCount}</span>
           </div>
         </header>
-        <div className="workbench-assistant-body">{assistant}</div>
+        <div className="workbench-assistant-body">{typeof assistant === "function" ? assistant({ focus: focused ? "draft" : selectedKind, openContext, openDraft: () => setFocused(true) }) : assistant}</div>
         <div className="workbench-assistant-composer-preview">
           <p>自由对话将在后续接入</p>
           <small>现在可以使用上方与当前项目关联的快捷操作。</small>
         </div>
       </aside>
 
-      {toolsOpen ? (
+      {contextOpen ? (
         <div className="canvas-tools-layer">
-          <button type="button" aria-label="关闭添加卡片" onClick={() => setToolsOpen(false)} />
+          <button type="button" aria-label="关闭当前创作内容" onClick={() => setContextOpen(false)} />
           <aside>
-            <header><strong>添加到当前工作</strong><button type="button" onClick={() => setToolsOpen(false)}><X size={18} /></button></header>
+            <header><strong>当前创作内容</strong><button type="button" aria-label="关闭当前创作内容" onClick={() => setContextOpen(false)}><X size={18} /></button></header>
             {contextTools}
           </aside>
         </div>

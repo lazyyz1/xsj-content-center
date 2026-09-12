@@ -14,7 +14,7 @@ async function request(url: string, method: string, body?: unknown) {
   return result;
 }
 
-export function StudioMethodSelector({ projectId, initial, editable, onChange }: { projectId: string; initial: ProjectMethodStateDTO; editable: boolean; onChange: (state: ProjectMethodStateDTO) => void }) {
+export function StudioMethodSelector({ projectId, initial, editable, openRequest = 0, onOpenRequestHandled, onChange }: { projectId: string; initial: ProjectMethodStateDTO; editable: boolean; openRequest?: number; onOpenRequestHandled?: () => void; onChange: (state: ProjectMethodStateDTO) => void }) {
   const [state, setState] = useState(initial);
   const [open, setOpen] = useState(false);
   const [draftIds, setDraftIds] = useState(initial.selected.map(({ methodVersionId }) => methodVersionId));
@@ -26,6 +26,7 @@ export function StudioMethodSelector({ projectId, initial, editable, onChange }:
     setState(initial);
     setDraftIds(initial.selected.map(({ methodVersionId }) => methodVersionId));
   }, [initial]);
+  useEffect(() => { if (openRequest && editable) { setError(""); setOpen(true); onOpenRequestHandled?.(); } }, [editable, onOpenRequestHandled, openRequest]);
 
   async function save(ids = draftIds) {
     if (!editable) return;
