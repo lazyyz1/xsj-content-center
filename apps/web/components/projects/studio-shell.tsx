@@ -20,7 +20,7 @@ import { CreationFeedback } from "./creation-feedback";
 import type { CreationFeedbackContext } from "@/server/creation-feedback/service";
 import { useRouter } from "next/navigation";
 import { StudioDefaultMethod, type StudioAssistantHandle } from "./studio-default-method";
-import { ContentCanvas, type CanvasAssistantContext, type CanvasContextKind } from "./content-canvas";
+import { ContentCanvas, type CanvasAssistantContext, type CanvasContextKind, type WorkbenchLayoutMode } from "./content-canvas";
 import type { StudioDefaultContentMethodDTO } from "@/server/default-content-method/service";
 import type { StudioActionRecommendation } from "@/server/ai/schemas";
 
@@ -77,7 +77,7 @@ export function StudioShell({ project, methods, defaultMethod, recommendedAction
   const [sourceManageRequest, setSourceManageRequest] = useState(0);
   const [methodSelectRequest, setMethodSelectRequest] = useState(0);
   const [supplementOpen, setSupplementOpen] = useState(false);
-  const [assistantOpen, setAssistantOpen] = useState(true);
+  const [layoutMode, setLayoutMode] = useState<WorkbenchLayoutMode>("canvas-assistant");
   const [selection, setSelection] = useState<{ text: string; start: number; end: number } | null>(null);
   const [activePlatform, setActivePlatform] = useState<SupportedPlatform>("DOUYIN");
   const [variants, setVariants] = useState(project.platformVariants);
@@ -89,17 +89,27 @@ export function StudioShell({ project, methods, defaultMethod, recommendedAction
   const advisoryWarnings = warnings.filter((warning) => !isBlockingWarning(warning));
   const blockingWarnings = warnings.filter((warning) => isBlockingWarning(warning));
   const unresolvedBlockingWarnings = blockingWarnings.filter((warning) => !confirmedWarningKeys.includes(warningKey(warning)));
+  const assistantOpen = layoutMode !== "canvas-only";
 
   useEffect(() => setFeedbackContext(feedback), [feedback]);
   useEffect(() => {
-    const stored = window.localStorage.getItem("studio-assistant-open");
-    if (stored === "false") setAssistantOpen(false);
-  }, []);
-  useEffect(() => { if (selection) setAssistantOpen(true); }, [selection]);
+    const stored = window.localStorage.getItem(`studio-workbench-layout:${project.id}:v1`);
+    if (stored === "canvas-only" || stored === "canvas-assistant" || stored === "assistant-only") {
+      setLayoutMode(stored);
+      return;
+    }
+    if (window.localStorage.getItem("studio-assistant-open") === "false") setLayoutMode("canvas-only");
+  }, [project.id]);
+  useEffect(() => { if (selection) setWorkbenchLayout("canvas-assistant"); }, [selection]);
+
+  function setWorkbenchLayout(next: WorkbenchLayoutMode) {
+    setLayoutMode(next);
+    window.localStorage.setItem(`studio-workbench-layout:${project.id}:v1`, next);
+    window.localStorage.setItem("studio-assistant-open", String(next !== "canvas-only"));
+  }
 
   function toggleAssistant(next: boolean) {
-    setAssistantOpen(next);
-    window.localStorage.setItem("studio-assistant-open", String(next));
+    setWorkbenchLayout(next ? "canvas-assistant" : "canvas-only");
   }
 
   function runSelectionAction(action: StudioSelectionAction) {
@@ -223,7 +233,7 @@ export function StudioShell({ project, methods, defaultMethod, recommendedAction
   const draftToolbar = <>{mother.version ? <><span className="draft-focus-save-state">已保存</span><button type="button" onClick={() => setPreviewOpen(true)}><Eye size={15} />预览</button><button type="button" onClick={() => setHistoryOpen(true)}>历史记录</button><details className="studio-document-more"><summary aria-label="更多稿件操作"><MoreHorizontal size={17} /></summary><div><a href="#mother-outline">编辑大纲</a>{configured && editableProject ? <button type="button" disabled={motherGenerating} onClick={() => void generateMotherContent()}>{motherGenerating ? "正在生成…" : "重新生成稿件"}</button> : null}</div></details></> : <span className="draft-focus-save-state">尚未开始</span>}</>;
 
   return <>
-    <ContentCanvas projectId={project.id} projectTitle={project.title} brief={[contextSummary.topic, project.audience || initialPlan.audience || "受众待补充", initialPlan.coreQuestion || contextSummary.goal]} sources={project.sources.slice(0, 4).map(({ sourceItem }) => sourceItem.displayName)} facts={contextSummary.ownFacts.slice(0, 4).map(({ text }) => text)} methods={[...(defaultMethod ? ["鑫世界默认创作方法"] : []), ...methodState.selected.slice(0, 3).map(({ title }) => title)]} suggestions={recommendedActions.slice(0, 4).map(({ label }) => label)} draft={{ title: mother.title || "当前稿件", body: mother.body, version: mother.version, characters: mother.body.replace(/\s/g, "").length, updated: mother.version ? "已保存" : "尚未开始" }} draftToolbar={draftToolbar} draftEditor={<>{draftEditor}<CreationFeedback projectId={project.id} context={feedbackContext} editable={editableProject} /></>} contextTools={contextPanel} assistant={assistantPanel} assistantOpen={assistantOpen} onAssistantOpen={toggleAssistant} onContextKindChange={openCanvasContext} onPlatform={(platform) => { setActivePlatform(platform as SupportedPlatform); setTab("PLATFORM"); }} />
+    <ContentCanvas projectId={project.id} projectTitle={project.title} brief={[contextSummary.topic, project.audience || initialPlan.audience || "受众待补充", initialPlan.coreQuestion || contextSummary.goal]} sources={project.sources.slice(0, 4).map(({ sourceItem }) => sourceItem.displayName)} facts={contextSummary.ownFacts.slice(0, 4).map(({ text }) => text)} methods={[...(defaultMethod ? ["鑫世界默认创作方法"] : []), ...methodState.selected.slice(0, 3).map(({ title }) => title)]} suggestions={recommendedActions.slice(0, 4).map(({ label }) => label)} draft={{ title: mother.title || "当前稿件", body: mother.body, version: mother.version, characters: mother.body.replace(/\s/g, "").length, updated: mother.version ? "已保存" : "尚未开始" }} draftToolbar={draftToolbar} draftEditor={<>{draftEditor}<CreationFeedback projectId={project.id} context={feedbackContext} editable={editableProject} /></>} contextTools={contextPanel} assistant={assistantPanel} assistantOpen={assistantOpen} layoutMode={layoutMode} onLayoutModeChange={setWorkbenchLayout} onAssistantOpen={toggleAssistant} onContextKindChange={openCanvasContext} onPlatform={(platform) => { setActivePlatform(platform as SupportedPlatform); setTab("PLATFORM"); }} />
     {tab === "PLATFORM" ? <div className="platform-focus-layer"><button type="button" aria-label="返回画布" onClick={() => setTab("CREATE")} /><section><header><div><span>平台适配</span><strong>选择一个平台继续</strong></div><Button variant="secondary" onClick={() => setTab("CREATE")}>返回画布</Button></header><nav aria-label="平台稿">{SUPPORTED_PLATFORMS.map((platform) => <button key={platform} className={activePlatform === platform ? "is-active" : ""} onClick={() => setActivePlatform(platform)}>{PLATFORM_LABELS[platform]}</button>)}</nav>{motherConfirmed ? <PlatformContentFactory projectId={project.id} activePlatform={activePlatform} motherVersion={mother.version} variants={effectiveVariants} editable={editableProject} integrationStatus={ai.integrationStatus} motherConfirmed onSelectPlatform={setActivePlatform} onVariantChange={(variant) => setVariants((current) => [...current.filter((item) => item.platform !== variant.platform), variant])} /> : <Card className="p-6"><h2 className="font-semibold">请先确认当前口播稿</h2><p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">确认后选择一个平台生成；未选择的平台不会创建内容。</p></Card>}</section></div> : null}
     <StudioDrawer title="稿件预览" open={previewOpen} onClose={() => setPreviewOpen(false)}><article className="studio-document-preview"><h2>{mother.title || "未命名口播稿"}</h2><p>{mother.body || "当前还是空白稿。"}</p></article></StudioDrawer>
     <StudioDrawer title="口播稿历史记录" open={historyOpen} onClose={() => setHistoryOpen(false)}><div className="grid gap-3">{motherHistory.map((item) => <details key={`${item.version}-${item.createdAt}`} className="rounded-xl border p-4"><summary className="text-sm font-medium">{historyLabel(item.version, item.current)}</summary><h3 className="mt-3 font-medium">{item.title || "未命名口播稿"}</h3><p className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-[var(--text-secondary)]">{item.body || "空白草稿"}</p></details>)}</div></StudioDrawer>
