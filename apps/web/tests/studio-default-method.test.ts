@@ -161,6 +161,11 @@ describe("published workspace default method in Studio", () => {
     expect(topic.output.suggestions).toHaveLength(2);
     expect(fact.canApply).toBe(false);
     expect(fact.output).toMatchObject({ summary: "当前未发现明显事实风险。", risks: [] });
+    const controlledRuns = await db.aIRun.findMany({ where: { id: { in: [topic.id, fact.id] } }, select: { metadata: true } });
+    expect(controlledRuns).toHaveLength(2);
+    for (const controlledRun of controlledRuns) {
+      expect(controlledRun.metadata).toMatchObject({ aiControlVersion: "ai-control-v1", contextVersion: "creation-context-v2", contextManifestRef: expect.stringMatching(/^airun-metadata:/), contextManifest: { schemaVersion: "ai-context-manifest-v1", project: { id: projectId } }, permissionDecision: "ALLOW" });
+    }
     await expect(applyStudioQuickAction({ workspaceId, userId, projectId, runId: fact.id, expectedVersion: before.version })).rejects.toMatchObject({ code: "QUICK_ACTION_NOT_APPLICABLE" });
     expect((await db.motherContent.findUniqueOrThrow({ where: { projectId } })).body).toBe(before.body);
   });

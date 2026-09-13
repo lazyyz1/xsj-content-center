@@ -10,6 +10,9 @@ import { buildDraftWarnings } from "../ai/draft-warnings";
 import { saveMotherContent } from "../mother-content-service";
 import { recordGenerationMethodUsages } from "../project-methods/service";
 import { sanitizeStudioQuickActionOutput } from "./fact-safety";
+import { AIControlService } from "../ai/control/ai-control-service";
+import { ContextBuilderV2, type ContextBuilderV2Result } from "../ai/control/context-builder-v2";
+import { ModelRouter } from "../ai/control/model-router";
 
 export class StudioQuickActionError extends Error {
   constructor(readonly code: "QUICK_ACTION_NOT_READY" | "QUICK_ACTION_NOT_FOUND" | "QUICK_ACTION_NOT_APPLICABLE" | "QUICK_ACTION_STALE", message: string) { super(message); this.name = "StudioQuickActionError"; }
@@ -60,10 +63,10 @@ function target(action: StudioQuickAction, body: string, fallback: string, expli
   return { original: body.slice(start, end), start, end };
 }
 
-export async function runStudioQuickAction(input: { workspaceId: string; userId: string; projectId: string; studioAction: StudioQuickAction; instruction?: string; selectedText?: string; selectionStart?: number; selectionEnd?: number }, dependencies: { runtime?: LLMRuntime; contextBuilder?: ProjectContextBuilder } = {}) {
-  const project = await db.contentProject.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId, workspace: { members: { some: { userId: input.userId } } } }, select: { title: true, motherContent: { select: { body: true } }, creativeBrief: { select: { topic: true, coreMessage: true, audience: true } } } });
-  if (!project) throw new StudioQuickActionError("QUICK_ACTION_NOT_FOUND", "当前创作不存在。");
-  const built = await (dependencies.contextBuilder ?? new ProjectContextBuilder()).build({ ...input, action: "REWRITE_SELECTION" });
+type QuickActionInput = { workspaceId: string; userId: string; projectId: string; studioAction: StudioQuickAction; instruction?: string; selectedText?: string; selectionStart?: number; selectionEnd?: number };
+type QuickActionContext = Awaited<ReturnType<ProjectContextBuilder["build"]>> | ContextBuilderV2Result;
+
+function quickActionPlan(input: QuickActionInput, project: { title: string; motherContent: { body: string } | null; creativeBrief: { topic: string; coreMessage: string; audience: string } | null }, built: QuickActionContext) {
   if (!built.defaultMethod) throw new StudioQuickActionError("QUICK_ACTION_NOT_READY", "公司默认创作方法尚未发布。");
   const fallback = JSON.stringify({ projectTitle: project.title, topic: project.creativeBrief?.topic, coreMessage: project.creativeBrief?.coreMessage, audience: project.creativeBrief?.audience });
   const selection = target(input.studioAction, project.motherContent?.body ?? "", fallback, { text: input.selectedText, start: input.selectionStart, end: input.selectionEnd });
@@ -71,6 +74,52 @@ export async function runStudioQuickAction(input: { workspaceId: string; userId:
   const hasActionEvidence = input.studioAction === "ADD_CASE" ? built.hasOwnCaseOrData : built.hasOwnEvidence;
   const prompt = `【本次任务】${input.studioAction}\n【用户明确要求】${input.instruction?.trim() || "无额外要求"}\n【当前处理文字】\n${selection.original}\n【统一创作上下文】\n${JSON.stringify(built.context)}\n\n${instructions[input.studioAction]}\nReturn exactly ${input.studioAction === "REWRITE_OPENING" ? openingOutputShape : fullOutputShape}. Do not return markdown or analysis.`;
   const defaultAudit = { defaultMethodAssetId: built.defaultMethod.assetId, defaultMethodVersionId: built.defaultMethod.versionId, defaultMethodVersion: built.defaultMethod.version, defaultMethodSections: studioQuickActionSections[input.studioAction].join(",") };
+  const generate = async (provider: Parameters<Parameters<typeof executeStructuredAIRun>[0]["generate"]>[0]) => {
+    if (input.studioAction === "REWRITE_OPENING") {
+      const generated = await provider.generateStructured({ systemPrompt: `${quickSystemPrompt}\n${generationQualityContract}`, prompt }, rewriteOpeningProviderSchema);
+      const value = { original: selection.original, summary: generated.data.value.summary, suggestions: generated.data.value.suggestions, replacement: null, replacementFactState: null, risks: [] };
+      return { ...generated, data: { ...generated.data, value: sanitizeStudioQuickActionOutput(input.studioAction, value, ownFactTexts, hasActionEvidence) } };
+    }
+    const generated = await provider.generateStructured({ systemPrompt: `${quickSystemPrompt}\n${generationQualityContract}`, prompt }, studioQuickActionOutputSchema);
+    const value = generated.data.value;
+    return { ...generated, data: { ...generated.data, value: sanitizeStudioQuickActionOutput(input.studioAction, { ...value, original: selection.original }, ownFactTexts, hasActionEvidence) } };
+  };
+  return { selection, defaultAudit, generate };
+}
+
+export async function runStudioQuickAction(input: QuickActionInput, dependencies: { runtime?: LLMRuntime; contextBuilder?: ProjectContextBuilder; controlService?: AIControlService } = {}) {
+  const project = await db.contentProject.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId, workspace: { members: { some: { userId: input.userId } } } }, select: { title: true, motherContent: { select: { body: true } }, creativeBrief: { select: { topic: true, coreMessage: true, audience: true } } } });
+  if (!project) throw new StudioQuickActionError("QUICK_ACTION_NOT_FOUND", "当前创作不存在。");
+  const controlled = input.studioAction === "TOPIC_IDEAS" || input.studioAction === "FACT_CHECK";
+  if (controlled) {
+    let controlledContext: ContextBuilderV2Result | null = null;
+    const suppliedRuntime = dependencies.runtime;
+    const controlService = dependencies.controlService ?? new AIControlService({ contextBuilder: new ContextBuilderV2(dependencies.contextBuilder ?? new ProjectContextBuilder()), modelRouter: suppliedRuntime ? new ModelRouter(async () => suppliedRuntime) : undefined });
+    const run = await controlService.execute({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      projectId: input.projectId,
+      taskType: input.studioAction === "FACT_CHECK" ? "CONTENT_CHECK" : "TOPIC_CANDIDATES",
+      requestedAction: input.studioAction === "FACT_CHECK" ? "CHECK_CONTENT" : "GENERATE_TOPIC_CANDIDATES",
+      userInput: input.instruction,
+      action: "REWRITE_SELECTION",
+      studioAction: input.studioAction,
+      operation: `STUDIO_${input.studioAction}`,
+      promptVersion: 1,
+      onContext: (context) => { controlledContext = context; },
+      inputSummary: (context) => { const plan = quickActionPlan(input, project, context); return { ...context.inputSummary, selectedTextLength: plan.selection.original.length, hasInstruction: Boolean(input.instruction?.trim()) }; },
+      metadata: (context) => { const plan = quickActionPlan(input, project, context); return { kind: "STUDIO_QUICK_ACTION", studioAction: input.studioAction, selectionStart: plan.selection.start, selectionEnd: plan.selection.end, ownFactCount: context.ownFacts.length, hasOwnEvidence: context.hasOwnEvidence, hasOwnCaseOrData: context.hasOwnCaseOrData, contextVersion: "creation-context-v2", ...plan.defaultAudit }; },
+      auditMetadata: (context) => ({ studioAction: input.studioAction, ...quickActionPlan(input, project, context).defaultAudit }),
+      onRunCreated: (aiRunId, context) => recordGenerationMethodUsages({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, aiRunId, selectedMethodVersionIds: context.selectedMethods.map(({ methodVersionId }) => methodVersionId), defaultMethodVersionId: context.defaultMethod?.versionId }).then(() => undefined),
+      generate: (provider, context) => quickActionPlan(input, project, context).generate(provider),
+    });
+    if (!controlledContext) throw new StudioQuickActionError("QUICK_ACTION_NOT_READY", "当前项目上下文尚未准备好。");
+    const defaultAudit = quickActionPlan(input, project, controlledContext).defaultAudit;
+    return { ...run, studioAction: input.studioAction, method: defaultAudit, canApply: false };
+  }
+
+  const built = await (dependencies.contextBuilder ?? new ProjectContextBuilder()).build({ ...input, action: "REWRITE_SELECTION" });
+  const plan = quickActionPlan(input, project, built);
   const run = await executeStructuredAIRun({
     workspaceId: input.workspaceId,
     userId: input.userId,
@@ -78,23 +127,14 @@ export async function runStudioQuickAction(input: { workspaceId: string; userId:
     action: "REWRITE_SELECTION",
     operation: `STUDIO_${input.studioAction}`,
     promptVersion: 1,
-    inputSummary: { ...built.inputSummary, selectedTextLength: selection.original.length, hasInstruction: Boolean(input.instruction?.trim()) },
-    metadata: { kind: "STUDIO_QUICK_ACTION", studioAction: input.studioAction, selectionStart: selection.start, selectionEnd: selection.end, ownFactCount: ownFactTexts.length, hasOwnEvidence: built.hasOwnEvidence, hasOwnCaseOrData: built.hasOwnCaseOrData, contextVersion: "creation-context-v1", ...defaultAudit },
-    auditMetadata: { studioAction: input.studioAction, ...defaultAudit },
+    inputSummary: { ...built.inputSummary, selectedTextLength: plan.selection.original.length, hasInstruction: Boolean(input.instruction?.trim()) },
+    metadata: { kind: "STUDIO_QUICK_ACTION", studioAction: input.studioAction, selectionStart: plan.selection.start, selectionEnd: plan.selection.end, ownFactCount: built.ownFacts.length, hasOwnEvidence: built.hasOwnEvidence, hasOwnCaseOrData: built.hasOwnCaseOrData, contextVersion: "creation-context-v1", ...plan.defaultAudit },
+    auditMetadata: { studioAction: input.studioAction, ...plan.defaultAudit },
     contextTruncated: built.contextTruncated,
     onRunCreated: (aiRunId) => recordGenerationMethodUsages({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, aiRunId, selectedMethodVersionIds: built.selectedMethods.map(({ methodVersionId }) => methodVersionId), defaultMethodVersionId: built.defaultMethod?.versionId }).then(() => undefined),
-    generate: async (provider) => {
-      if (input.studioAction === "REWRITE_OPENING") {
-        const generated = await provider.generateStructured({ systemPrompt: `${quickSystemPrompt}\n${generationQualityContract}`, prompt }, rewriteOpeningProviderSchema);
-        const value = { original: selection.original, summary: generated.data.value.summary, suggestions: generated.data.value.suggestions, replacement: null, replacementFactState: null, risks: [] };
-        return { ...generated, data: { ...generated.data, value: sanitizeStudioQuickActionOutput(input.studioAction, value, ownFactTexts, hasActionEvidence) } };
-      }
-      const generated = await provider.generateStructured({ systemPrompt: `${quickSystemPrompt}\n${generationQualityContract}`, prompt }, studioQuickActionOutputSchema);
-      const value = generated.data.value;
-      return { ...generated, data: { ...generated.data, value: sanitizeStudioQuickActionOutput(input.studioAction, { ...value, original: selection.original }, ownFactTexts, hasActionEvidence) } };
-    },
+    generate: plan.generate,
   }, { runtime: dependencies.runtime });
-  return { ...run, studioAction: input.studioAction, method: defaultAudit, canApply: !["TOPIC_IDEAS", "FACT_CHECK"].includes(input.studioAction) };
+  return { ...run, studioAction: input.studioAction, method: plan.defaultAudit, canApply: true };
 }
 
 export async function applyStudioQuickAction(input: { workspaceId: string; userId: string; projectId: string; runId: string; expectedVersion: number; suggestionIndex?: number }) {

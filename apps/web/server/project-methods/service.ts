@@ -45,6 +45,7 @@ export type ProjectMethodStateDTO = {
 export type SelectedGenerationMethod = {
   methodAssetId: string;
   methodVersionId: string;
+  version: number;
   title: string;
   steps: string[];
   applicableScenarios: string[];
@@ -129,10 +130,10 @@ export async function getSelectedGenerationMethods(input: { workspaceId: string;
   const rows = await db.projectMethodSelection.findMany({
     where: { projectId: input.projectId, selectedByUserId: input.userId, project: { workspaceId: input.workspaceId }, methodAsset: { workspaceId: input.workspaceId, ownerUserId: input.userId, status: { not: "DISABLED" } } },
     orderBy: { createdAt: "asc" },
-    include: { methodVersion: { select: { title: true, steps: true, applicableScenarios: true, boundaries: true } } },
+    include: { methodVersion: { select: { version: true, title: true, steps: true, applicableScenarios: true, boundaries: true } } },
   });
   if (rows.length > 3) throw new ProjectMethodError("METHOD_SELECTION_INVALID", "本次选择的方法超过 3 个，请刷新后重新选择。");
-  return rows.filter(({ methodVersion }) => !isDefaultContentMethodPayload(methodVersion.steps)).map(({ methodAssetId, methodVersionId, methodVersion }) => ({ methodAssetId, methodVersionId, title: methodVersion.title, steps: strings(methodVersion.steps), applicableScenarios: strings(methodVersion.applicableScenarios), boundaries: strings(methodVersion.boundaries) }));
+  return rows.filter(({ methodVersion }) => !isDefaultContentMethodPayload(methodVersion.steps)).map(({ methodAssetId, methodVersionId, methodVersion }) => ({ methodAssetId, methodVersionId, version: methodVersion.version, title: methodVersion.title, steps: strings(methodVersion.steps), applicableScenarios: strings(methodVersion.applicableScenarios), boundaries: strings(methodVersion.boundaries) }));
 }
 
 export async function recordSelectedMethodUsages(input: { workspaceId: string; userId: string; projectId: string; aiRunId: string; methodVersionIds: string[] }) {
