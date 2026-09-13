@@ -11,6 +11,7 @@ import {
   useReactFlow,
   useViewport,
   type Node,
+  type Edge,
   type NodeProps,
   type Viewport,
 } from "@xyflow/react";
@@ -65,6 +66,7 @@ export type CanvasAssistantContext = {
   openDraft: () => void;
   selectedObject: { objectType: "CANVAS_OBJECT"; objectId: string; version: number; ownership: "EXTERNAL" | "PENDING"; whySelected: string; label: string } | null;
   projectMaterials: CanvasSourceOption[];
+  canvasObjects: CanvasObjectDTO[];
   onObjectCreated: (object: CanvasObjectDTO) => void;
 };
 export type WorkbenchLayoutMode = "canvas-only" | "canvas-assistant" | "assistant-only";
@@ -341,17 +343,20 @@ function WorkbenchLayoutMenu({ current, open, onClose, onChange }: { current: Wo
   </div>;
 }
 
-function CanvasViewCoordinator({ request, onHandled }: { request: { ids: string[]; revision: number } | null; onHandled: () => void }) {
-  const { fitView } = useReactFlow();
+function CanvasViewCoordinator({ request, onHandled }: { request: { ids: string[]; revision: number; mode?: "fit" | "follow" } | null; onHandled: () => void }) {
+  const { fitView, getNode, getViewport, setCenter } = useReactFlow();
   useEffect(() => {
     if (!request) return;
     const motionSafe = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const frame = window.requestAnimationFrame(() => {
-      void fitView({ nodes: request.ids.map((id) => ({ id })), padding: 0.55, maxZoom: 1.05, duration: motionSafe ? 280 : 0 });
+      if (request.mode === "follow") {
+        const node = getNode(request.ids.at(-1)!); const viewport = getViewport(); const canvas = document.querySelector(".content-canvas .react-flow")?.getBoundingClientRect();
+        if (node && canvas) { const left = node.position.x * viewport.zoom + viewport.x; const top = node.position.y * viewport.zoom + viewport.y; const width = (node.measured?.width ?? 380) * viewport.zoom; const height = (node.measured?.height ?? 240) * viewport.zoom; const visible = left > 24 && top > 72 && left + width < canvas.width - 24 && top + height < canvas.height - 48; if (!visible) void setCenter(node.position.x + width / viewport.zoom / 2, node.position.y + height / viewport.zoom / 2, { zoom: viewport.zoom, duration: motionSafe ? 240 : 0 }); }
+      } else void fitView({ nodes: request.ids.map((id) => ({ id })), padding: 0.55, maxZoom: 1.05, duration: motionSafe ? 280 : 0 });
       onHandled();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [fitView, onHandled, request]);
+  }, [fitView, getNode, getViewport, onHandled, request, setCenter]);
   return null;
 }
 
@@ -517,7 +522,7 @@ function CanvasSurface({
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [saveStates, setSaveStates] = useState<Record<string, CanvasSaveState>>({});
   const [canvasError, setCanvasError] = useState("");
-  const [viewRequest, setViewRequest] = useState<{ ids: string[]; revision: number } | null>(null);
+  const [viewRequest, setViewRequest] = useState<{ ids: string[]; revision: number; mode?: "fit" | "follow" } | null>(null);
   const [, setHistoryRevision] = useState(0);
   const workbenchRef = useRef<HTMLDivElement>(null);
   const assistantWidthRef = useRef<number | null>(null);
@@ -595,6 +600,7 @@ function CanvasSurface({
   const selectedKind = selectedNode?.type === "card" ? (selectedNode as CanvasNode).data.kind : null;
   const selectedFreeObject = selectedNode?.type === "free" ? (selectedNode as FreeCanvasNode).data.object : null;
   const selectedAssistantObject = selectedFreeObject ? { objectType: "CANVAS_OBJECT" as const, objectId: selectedFreeObject.id, version: selectedFreeObject.contentVersion, ownership: selectedFreeObject.objectType === "TEXT" ? "PENDING" as const : "EXTERNAL" as const, whySelected: "员工当前在画布中显式选中的对象", label: selectedFreeObject.title || selectedFreeObject.materialReference?.sourceTitleSnapshot || (selectedFreeObject.objectType === "TEXT" ? "未命名文本" : "项目资料") } : null;
+  const relationEdges = useMemo<Edge[]>(() => freeObjects.flatMap((target) => target.generatedFrom.flatMap((relation) => freeObjects.some((source) => source.id === relation.sourceObjectId) ? [{ id: `generated:${relation.sourceSnapshotId}:${target.id}`, source: `object:${relation.sourceObjectId}`, target: `object:${target.id}`, type: "smoothstep", className: "canvas-generated-edge", selectable: false, focusable: false } satisfies Edge] : [])), [freeObjects]);
   const currentFocus = focused ? `稿件｜${draft.title || "未命名稿件"}` : selectedNode?.type === "free" ? selectedFreeObject?.title || "未命名文本" : selectedNode?.type === "card" ? (selectedNode as CanvasNode).data.title : "画布";
 
   useEffect(() => {
@@ -1112,7 +1118,7 @@ function CanvasSurface({
           />
           <ReactFlow
             nodes={nodes}
-            edges={[]}
+            edges={relationEdges}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
             onDragOver={(event) => { if (!editable || !event.dataTransfer.types.includes(PROJECT_MATERIAL_DRAG_TYPE)) return; event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setMaterialDragging(true); }}
@@ -1236,7 +1242,7 @@ function CanvasSurface({
             <span>引用 · {referenceCount}</span>
           </div>
         </header>
-        <div className="workbench-assistant-body">{typeof assistant === "function" ? assistant({ focus: focused ? "draft" : selectedKind, openContext, openDraft: () => setFocused(true), selectedObject: selectedAssistantObject, projectMaterials: sourceOptions, onObjectCreated: (object) => { upsertObject(object); setSelectedObjectId(object.id); setEditingObjectId(null); pushCommand({ type: "CREATE", objectId: object.id }); } }) : assistant}</div>
+        <div className="workbench-assistant-body">{typeof assistant === "function" ? assistant({ focus: focused ? "draft" : selectedKind, openContext, openDraft: () => setFocused(true), selectedObject: selectedAssistantObject, projectMaterials: sourceOptions, canvasObjects: freeObjects, onObjectCreated: (object) => { upsertObject(object); setSelectedObjectId(object.id); setEditingObjectId(null); pushCommand({ type: "CREATE", objectId: object.id }); setViewRequest({ ids: [`object:${object.id}`], revision: Date.now(), mode: "follow" }); window.requestAnimationFrame(() => setNodes((current) => current.map((node) => ({ ...node, selected: node.id === `object:${object.id}` })))); } }) : assistant}</div>
       </aside>
 
       <WorkbenchLayoutMenu current={layoutMode} open={layoutMenuOpen} onClose={() => setLayoutMenuOpen(false)} onChange={onLayoutModeChange} />

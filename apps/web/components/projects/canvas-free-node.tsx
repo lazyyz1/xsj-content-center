@@ -1,6 +1,6 @@
 "use client";
 
-import { NodeResizer, type Node, type NodeProps } from "@xyflow/react";
+import { Handle, NodeResizer, Position, type Node, type NodeProps } from "@xyflow/react";
 import { FileText, ImageIcon, Link2, Plus, RotateCcw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { createContext, memo, useContext, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
@@ -85,6 +85,8 @@ function FreeCanvasNodeView({ data, selected }: NodeProps<FreeCanvasNode>) {
     className={`free-canvas-node is-${object.objectType.toLowerCase().replaceAll("_", "-")} ${selected ? "is-selected" : ""} ${editing ? "is-editing" : ""} ${editable ? "" : "is-readonly"}`}
     onDoubleClick={() => { if (editable && object.objectType === "TEXT") actions.startEditing(object.id); }}
   >
+    <Handle type="target" position={Position.Left} isConnectable={false} className="canvas-system-handle" />
+    <Handle type="source" position={Position.Right} isConnectable={false} className="canvas-system-handle" />
     <NodeResizer
       isVisible={selected && editable}
       minWidth={object.objectType === "IMAGE_REFERENCE" ? 260 : 300}
@@ -116,6 +118,8 @@ function FreeCanvasNodeView({ data, selected }: NodeProps<FreeCanvasNode>) {
     </div> : null}
 
     {object.objectType === "IMAGE_REFERENCE" ? <CanvasImage object={object} /> : null}
+
+    {object.generatedFrom.length ? <div className="canvas-generated-origin">{object.generatedFrom.some(({ sourceDeleted }) => sourceDeleted) ? "部分来源已删除" : `基于 ${object.generatedFrom.length} 项内容生成`}</div> : null}
 
     <footer>
       <span className={`canvas-save-state is-${saveState}`} aria-live="polite">{saveLabel(saveState)}</span>

@@ -390,6 +390,7 @@ model User {
   deletedDraftBranches    DraftBranch[]                 @relation("DraftBranchDeletedBy")
   createdDraftRevisions   DraftRevision[]               @relation("DraftRevisionCreatedBy")
   createdAssistantThreads AssistantThread[]             @relation("AssistantThreadCreatedBy")
+  createdCanvasGenerateRuns CanvasGenerateRun[]          @relation("CanvasGenerateRunCreatedBy")
 
   @@index([systemRole])
   @@index([disabledAt])
@@ -489,6 +490,7 @@ model Workspace {
   draftBranches           DraftBranch[]
   draftRevisions          DraftRevision[]
   assistantThreads        AssistantThread[]
+  canvasGenerateRuns      CanvasGenerateRun[]
 }
 
 model WorkspaceMember {
@@ -765,7 +767,8 @@ model ContentProject {
   draftBranches          DraftBranch[]      @relation("ProjectDraftBranches")
   draftRevisions         DraftRevision[]
   primaryDraftBranch     DraftBranch?       @relation("PrimaryDraftBranch", fields: [primaryDraftBranchId], references: [id], onDelete: SetNull)
-  assistantThread        AssistantThread?
+  assistantThreads       AssistantThread[]
+  canvasGenerateRuns     CanvasGenerateRun[]
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
@@ -869,6 +872,9 @@ model CanvasObject {
   sourceRelations CanvasRelation[] @relation("CanvasRelationSource")
   targetRelations CanvasRelation[] @relation("CanvasRelationTarget")
   materialReference CanvasMaterialReference?
+  assistantThreads AssistantThread[]
+  sourceGenerateRuns CanvasGenerateRun[] @relation("CanvasGenerateRunSource")
+  resultGenerateRuns CanvasGenerateRun[] @relation("CanvasGenerateRunResult")
 
   @@index([workspaceId, projectId, deletedAt, updatedAt])
   @@index([projectId, deletedAt, zIndex])
@@ -896,6 +902,7 @@ model CanvasObjectSnapshot {
   object               CanvasObject          @relation(fields: [objectId], references: [id], onDelete: Restrict)
   createdBy            User                  @relation("CanvasSnapshotCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   sourceRelations      CanvasRelation[]
+  generateRuns         CanvasGenerateRun[]
 
   @@index([workspaceId, projectId, createdAt])
   @@index([objectId, objectContentVersion, createdAt])
@@ -1703,6 +1710,7 @@ model AIRun {
   methodUsages        MethodUsage[]
   creationFeedbacks   CreationFeedback[] @relation("CreationFeedbackSourceRun")
   assistantMessage    AssistantMessage?
+  canvasGenerateRun   CanvasGenerateRun?
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, projectId, createdAt])
@@ -1714,17 +1722,20 @@ model AIRun {
 model AssistantThread {
   id          String             @id @default(cuid())
   workspaceId String
-  projectId   String             @unique
+  projectId   String
+  canvasObjectId String?
   createdById String
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
   workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project     ContentProject     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  canvasObject CanvasObject?     @relation(fields: [canvasObjectId], references: [id], onDelete: Cascade)
   createdBy   User               @relation("AssistantThreadCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   messages    AssistantMessage[]
 
   @@index([workspaceId, updatedAt])
   @@index([createdById])
+  @@index([projectId, canvasObjectId])
 }
 
 model AssistantMessage {
@@ -1743,6 +1754,42 @@ model AssistantMessage {
 
   @@index([threadId, createdAt])
   @@index([threadId, status])
+}
+
+enum CanvasGenerateRunStatus {
+  PENDING
+  STREAMING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+model CanvasGenerateRun {
+  id                   String                  @id @default(cuid())
+  workspaceId          String
+  projectId            String
+  sourceCanvasObjectId String
+  resultCanvasObjectId String?
+  aiRunId              String?                 @unique
+  inputSnapshotId      String
+  instruction          String                  @db.Text
+  status               CanvasGenerateRunStatus @default(PENDING)
+  createdById          String
+  createdAt            DateTime                @default(now())
+  completedAt          DateTime?
+  workspace            Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project              ContentProject          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceCanvasObject   CanvasObject            @relation("CanvasGenerateRunSource", fields: [sourceCanvasObjectId], references: [id], onDelete: Restrict)
+  resultCanvasObject   CanvasObject?           @relation("CanvasGenerateRunResult", fields: [resultCanvasObjectId], references: [id], onDelete: SetNull)
+  aiRun                AIRun?                  @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
+  inputSnapshot        CanvasObjectSnapshot    @relation(fields: [inputSnapshotId], references: [id], onDelete: Restrict)
+  createdBy            User                    @relation("CanvasGenerateRunCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, projectId, createdAt])
+  @@index([sourceCanvasObjectId, createdAt])
+  @@index([resultCanvasObjectId])
+  @@index([inputSnapshotId])
+  @@index([createdById])
 }
 
 model UnifiedCreativeAnalysis {

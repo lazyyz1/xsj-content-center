@@ -49,13 +49,13 @@ class CanvasSelectedObjectAdapter implements SelectedContextObjectAdapter {
     const [rows, sourceRows] = await Promise.all([
       requestedCanvas.length ? db.canvasObject.findMany({
       where: { id: { in: requestedCanvas.map(({ objectId }) => objectId) }, workspaceId: input.workspaceId, projectId: input.projectId, deletedAt: null },
-      select: { id: true, objectType: true, title: true, textContent: true, contentVersion: true },
+      select: { id: true, objectType: true, title: true, textContent: true, contentVersion: true, targetRelations: { where: { relationType: "GENERATED_FROM" }, orderBy: { createdAt: "asc" }, take: 8, select: { sourceSnapshot: { select: { id: true, objectType: true, objectContentVersion: true, title: true, textContent: true, referenceManifest: true } } } } },
       }) : [],
       requestedSources.length ? db.projectSource.findMany({ where: { projectId: input.projectId, sourceItemId: { in: requestedSources.map(({ objectId }) => objectId) }, sourceItem: { workspaceId: input.workspaceId } }, select: { sourceItem: { select: { id: true, title: true, description: true, sourceType: true, sourcePlatform: true, materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { version: true, summary: true, keyPoints: true } } } } } }) : [],
     ]);
-    return [...rows.map((row): ContextItem => {
+    return [...rows.flatMap((row): ContextItem[] => {
       const requestedItem = requestedCanvas.find(({ objectId }) => objectId === row.id);
-      return {
+      return [{
         objectType: "CANVAS_OBJECT",
         objectId: row.id,
         version: row.contentVersion,
@@ -64,7 +64,7 @@ class CanvasSelectedObjectAdapter implements SelectedContextObjectAdapter {
         whySelected: requestedItem?.whySelected ?? "用户当前选中对象",
         truncated: false,
         content: [row.title, row.textContent].filter(Boolean).join("\n"),
-      };
+      }, ...row.targetRelations.map(({ sourceSnapshot }): ContextItem => ({ objectType: "CANVAS_OBJECT_SNAPSHOT", objectId: sourceSnapshot.id, version: sourceSnapshot.objectContentVersion, ownership: sourceSnapshot.objectType === "TEXT" && !sourceSnapshot.referenceManifest ? "PENDING" : "EXTERNAL", provenance: "generated_from_snapshot", whySelected: "当前节点的历史生成来源", truncated: false, content: [sourceSnapshot.title, sourceSnapshot.textContent, sourceSnapshot.referenceManifest ? JSON.stringify(sourceSnapshot.referenceManifest) : null].filter(Boolean).join("\n") }))];
     }), ...sourceRows.map(({ sourceItem }): ContextItem => {
       const requestedItem = requestedSources.find(({ objectId }) => objectId === sourceItem.id);
       const analysis = sourceItem.materialAnalyses[0];

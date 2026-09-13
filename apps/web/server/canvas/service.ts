@@ -53,6 +53,7 @@ export type CanvasObjectDTO = {
   updatedAt: string;
   deletedAt: string | null;
   materialReference: CanvasMaterialReferenceDTO | null;
+  generatedFrom: Array<{ sourceObjectId: string; sourceTitle: string; sourceDeleted: boolean; sourceSnapshotId: string }>;
 };
 
 export class CanvasServiceError extends Error {
@@ -69,6 +70,7 @@ const canvasObjectInclude = {
       sourceAsset: { select: { id: true, assetType: true, status: true, mimeType: true } },
     },
   },
+  targetRelations: { where: { relationType: "GENERATED_FROM" }, include: { sourceObject: { select: { id: true, title: true, deletedAt: true } }, sourceSnapshot: { select: { id: true, title: true } } } },
 } satisfies Prisma.CanvasObjectInclude;
 
 type CanvasObjectRow = Prisma.CanvasObjectGetPayload<{ include: typeof canvasObjectInclude }>;
@@ -107,6 +109,7 @@ function objectDTO(row: CanvasObjectRow): CanvasObjectDTO {
     updatedAt: row.updatedAt.toISOString(),
     deletedAt: row.deletedAt?.toISOString() ?? null,
     materialReference: row.materialReference ? materialReferenceDTO(row.materialReference) : null,
+    generatedFrom: row.targetRelations.map((relation) => ({ sourceObjectId: relation.sourceObjectId, sourceTitle: relation.sourceObject.title || relation.sourceSnapshot.title || "未命名内容", sourceDeleted: Boolean(relation.sourceObject.deletedAt), sourceSnapshotId: relation.sourceSnapshotId })),
   };
 }
 

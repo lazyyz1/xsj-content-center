@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import { db, type Prisma } from "@content-center/db";
 import type { LLMRuntime } from "../ai/llm-runtime";
 import { AIControlService } from "../ai/control/ai-control-service";
@@ -7,7 +8,7 @@ import { ActionPermissionPolicy } from "../ai/control/action-permission";
 import { AIControlError, type ContextItem, type ContextManifest, type SelectedContextObject, type WorkspaceRoleName } from "../ai/control/contracts";
 import { ModelRouter } from "../ai/control/model-router";
 import { deterministicFactRisks, inspectStudioFactText } from "../studio/fact-safety";
-import { createCanvasTextObject, type CanvasObjectDTO } from "../canvas/service";
+import { createCanvasTextObject, listCanvasObjects, type CanvasObjectDTO } from "../canvas/service";
 import { createDraftBranch, createDraftRevision, type DraftBranchDTO } from "../drafts/service";
 import { createIdea } from "../discovery/service";
 
@@ -21,6 +22,7 @@ export type AssistantResultAction = "TEXT" | "TOPIC" | "DRAFT";
 export type AssistantMessageDTO = { id: string; role: "USER" | "ASSISTANT"; content: string; status: "PENDING" | "STREAMING" | "COMPLETED" | "FAILED" | "STOPPED"; createdAt: string; sources: AssistantSourceDTO[]; warnings: string[]; resultType: "TEXT" | "TOPIC" | "DRAFT" | "CHECK"; actions: AssistantResultAction[] };
 export type AssistantThreadDTO = { id: string; messages: AssistantMessageDTO[] };
 export type AssistantStreamEvent = { type: "start"; threadId: string; userMessage: AssistantMessageDTO; assistantMessage: AssistantMessageDTO } | { type: "delta"; messageId: string; delta: string } | { type: "done" | "stopped"; message: AssistantMessageDTO } | { type: "error"; messageId: string; code: string; message: string };
+export type NodeAssistantStreamEvent = { type: "start"; threadId: string; generateRunId: string; userMessage: AssistantMessageDTO; assistantMessage: AssistantMessageDTO } | { type: "delta"; messageId: string; delta: string } | { type: "done"; message: AssistantMessageDTO; resultObject: CanvasObjectDTO; relationCount: number } | { type: "stopped"; message: AssistantMessageDTO } | { type: "error"; messageId: string; code: string; message: string };
 
 export class AssistantServiceError extends Error {
   constructor(readonly code: "PROJECT_NOT_FOUND" | "MESSAGE_NOT_FOUND" | "INVALID_INPUT" | "PERMISSION_DENIED", message: string) { super(message); this.name = "AssistantServiceError"; }
@@ -79,7 +81,7 @@ function messageDTO(message: { id: string; role: "USER" | "ASSISTANT"; content: 
   const metadata = record(message.metadata);
   const type = ["TEXT", "TOPIC", "DRAFT", "CHECK"].includes(String(metadata.resultType)) ? metadata.resultType as AssistantMessageDTO["resultType"] : "TEXT";
   const sources = Array.isArray(metadata.sources) ? metadata.sources.flatMap((source) => { const value = record(source); return typeof value.title === "string" && typeof value.type === "string" && typeof value.excerpt === "string" ? [{ title: value.title, type: value.type, excerpt: value.excerpt }] : []; }) : [];
-  return { id: message.id, role: message.role, content: message.content, status: message.status, createdAt: message.createdAt.toISOString(), sources, warnings: strings(metadata.warnings), resultType: type, actions: message.role === "ASSISTANT" && message.status === "COMPLETED" ? resultActions(type) : [] };
+  return { id: message.id, role: message.role, content: message.content, status: message.status, createdAt: message.createdAt.toISOString(), sources, warnings: strings(metadata.warnings), resultType: type, actions: message.role === "ASSISTANT" && message.status === "COMPLETED" && metadata.nodeResult !== true ? resultActions(type) : [] };
 }
 
 async function scopedProject(input: { workspaceId: string; userId: string; projectId: string }) {
@@ -90,7 +92,10 @@ async function scopedProject(input: { workspaceId: string; userId: string; proje
 
 async function defaultThread(input: { workspaceId: string; userId: string; projectId: string }) {
   await scopedProject(input);
-  return db.assistantThread.upsert({ where: { projectId: input.projectId }, update: { updatedAt: new Date() }, create: { workspaceId: input.workspaceId, projectId: input.projectId, createdById: input.userId } });
+  const existing = await db.assistantThread.findFirst({ where: { projectId: input.projectId, workspaceId: input.workspaceId, canvasObjectId: null } });
+  if (existing) return db.assistantThread.update({ where: { id: existing.id }, data: { updatedAt: new Date() } });
+  try { return await db.assistantThread.create({ data: { workspaceId: input.workspaceId, projectId: input.projectId, createdById: input.userId } }); }
+  catch { return db.assistantThread.findFirstOrThrow({ where: { projectId: input.projectId, workspaceId: input.workspaceId, canvasObjectId: null } }); }
 }
 
 export async function getProjectAssistantThread(input: { workspaceId: string; userId: string; projectId: string }): Promise<AssistantThreadDTO> {
@@ -160,4 +165,81 @@ export async function saveAssistantMessageResult(input: { workspaceId: string; u
   const branch = await createDraftBranch({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, title: `候选稿 · ${title.slice(0, 60)}` });
   const draft = await createDraftRevision({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, branchId: branch.id, expectedVersion: branch.version, title, body: message.content, outline: [], origin: "AI", originNote: "由项目级鑫小助生成，尚未设为主稿", generateRunId: message.aiRunId });
   return { draft: draft.branch };
+}
+
+async function nodeThread(input: { workspaceId: string; userId: string; projectId: string; objectId: string }) {
+  await scopedProject(input);
+  const object = await db.canvasObject.findFirst({ where: { id: input.objectId, workspaceId: input.workspaceId, projectId: input.projectId, deletedAt: null }, select: { id: true } });
+  if (!object) throw new AssistantServiceError("MESSAGE_NOT_FOUND", "当前内容不存在。");
+  const existing = await db.assistantThread.findFirst({ where: { projectId: input.projectId, canvasObjectId: input.objectId } });
+  if (existing) return existing;
+  try { return await db.assistantThread.create({ data: { workspaceId: input.workspaceId, projectId: input.projectId, canvasObjectId: input.objectId, createdById: input.userId } }); }
+  catch { return db.assistantThread.findFirstOrThrow({ where: { projectId: input.projectId, canvasObjectId: input.objectId } }); }
+}
+
+export async function getNodeAssistantThread(input: { workspaceId: string; userId: string; projectId: string; objectId: string }) {
+  const thread = await nodeThread(input);
+  const messages = await db.assistantMessage.findMany({ where: { threadId: thread.id }, orderBy: { createdAt: "asc" }, take: 60 });
+  return { id: thread.id, messages: messages.map(messageDTO) };
+}
+
+function nextResultPosition(source: { positionX: number; positionY: number; width: number }, objects: Array<{ positionX: number; positionY: number; width: number; height: number }>) {
+  const width = 380; const height = 240; const positionX = source.positionX + source.width + 64; let positionY = source.positionY;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const blocked = objects.some((item) => positionX < item.positionX + item.width && positionX + width > item.positionX && positionY < item.positionY + item.height && positionY + height > item.positionY);
+    if (!blocked) break;
+    positionY += 44;
+  }
+  return { positionX, positionY, width, height };
+}
+
+export async function runNodeAssistant(input: { workspaceId: string; userId: string; projectId: string; sourceObjectId: string; instruction: string; additionalObjectIds?: string[]; sourceItemIds?: string[]; signal?: AbortSignal }, emit: (event: NodeAssistantStreamEvent) => void, dependencies: { controlService?: AIControlService; runtime?: LLMRuntime } = {}) {
+  const instruction = input.instruction.trim();
+  if (!instruction || instruction.length > 4_000 || (input.additionalObjectIds?.length ?? 0) > 5 || (input.sourceItemIds?.length ?? 0) > 8) throw new AssistantServiceError("INVALID_INPUT", "请输入 1 到 4000 个字，并控制引用数量。");
+  const project = await scopedProject(input);
+  if (new ActionPermissionPolicy().evaluate({ role: project.role, action: "CREATE_FREE_TEXT_CANDIDATE" }).decision !== "ALLOW") throw new AssistantServiceError("PERMISSION_DENIED", "当前权限可以查看节点记录，但不能发起新的节点生成。");
+  const requestedIds = [...new Set([input.sourceObjectId, ...(input.additionalObjectIds ?? [])])];
+  const sourceObjects = await db.canvasObject.findMany({ where: { id: { in: requestedIds }, workspaceId: input.workspaceId, projectId: input.projectId, deletedAt: null }, include: { materialReference: true } });
+  if (sourceObjects.length !== requestedIds.length) throw new AssistantServiceError("MESSAGE_NOT_FOUND", "引用的内容不存在或已经删除。");
+  const ordered = requestedIds.map((id) => sourceObjects.find((object) => object.id === id)!);
+  const snapshots = await db.$transaction(ordered.map((object) => db.canvasObjectSnapshot.create({ data: { workspaceId: input.workspaceId, projectId: input.projectId, objectId: object.id, objectType: object.objectType, objectContentVersion: object.contentVersion, title: object.title, textContent: object.textContent, contentHash: createHash("sha256").update(`${object.title ?? ""}\n${object.textContent ?? ""}`).digest("hex"), snapshotReason: "AI_INPUT", referenceManifest: object.materialReference ? json({ sourceItemId: object.materialReference.sourceItemId, sourceTitleSnapshot: object.materialReference.sourceTitleSnapshot, excerpt: object.materialReference.excerpt }) : undefined, createdById: input.userId } })));
+  const thread = await nodeThread({ ...input, objectId: input.sourceObjectId });
+  const [userMessage, assistantMessage] = await db.$transaction([
+    db.assistantMessage.create({ data: { threadId: thread.id, role: "USER", content: instruction, status: "COMPLETED", metadata: json({ temporarySupplement: true }) } }),
+    db.assistantMessage.create({ data: { threadId: thread.id, role: "ASSISTANT", content: "", status: "PENDING", metadata: json({ nodeResult: true }) } }),
+  ]);
+  const generateRun = await db.canvasGenerateRun.create({ data: { workspaceId: input.workspaceId, projectId: input.projectId, sourceCanvasObjectId: input.sourceObjectId, inputSnapshotId: snapshots[0]!.id, instruction, createdById: input.userId } });
+  emit({ type: "start", threadId: thread.id, generateRunId: generateRun.id, userMessage: messageDTO(userMessage), assistantMessage: messageDTO(assistantMessage) });
+  const recent = await db.assistantMessage.findMany({ where: { threadId: thread.id, id: { notIn: [userMessage.id, assistantMessage.id] }, status: "COMPLETED" }, orderBy: { createdAt: "desc" }, take: 8 });
+  let contextManifest: ContextManifest | null = null;
+  try {
+    const runtime = dependencies.runtime;
+    const controlService = dependencies.controlService ?? new AIControlService({ modelRouter: runtime ? new ModelRouter(async () => runtime) : undefined });
+    const selectedObjects: SelectedContextObject[] = [...ordered.map((object, index) => ({ objectType: "CANVAS_OBJECT", objectId: object.id, version: object.contentVersion, ownership: object.objectType === "TEXT" ? "PENDING" as const : "EXTERNAL" as const, whySelected: index === 0 ? "当前节点" : "员工显式追加的 Canvas 内容" })), ...(input.sourceItemIds ?? []).map((objectId) => ({ objectType: "SOURCE_ITEM", objectId, ownership: "EXTERNAL" as const, whySelected: "员工显式追加的项目资料" }))];
+    const run = await controlService.execute({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, taskType: "DRAFT_SUGGESTION", requestedAction: "CREATE_FREE_TEXT_CANDIDATE", userInput: instruction, selectedObjects, conversationHistory: recent.reverse().map((message) => ({ id: message.id, role: message.role, content: message.content, createdAt: message.createdAt.toISOString() })), action: "PROJECT_ASSISTANT", operation: "CANVAS_NODE_ASSISTANT", promptVersion: 1, modelRequest: { structuredOutput: false }, onContext: (context) => { contextManifest = context.manifest; }, inputSummary: (context) => ({ ...context.inputSummary, nodeSourceCount: selectedObjects.length, instructionLength: instruction.length }), metadata: () => ({ kind: "CANVAS_NODE_ASSISTANT", canvasGenerateRunId: generateRun.id, inputSnapshotId: snapshots[0]!.id }), auditMetadata: () => ({ canvasGenerateRunId: generateRun.id, sourceCanvasObjectCount: ordered.length }), onRunCreated: async (aiRunId) => { await db.$transaction([db.canvasGenerateRun.update({ where: { id: generateRun.id }, data: { aiRunId, status: "STREAMING" } }), db.assistantMessage.update({ where: { id: assistantMessage.id }, data: { aiRunId, status: "STREAMING" } })]); }, generate: async (provider, context) => {
+      const prompt = `【当前节点生成要求】\n${instruction}\n\n【节点与必要项目上下文】\n${JSON.stringify(context.context)}\n\n只返回适合放入新文本节点的结果，不要解释内部处理过程。`;
+      const streamed = await provider.streamText({ systemPrompt: assistantSystemPrompt, prompt, maxCompletionTokens: 2_000 }, { signal: input.signal, onDelta: (delta) => { emit({ type: "delta", messageId: assistantMessage.id, delta }); } });
+      const checked = postCheck(streamed.data.text, context.ownFacts.map(({ text }) => text));
+      return { ...streamed, data: { ...streamed.data, value: { content: checked.content, warnings: checked.warnings, resultType: resultType(instruction) } } };
+    } });
+    const value = run.output as { content: string; warnings: string[]; resultType: AssistantMessageDTO["resultType"] };
+    const allObjects = await db.canvasObject.findMany({ where: { projectId: input.projectId, deletedAt: null }, select: { positionX: true, positionY: true, width: true, height: true, zIndex: true } });
+    const primary = ordered[0]!; const placement = nextResultPosition(primary, allObjects); const title = value.content.split(/\n/u).map((line) => line.replace(/^#+\s*/, "").trim()).find(Boolean)?.slice(0, 100) || "鑫小助生成内容";
+    const transaction = await db.$transaction(async (tx) => {
+      const result = await tx.canvasObject.create({ data: { workspaceId: input.workspaceId, projectId: input.projectId, objectType: "TEXT", title, textContent: value.content, ...placement, zIndex: Math.max(0, ...allObjects.map(({ zIndex }) => zIndex)) + 1, metadata: json({ candidate: true, canvasGenerateRunId: generateRun.id }), createdById: input.userId, updatedById: input.userId } });
+      await tx.canvasRelation.createMany({ data: ordered.map((object, index) => ({ workspaceId: input.workspaceId, projectId: input.projectId, relationType: "GENERATED_FROM", sourceObjectId: object.id, targetObjectId: result.id, sourceSnapshotId: snapshots[index]!.id, createdById: input.userId })) });
+      await tx.canvasGenerateRun.update({ where: { id: generateRun.id }, data: { resultCanvasObjectId: result.id, status: "SUCCEEDED", completedAt: new Date() } });
+      const completed = await tx.assistantMessage.update({ where: { id: assistantMessage.id }, data: { content: value.content, status: "COMPLETED", metadata: json({ nodeResult: true, resultType: value.resultType, warnings: value.warnings, sources: contextManifest ? sourcesFromManifest(contextManifest) : [] }) } });
+      await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "canvas.ai_result_created", resourceType: "canvas_generate_run", resourceId: generateRun.id, metadata: json({ projectId: input.projectId, sourceCount: ordered.length, resultObjectId: result.id }) } });
+      return { result, completed };
+    });
+    const resultObject = (await listCanvasObjects(input)).find(({ id }) => id === transaction.result.id)!;
+    emit({ type: "done", message: messageDTO(transaction.completed), resultObject, relationCount: ordered.length });
+    return { message: messageDTO(transaction.completed), resultObject, generateRunId: generateRun.id };
+  } catch (error) {
+    const stopped = Boolean(input.signal?.aborted); const code = stopped ? "STOPPED" : error instanceof AIControlError ? error.code : "UNKNOWN"; const message = stopped ? "已停止这次生成。" : error instanceof AIControlError ? error.message : "AI 生成失败，请稍后重试。";
+    const [failed] = await db.$transaction([db.assistantMessage.update({ where: { id: assistantMessage.id }, data: { status: stopped ? "STOPPED" : "FAILED", errorCode: code } }), db.canvasGenerateRun.update({ where: { id: generateRun.id }, data: { status: stopped ? "CANCELLED" : "FAILED", completedAt: new Date() } })]);
+    if (stopped) emit({ type: "stopped", message: messageDTO(failed) }); else emit({ type: "error", messageId: assistantMessage.id, code, message });
+    return { message: messageDTO(failed), resultObject: null, generateRunId: generateRun.id };
+  }
 }

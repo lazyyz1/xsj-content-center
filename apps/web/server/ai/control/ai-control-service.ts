@@ -83,7 +83,7 @@ export class AIControlService {
     const context = await this.contextBuilder.build({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, taskType: input.taskType, action: input.action, studioAction: input.studioAction, selectedObjects: input.selectedObjects, conversationHistory: input.conversationHistory });
     if (!context) throw new AIControlError("NO_CONTEXT");
     input.onContext?.(context);
-    const fact = this.factGate.evaluate({ items: context.manifest.items, ownFacts: context.ownFacts.map(({ text }) => text) });
+    const fact = this.factGate.evaluate({ items: context.manifest.items, ownFacts: context.ownFacts.map(({ text }) => text), instruction: input.userInput });
     if (fact.decision === "BLOCK") throw new AIControlError("FACT_BLOCKED");
     const permission = this.permissionPolicy.evaluate({ role, action: input.requestedAction, userConfirmed: input.userConfirmed });
     if (permission.decision !== "ALLOW") throw new AIControlError("PERMISSION_DENIED", permission.decision === "REQUIRE_CONFIRMATION" ? "这个操作需要你明确确认后才能继续。" : undefined);

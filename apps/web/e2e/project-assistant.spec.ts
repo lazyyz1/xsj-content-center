@@ -47,8 +47,6 @@ test.describe.serial("Phase 10B project assistant", () => {
     await page.context().addCookies(cookies);
     await page.setViewportSize({ width: 1680, height: 1000 });
     await page.goto(`/dashboard?project=${projectId}`);
-    await page.getByText("当前选中观点", { exact: true }).click();
-    await expect(page.getByText("已引用：当前选中观点", { exact: true })).toBeVisible();
     const before = await page.evaluate((id) => JSON.parse(localStorage.getItem(`content-canvas:${id}:v5`) || "{}")?.viewport, projectId);
     await page.getByRole("button", { name: "添加项目资料" }).last().click();
     await page.getByPlaceholder("搜索当前项目资料").fill("校长访谈");

@@ -3041,6 +3041,8 @@ body:has(.benchmark-page) .assistant-dock-button.is-labeled span { writing-mode:
 @keyframes assistant-live{0%,100%{opacity:.38}50%{opacity:1}}@keyframes assistant-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.studio-assistant-loading svg,.studio-assistant-message>header i{animation:none}.studio-assistant-citations summary svg{transition:none!important}.studio-assistant-stream{scroll-behavior:auto}}
 .studio-assistant-error,.studio-assistant-success{flex:0 0 auto}
+.canvas-generated-edge .react-flow__edge-path{stroke:rgb(112 137 176 / .42);stroke-width:1.25;stroke-dasharray:5 6}.canvas-generated-origin{margin:.15rem .65rem .4rem;border-radius:.5rem;background:rgb(239 245 255 / .78);padding:.35rem .45rem;color:var(--text-tertiary);font-size:.6rem}.studio-assistant-material-picker>div>p{padding:.36rem .45rem .2rem;color:var(--text-tertiary);font-size:.58rem;font-weight:700}.studio-assistant-message.is-streaming .studio-assistant-message-content{min-height:3.25rem}
+.canvas-system-handle{width:1px!important;height:1px!important;min-width:1px!important;min-height:1px!important;border:0!important;background:transparent!important;opacity:0!important;pointer-events:none!important}
 
 @media (hover:hover) and (pointer:fine) {
   .sidebar-desktop-control button:hover { background:#edf3fd; color:#315fc8; }
