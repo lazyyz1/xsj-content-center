@@ -48,6 +48,15 @@ export class MockLLMProvider implements LLMProvider {
     return mockResult("LLMProvider", { text, model: "mock-llm" });
   }
 
+  async streamText(input: LLMGenerateInput, options: import("./types").LLMStreamOptions) {
+    const result = await this.generateText(input);
+    for (const chunk of result.data.text.match(/[\s\S]{1,24}/g) ?? []) {
+      if (options.signal?.aborted) throw new DOMException("Stopped", "AbortError");
+      await options.onDelta(chunk);
+    }
+    return result;
+  }
+
   async generateStructured<T>(input: LLMGenerateInput, schema: ZodType<T>) {
     const raw = this.fixture?.(input);
     const value = schema.parse(raw);

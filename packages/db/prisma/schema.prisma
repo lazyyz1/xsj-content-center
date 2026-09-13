@@ -167,6 +167,7 @@ enum PromptType {
   REVIEW_PLATFORM_CONTENT
   GENERATE_TOPIC_CANDIDATES
   GENERATE_TODAY_RECOMMENDATIONS
+  PROJECT_ASSISTANT
 }
 
 enum MaterialAnalysisStatus {
@@ -278,6 +279,19 @@ enum MotherContentOrigin {
   GPT_WEB
 }
 
+enum AssistantMessageRole {
+  USER
+  ASSISTANT
+}
+
+enum AssistantMessageStatus {
+  PENDING
+  STREAMING
+  COMPLETED
+  FAILED
+  STOPPED
+}
+
 enum DraftRevisionOrigin {
   HUMAN
   AI
@@ -375,6 +389,7 @@ model User {
   updatedDraftBranches    DraftBranch[]                 @relation("DraftBranchUpdatedBy")
   deletedDraftBranches    DraftBranch[]                 @relation("DraftBranchDeletedBy")
   createdDraftRevisions   DraftRevision[]               @relation("DraftRevisionCreatedBy")
+  createdAssistantThreads AssistantThread[]             @relation("AssistantThreadCreatedBy")
 
   @@index([systemRole])
   @@index([disabledAt])
@@ -473,6 +488,7 @@ model Workspace {
   canvasMaterialReferences CanvasMaterialReference[]
   draftBranches           DraftBranch[]
   draftRevisions          DraftRevision[]
+  assistantThreads        AssistantThread[]
 }
 
 model WorkspaceMember {
@@ -749,6 +765,7 @@ model ContentProject {
   draftBranches          DraftBranch[]      @relation("ProjectDraftBranches")
   draftRevisions         DraftRevision[]
   primaryDraftBranch     DraftBranch?       @relation("PrimaryDraftBranch", fields: [primaryDraftBranchId], references: [id], onDelete: SetNull)
+  assistantThread        AssistantThread?
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
@@ -1685,12 +1702,47 @@ model AIRun {
   unifiedCreativeAnalysis UnifiedCreativeAnalysis?
   methodUsages        MethodUsage[]
   creationFeedbacks   CreationFeedback[] @relation("CreationFeedbackSourceRun")
+  assistantMessage    AssistantMessage?
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, projectId, createdAt])
   @@index([projectId, action, createdAt])
   @@index([userId])
   @@index([platformTemplateId])
+}
+
+model AssistantThread {
+  id          String             @id @default(cuid())
+  workspaceId String
+  projectId   String             @unique
+  createdById String
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project     ContentProject     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy   User               @relation("AssistantThreadCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  messages    AssistantMessage[]
+
+  @@index([workspaceId, updatedAt])
+  @@index([createdById])
+}
+
+model AssistantMessage {
+  id        String                 @id @default(cuid())
+  threadId  String
+  role      AssistantMessageRole
+  content   String                 @db.Text
+  status    AssistantMessageStatus @default(PENDING)
+  aiRunId   String?                @unique
+  metadata  Json?
+  errorCode String?
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+  thread    AssistantThread        @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  aiRun     AIRun?                 @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
+
+  @@index([threadId, createdAt])
+  @@index([threadId, status])
 }
 
 model UnifiedCreativeAnalysis {

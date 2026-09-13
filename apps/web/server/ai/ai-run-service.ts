@@ -101,6 +101,15 @@ export async function executeStructuredAIRun<T>(input: {
     ]);
     return { id: run.id, action: input.action, status: "SUCCEEDED" as const, output: result.data.value, contextTruncated: input.contextTruncated, provider: runtime.providerName, model: result.data.model, usage };
   } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      const latencyMs = Date.now() - requestStartedAt;
+      await db.$transaction([
+        db.aIRun.update({ where: { id: run.id }, data: { status: "CANCELLED", errorCode: "CANCELLED", errorMessage: "AI run stopped by user.", finishedAt: new Date() } }),
+        db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: runtime.providerName, operation: input.operation, requestId: run.id, success: false, units: 1, cost: null, metadata: json({ airRunId: run.id, errorCode: "CANCELLED", promptVersion: input.promptVersion, latencyMs, ...auditModel, ...input.auditMetadata }) } }),
+        db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_cancelled", resourceType: "ai_run", resourceId: run.id, metadata: json({ ...(input.projectId ? { projectId: input.projectId } : {}), ...safeAuditMetadata }) } }),
+      ]);
+      throw error;
+    }
     const failure = publicError(error, runtime);
     const failureDetails = safeFailureDetails(failure);
     const latencyMs = Date.now() - requestStartedAt;

@@ -2,6 +2,7 @@ import type {
   ProviderInput,
   LLMGenerateInput,
   LLMStructuredResult,
+  LLMStreamOptions,
   LLMTextResult,
   ProviderResult,
   PublishingTaskStatus,
@@ -33,6 +34,7 @@ export interface TranscriptionProvider {
 
 export interface LLMProvider {
   generateText(input: LLMGenerateInput): Promise<ProviderResult<LLMTextResult>>;
+  streamText(input: LLMGenerateInput, options: LLMStreamOptions): Promise<ProviderResult<LLMTextResult>>;
   generateStructured<T>(input: LLMGenerateInput, schema: ZodType<T>): Promise<ProviderResult<LLMStructuredResult<T>>>;
   generate(input: ProviderInput): Promise<ProviderResult<{ text: string }>>;
   rewrite(input: ProviderInput): Promise<ProviderResult<{ text: string }>>;

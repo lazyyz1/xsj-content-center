@@ -52,6 +52,13 @@ export type SelectedContextObject = {
   whySelected?: string;
 };
 
+export type ConversationContextMessage = {
+  id: string;
+  role: "USER" | "ASSISTANT";
+  content: string;
+  createdAt: string;
+};
+
 export type ContextItem = {
   objectType: string;
   objectId: string;
@@ -75,6 +82,7 @@ export type ContextManifest = {
   confirmedInformationRefs: string[];
   sourceRefs: string[];
   externalRefs: string[];
+  conversationMessageRefs: string[];
   items: ContextItem[];
   truncation: { any: boolean; categories: Record<string, boolean> };
 };
@@ -105,12 +113,12 @@ export type AIControlErrorCode = (typeof AI_CONTROL_ERROR_CODES)[number];
 
 const employeeMessages: Record<AIControlErrorCode, string> = {
   OUT_OF_SCOPE: "鑫小助主要用于当前内容项目相关的研究、资料整理和创作。",
-  NO_CONTEXT: "当前项目还没有足够的内容信息，请先补充项目目标、稿件或资料。",
+  NO_CONTEXT: "当前还没有足够的信息。你可以添加资料，或者告诉我更多背景。",
   FACT_BLOCKED: "这次请求可能把未确认信息写成事实，请补充依据或改成明确的示例、假设。",
   PERMISSION_DENIED: "当前账号不能执行这个操作，请联系项目负责人。",
-  PROVIDER_UNAVAILABLE: "AI 服务暂时不可用，请稍后重试或联系管理员。",
-  MODEL_UNAVAILABLE: "当前 AI 能力暂时不可用，请稍后重试或联系管理员。",
-  TIMEOUT: "AI 处理超时，请稍后重试。",
+  PROVIDER_UNAVAILABLE: "当前 AI 服务暂时不可用，请稍后再试。",
+  MODEL_UNAVAILABLE: "当前 AI 服务暂时无法完成这个任务。",
+  TIMEOUT: "这次处理时间较长，可以重新试一次。",
   INVALID_OUTPUT: "AI 返回的内容未通过检查，请重试。",
   RATE_LIMITED: "当前请求较多，请稍后再试。",
   UNKNOWN: "AI 处理失败，请稍后重试。",

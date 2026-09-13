@@ -3,7 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { db } from "@content-center/db";
 import { ProjectContextBuilder } from "../project-context";
-import type { AIControlTask, ContextItem, ContextManifest, ContextOwnership, SelectedContextObject } from "./contracts";
+import type { AIControlTask, ContextItem, ContextManifest, ContextOwnership, ConversationContextMessage, SelectedContextObject } from "./contracts";
 
 type BuildInput = {
   workspaceId: string;
@@ -13,6 +13,7 @@ type BuildInput = {
   action: Parameters<ProjectContextBuilder["build"]>[0]["action"];
   studioAction?: Parameters<ProjectContextBuilder["build"]>[0]["studioAction"];
   selectedObjects?: SelectedContextObject[];
+  conversationHistory?: ConversationContextMessage[];
 };
 
 type ProjectContextRecord = {
@@ -43,25 +44,32 @@ export interface SelectedContextObjectAdapter {
 
 class CanvasSelectedObjectAdapter implements SelectedContextObjectAdapter {
   async resolve(input: { workspaceId: string; projectId: string; selectedObjects: SelectedContextObject[] }) {
-    const requested = input.selectedObjects.filter((item) => item.objectType === "CANVAS_OBJECT");
-    if (!requested.length) return [];
-    const rows = await db.canvasObject.findMany({
-      where: { id: { in: requested.map(({ objectId }) => objectId) }, workspaceId: input.workspaceId, projectId: input.projectId, deletedAt: null },
+    const requestedCanvas = input.selectedObjects.filter((item) => item.objectType === "CANVAS_OBJECT");
+    const requestedSources = input.selectedObjects.filter((item) => item.objectType === "SOURCE_ITEM");
+    const [rows, sourceRows] = await Promise.all([
+      requestedCanvas.length ? db.canvasObject.findMany({
+      where: { id: { in: requestedCanvas.map(({ objectId }) => objectId) }, workspaceId: input.workspaceId, projectId: input.projectId, deletedAt: null },
       select: { id: true, objectType: true, title: true, textContent: true, contentVersion: true },
-    });
-    return rows.map((row): ContextItem => {
-      const requestedItem = requested.find(({ objectId }) => objectId === row.id);
+      }) : [],
+      requestedSources.length ? db.projectSource.findMany({ where: { projectId: input.projectId, sourceItemId: { in: requestedSources.map(({ objectId }) => objectId) }, sourceItem: { workspaceId: input.workspaceId } }, select: { sourceItem: { select: { id: true, title: true, description: true, sourceType: true, sourcePlatform: true, materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { version: true, summary: true, keyPoints: true } } } } } }) : [],
+    ]);
+    return [...rows.map((row): ContextItem => {
+      const requestedItem = requestedCanvas.find(({ objectId }) => objectId === row.id);
       return {
         objectType: "CANVAS_OBJECT",
         objectId: row.id,
         version: row.contentVersion,
-        ownership: requestedItem?.ownership ?? "PENDING",
+        ownership: row.objectType === "TEXT" ? "PENDING" : "EXTERNAL",
         provenance: `canvas:${row.objectType}`,
         whySelected: requestedItem?.whySelected ?? "用户当前选中对象",
         truncated: false,
         content: [row.title, row.textContent].filter(Boolean).join("\n"),
       };
-    });
+    }), ...sourceRows.map(({ sourceItem }): ContextItem => {
+      const requestedItem = requestedSources.find(({ objectId }) => objectId === sourceItem.id);
+      const analysis = sourceItem.materialAnalyses[0];
+      return { objectType: "SOURCE_ITEM", objectId: sourceItem.id, version: analysis?.version ?? null, ownership: "EXTERNAL", provenance: sourceItem.sourcePlatform, whySelected: requestedItem?.whySelected ?? "用户本次添加的项目资料", truncated: false, content: JSON.stringify({ title: sourceItem.title, description: sourceItem.description, type: sourceItem.sourceType, summary: analysis?.summary, keyPoints: analysis?.keyPoints }) };
+    })];
   }
 }
 
@@ -86,7 +94,7 @@ const defaultStore: ContextBuilderStore = {
   }),
 };
 
-const budgets = { project: 4_000, draft: 16_000, selected: 8_000, profile: 4_000, method: 6_000, fact: 8_000, source: 12_000 } as const;
+const budgets = { project: 4_000, draft: 16_000, selected: 8_000, profile: 4_000, method: 6_000, fact: 8_000, source: 12_000, conversation: 8_000 } as const;
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -147,7 +155,8 @@ export class ContextBuilderV2 {
     ], budgets.method);
     const factItems = boundedItems(legacy.ownFacts.map((fact) => ({ objectType: "CONFIRMED_INFORMATION", objectId: fact.sourceId ?? `${fact.source}:${fact.text.slice(0, 40)}`, version: null, ownership: "OWN_CONFIRMED" as ContextOwnership, provenance: fact.source, whySelected: "已确认我方信息", content: fact.text })), budgets.fact);
     const sources = boundedItems(sourceRows(legacy.context).map((source) => ({ objectType: "SOURCE_ITEM", objectId: String(source.id ?? "unknown"), version: Number(record(source.materialDistillation).version ?? record(source.materialAnalysis).version ?? 0) || null, ownership: "EXTERNAL" as ContextOwnership, provenance: String(source.platform ?? source.contextKind ?? "external_source"), whySelected: "相关项目资料摘要", content: JSON.stringify({ title: source.title, content: source.content, materialDistillation: source.materialDistillation, materialUnderstanding: source.materialUnderstanding, materialAnalysis: source.materialAnalysis }) })), budgets.source);
-    const items = [projectItem, ...(draftItem ? [draftItem] : []), ...selectedItems, ...(profileItem ? [profileItem] : []), ...methodItems, ...factItems, ...sources];
+    const conversationItems = boundedItems((input.conversationHistory ?? []).slice(-10).map((message) => ({ objectType: "ASSISTANT_MESSAGE", objectId: message.id, version: message.createdAt, ownership: "PENDING" as ContextOwnership, provenance: "assistant_thread", whySelected: "最近必要的项目对话", content: `${message.role === "USER" ? "员工" : "鑫小助"}：${message.content}` })), budgets.conversation);
+    const items = [projectItem, ...(draftItem ? [draftItem] : []), ...selectedItems, ...(profileItem ? [profileItem] : []), ...methodItems, ...factItems, ...sources, ...conversationItems];
     const categories = Object.fromEntries(items.map((entry) => [entry.objectType, items.filter((candidate) => candidate.objectType === entry.objectType).some((candidate) => candidate.truncated)]));
 
     const manifestCore = {
@@ -164,6 +173,7 @@ export class ContextBuilderV2 {
       confirmedInformationRefs: factItems.map(({ objectId }) => objectId),
       sourceRefs: [...new Set(sources.map(({ objectId }) => objectId))],
       externalRefs: [...new Set(sources.map(({ objectId }) => objectId))],
+      conversationMessageRefs: conversationItems.map(({ objectId }) => objectId),
       items,
       truncation: { any: legacy.contextTruncated || items.some(({ truncated }) => truncated), categories },
     };
@@ -174,6 +184,7 @@ export class ContextBuilderV2 {
       ...legacyContext,
       currentDraft: draft ? { branchId: draft.id, workingVersion: draft.version, currentRevisionId: draft.currentRevisionId, updatedAt: draft.updatedAt.toISOString(), body: bounded(draft.workingBody, budgets.draft).content, truncated: draftItem?.truncated ?? false } : legacyContext.currentDraft,
       selectedObjects: selectedItems,
+      recentConversation: conversationItems.map(({ objectId, content }) => ({ messageId: objectId, content })),
       contextManifest: { manifestId, schemaVersion: manifest.schemaVersion },
     };
     return { ...legacy, context, manifest, contextTruncated: manifest.truncation.any };

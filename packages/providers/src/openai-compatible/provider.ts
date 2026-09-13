@@ -1,6 +1,6 @@
 import { z, type ZodIssue, type ZodType } from "zod";
 import type { LLMProvider } from "../contracts";
-import type { LLMContentBlock, LLMGenerateInput, LLMTextResult, ProviderResult } from "../types";
+import type { LLMContentBlock, LLMGenerateInput, LLMStreamOptions, LLMTextResult, ProviderResult } from "../types";
 import { LLMError } from "./errors";
 import { chatCompletionResponseSchema, openAICompatibleConfigSchema, type OpenAICompatibleConfig } from "./schemas";
 
@@ -114,6 +114,68 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
 
   async generateText(input: LLMGenerateInput): Promise<ProviderResult<LLMTextResult>> {
     return this.requestWithRetries(input, { type: "json_object" });
+  }
+
+  async streamText(input: LLMGenerateInput, options: LLMStreamOptions): Promise<ProviderResult<LLMTextResult>> {
+    const capabilities = resolveRequestCapabilities(this.config);
+    const userContent = input.content?.length ? input.content.map(contentBlock) : input.prompt;
+    const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(this.timeoutMs)]) : AbortSignal.timeout(this.timeoutMs);
+    let response: Response;
+    try {
+      response = await this.fetcher(endpoint(this.config.baseUrl), {
+        method: "POST",
+        headers: { authorization: `Bearer ${this.config.apiKey}`, "content-type": "application/json", accept: "text/event-stream" },
+        body: JSON.stringify({
+          model: this.config.model,
+          messages: [...(input.systemPrompt ? [{ role: "system", content: input.systemPrompt }] : []), { role: "user", content: userContent }],
+          ...(capabilities.supportsTemperature ? { temperature: input.temperature ?? 0.4 } : {}),
+          ...(capabilities.thinking ? { thinking: capabilities.thinking } : {}),
+          ...(capabilities.reasoningEffort ? { reasoning_effort: capabilities.reasoningEffort } : {}),
+          ...(input.maxCompletionTokens ? { max_completion_tokens: input.maxCompletionTokens } : {}),
+          stream: true,
+          stream_options: { include_usage: true },
+        }),
+        signal,
+      });
+    } catch (error) {
+      if (options.signal?.aborted) throw new DOMException("Stopped", "AbortError");
+      if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) throw new LLMError("LLM_TIMEOUT", "AI 模型请求超时。", true);
+      throw new LLMError("LLM_SERVER_ERROR", "无法连接 AI 模型服务。", true);
+    }
+    if (!response.ok) throw responseError(response);
+    if (!response.body) throw new LLMError("LLM_INVALID_RESPONSE", "AI 模型没有返回流式内容。", false, { httpStatus: response.status });
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let text = "";
+    let model = this.config.model;
+    let providerRequestId = response.headers.get("x-request-id") ?? undefined;
+    let finishReason: string | undefined;
+    let usage: LLMTextResult["usage"];
+    const consume = async (event: string) => {
+      const data = event.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\n");
+      if (!data || data === "[DONE]") return;
+      let value: unknown;
+      try { value = JSON.parse(data); } catch { throw new LLMError("LLM_INVALID_RESPONSE", "AI 模型返回了无效流式内容。", false, { providerRequestId }); }
+      const payload = value as { id?: string; model?: string; choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+      providerRequestId ??= payload.id;
+      model = payload.model ?? model;
+      const delta = payload.choices?.[0]?.delta?.content ?? "";
+      if (delta) { text += delta; await options.onDelta(delta); }
+      finishReason = payload.choices?.[0]?.finish_reason ?? finishReason;
+      if (payload.usage) usage = { inputTokens: payload.usage.prompt_tokens, outputTokens: payload.usage.completion_tokens };
+    };
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const events = buffer.split(/\r?\n\r?\n/);
+      buffer = events.pop() ?? "";
+      for (const event of events) await consume(event);
+      if (done) break;
+    }
+    if (buffer.trim()) await consume(buffer);
+    if (!text.trim()) throw new LLMError("LLM_INVALID_RESPONSE", "AI 模型没有返回有效内容。", false, { providerRequestId, actualModel: model, finishReason });
+    return { providerMode: "REAL", data: { text, model, providerRequestId, finishReason, usage } };
   }
 
   private async requestWithRetries(input: LLMGenerateInput, responseFormat: ResponseFormat): Promise<ProviderResult<LLMTextResult>> {

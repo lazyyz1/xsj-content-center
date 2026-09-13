@@ -10,6 +10,8 @@ import { getSelectedGenerationMethods } from "../project-methods/service";
 import { getPublishedDefaultContentMethodForStudio } from "../default-content-method/service";
 import { classifyCreatorContext, extractExplicitOwnFacts, uniqueConfirmedFacts, type ConfirmedOwnFact } from "./creation-context";
 
+export type ProjectContextAction = AIAction | "PROJECT_ASSISTANT";
+
 export type ContextBudgetLimits = { perSourceChars: number; totalSourceChars: number; totalEvidenceChars: number };
 export type AdditionalExternalReference = { id: string; title: string; content: string };
 const defaults: ContextBudgetLimits = { perSourceChars: 8_000, totalSourceChars: 24_000, totalEvidenceChars: 12_000 };
@@ -20,7 +22,7 @@ function take(value: string, maximum: number) { return value.length <= maximum ?
 export class ProjectContextBuilder {
   constructor(private readonly limits: ContextBudgetLimits = defaults) {}
 
-  async build(input: { workspaceId: string; userId: string; projectId: string; action: AIAction; studioAction?: StudioQuickAction; externalReferences?: AdditionalExternalReference[] }) {
+  async build(input: { workspaceId: string; userId: string; projectId: string; action: ProjectContextAction; studioAction?: StudioQuickAction; externalReferences?: AdditionalExternalReference[] }) {
     const project = await db.contentProject.findFirst({
       where: { id: input.projectId, workspaceId: input.workspaceId, workspace: { members: { some: { userId: input.userId } } } },
       select: { id: true, title: true, description: true, goal: true, audience: true, creatorProfileId: true, motherContent: { select: { title: true, body: true, version: true, confirmedVersion: true } } },
@@ -29,23 +31,23 @@ export class ProjectContextBuilder {
     const creatorProfile = project.creatorProfileId
       ? await db.creatorProfile.findFirst({ where: { id: project.creatorProfileId, workspaceId: input.workspaceId } })
       : await db.creatorProfile.findUnique({ where: { workspaceId_userId: { workspaceId: input.workspaceId, userId: input.userId } } });
-    const needsSources = Boolean(input.studioAction) || ["ANALYZE_SOURCES", "EXTRACT_EVIDENCE", "GENERATE_ANGLES", "GENERATE_MOTHER_CONTENT"].includes(input.action);
-    const needsEvidence = Boolean(input.studioAction) || ["GENERATE_ANGLES", "GENERATE_BRIEF", "GENERATE_MOTHER_CONTENT"].includes(input.action);
-    const needsBrief = Boolean(input.studioAction) || ["GENERATE_BRIEF", "GENERATE_MOTHER_CONTENT", "REWRITE_SELECTION", "SHORTEN", "EXPAND", "ADD_PERSONAL_VIEW", "HUMANIZE"].includes(input.action);
+    const needsSources = Boolean(input.studioAction) || ["ANALYZE_SOURCES", "EXTRACT_EVIDENCE", "GENERATE_ANGLES", "GENERATE_MOTHER_CONTENT", "PROJECT_ASSISTANT"].includes(input.action);
+    const needsEvidence = Boolean(input.studioAction) || ["GENERATE_ANGLES", "GENERATE_BRIEF", "GENERATE_MOTHER_CONTENT", "PROJECT_ASSISTANT"].includes(input.action);
+    const needsBrief = Boolean(input.studioAction) || ["GENERATE_BRIEF", "GENERATE_MOTHER_CONTENT", "REWRITE_SELECTION", "SHORTEN", "EXPAND", "ADD_PERSONAL_VIEW", "HUMANIZE", "PROJECT_ASSISTANT"].includes(input.action);
     const [sourceRows, evidenceRows, brief] = await Promise.all([
       needsSources ? db.projectSource.findMany({ where: { projectId: project.id }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], select: { role: true, sourceItem: { select: { id: true, title: true, sourcePlatform: true, rawText: true, transcript: { select: { fullText: true } }, materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { version: true, suggestedTitle: true, summary: true, topic: true, targetAudience: true, coreViewpoint: true, keyPoints: true, coreQuestion: true, understanding: true } }, materialDistillations: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { id: true, version: true, schemaVersion: true, output: true } } } } } }) : [],
       needsEvidence ? db.evidenceItem.findMany({ where: { projectId: project.id, workspaceId: input.workspaceId }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], select: { id: true, type: true, excerpt: true, claim: true, note: true, sourceItemId: true } }) : [],
       needsBrief ? db.creativeBrief.findFirst({ where: { projectId: project.id, workspaceId: input.workspaceId } }) : null,
     ]);
-    const useMethods = input.action === "GENERATE_MOTHER_CONTENT" || Boolean(input.studioAction);
-    const defaultSections = input.studioAction ? studioQuickActionSections[input.studioAction] : input.action === "GENERATE_MOTHER_CONTENT" ? ["BODY", "EVIDENCE", "ENDING", "BOUNDARY"] as const : [];
+    const useMethods = input.action === "GENERATE_MOTHER_CONTENT" || input.action === "PROJECT_ASSISTANT" || Boolean(input.studioAction);
+    const defaultSections = input.studioAction ? studioQuickActionSections[input.studioAction] : input.action === "GENERATE_MOTHER_CONTENT" ? ["BODY", "EVIDENCE", "ENDING", "BOUNDARY"] as const : input.action === "PROJECT_ASSISTANT" ? ["TOPIC", "BODY", "EVIDENCE", "BOUNDARY"] as const : [];
     const [selectedMethods, defaultMethod] = await Promise.all([
       useMethods ? getSelectedGenerationMethods({ workspaceId: input.workspaceId, userId: input.userId, projectId: project.id }) : [],
       useMethods ? getPublishedDefaultContentMethodForStudio({ workspaceId: input.workspaceId, sectionCodes: [...defaultSections] }) : null,
     ]);
     const selectedMethodContext = selectedMethods.map(({ title, steps, applicableScenarios, boundaries }) => ({ title, steps, applicableScenarios, boundaries }));
     const defaultMethodContext = defaultMethod ? { title: defaultMethod.title, version: defaultMethod.version, sections: defaultMethod.sections.map(({ code, items }) => ({ code, guidelines: items.map(({ text }) => text) })) } : null;
-    const creationAction = input.action === "GENERATE_MOTHER_CONTENT" || Boolean(input.studioAction);
+    const creationAction = input.action === "GENERATE_MOTHER_CONTENT" || input.action === "PROJECT_ASSISTANT" || Boolean(input.studioAction);
     let contextTruncated = false;
     let sourceBudget = this.limits.totalSourceChars;
     type BuiltSource = { id: string; title: string | null; platform: string; role?: string; text?: string; materialAnalysis?: Record<string, unknown> | null; materialDistillation?: { id: string; version: number; schemaVersion: string; output: unknown } | null; materialUnderstanding?: MaterialAnalysisOutput | { whatItSays: { summary: string; keyPoints: string[] }; reusable: never[]; doNotCopy: never[]; uncertain: never[] } | { reusable: MaterialAnalysisOutput["reusable"]; prohibitedReferenceClaims: Array<{ content: string; reason: string }> } | null };

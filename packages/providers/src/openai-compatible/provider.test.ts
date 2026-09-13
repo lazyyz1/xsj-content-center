@@ -19,7 +19,7 @@ beforeAll(async () => {
     let body = "";
     request.on("data", (chunk) => { body += String(chunk); });
     request.on("end", () => {
-      const parsed = JSON.parse(body) as { messages: Array<{ content: string | unknown[] }> };
+      const parsed = JSON.parse(body) as { messages: Array<{ content: string | unknown[] }>; stream?: boolean };
       lastRequestBody = parsed;
       const content = parsed.messages.at(-1)?.content ?? "";
       const prompt = typeof content === "string" ? content : JSON.stringify(content);
@@ -39,6 +39,13 @@ beforeAll(async () => {
       if (prompt.includes("M9_PROFILE_REQUEST")) return send(200, completion(JSON.stringify({ videos: [] })));
       if (prompt.includes("FENCED_STRUCTURED")) return send(200, completion("```json\n{\"ok\":true,\"title\":\"Fenced result\"}\n```"));
       if (prompt.includes("TIMEOUT")) return setTimeout(() => send(200, completion(JSON.stringify({ ok: true }))), 100);
+      if (parsed.stream) {
+        response.writeHead(200, { "content-type": "text/event-stream", "x-request-id": "fixture-stream-id" });
+        response.write(`data: ${JSON.stringify({ id: "fixture-stream-id", model: "fixture-model", choices: [{ delta: { content: "流式" }, finish_reason: null }] })}\n\n`);
+        response.write(`data: ${JSON.stringify({ id: "fixture-stream-id", model: "fixture-model", choices: [{ delta: { content: "回复" }, finish_reason: "stop" }], usage: { prompt_tokens: 9, completion_tokens: 2 } })}\n\n`);
+        response.end("data: [DONE]\n\n");
+        return;
+      }
       return send(200, completion(JSON.stringify({ ok: true, title: "Fixture result" })));
     });
   });
@@ -72,6 +79,15 @@ function deepSeekProvider(model: "deepseek-v4-flash" | "deepseek-v4-pro" | "deep
 describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
   it("sends OpenAI-compatible chat requests and returns real usage", async () => {
     await expect(provider().generateText({ systemPrompt: "Fixture system", prompt: "SUCCESS" })).resolves.toMatchObject({ providerMode: "REAL", data: { model: "fixture-model", providerRequestId: "fixture-header-id", finishReason: "stop", usage: { inputTokens: 12, outputTokens: 7 } } });
+  });
+
+  it("streams OpenAI-compatible text deltas and returns the final usage", async () => {
+    const chunks: string[] = [];
+    const result = await provider().streamText({ prompt: "STREAM_SUCCESS" }, { onDelta: (delta) => { chunks.push(delta); } });
+    expect(chunks).toEqual(["流式", "回复"]);
+    expect(result).toMatchObject({ providerMode: "REAL", data: { text: "流式回复", model: "fixture-model", providerRequestId: "fixture-stream-id", finishReason: "stop", usage: { inputTokens: 9, outputTokens: 2 } } });
+    expect(lastRequestBody).toMatchObject({ stream: true, stream_options: { include_usage: true } });
+    expect(lastRequestBody).not.toHaveProperty("response_format");
   });
 
   it("uses Kimi 2.6 compatible request parameters", async () => {

@@ -76,6 +76,11 @@ export type LLMTextResult = {
   usage?: LLMTokenUsage;
 };
 
+export type LLMStreamOptions = {
+  signal?: AbortSignal;
+  onDelta: (delta: string) => void | Promise<void>;
+};
+
 export type LLMStructuredResult<T> = LLMTextResult & {
   value: T;
 };

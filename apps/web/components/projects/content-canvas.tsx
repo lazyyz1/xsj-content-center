@@ -59,7 +59,14 @@ import type { CanvasLayoutInput, CanvasObjectDTO } from "@/server/canvas/service
 
 export type CardKind = "brief" | "sources" | "facts" | "methods" | "suggestion" | "draft";
 export type CanvasContextKind = Extract<CardKind, "brief" | "sources" | "facts" | "methods">;
-export type CanvasAssistantContext = { focus: CardKind | null; openContext: (kind: CanvasContextKind) => void; openDraft: () => void };
+export type CanvasAssistantContext = {
+  focus: CardKind | null;
+  openContext: (kind: CanvasContextKind) => void;
+  openDraft: () => void;
+  selectedObject: { objectType: "CANVAS_OBJECT"; objectId: string; version: number; ownership: "EXTERNAL" | "PENDING"; whySelected: string; label: string } | null;
+  projectMaterials: CanvasSourceOption[];
+  onObjectCreated: (object: CanvasObjectDTO) => void;
+};
 export type WorkbenchLayoutMode = "canvas-only" | "canvas-assistant" | "assistant-only";
 export type CanvasSourceOption = ProjectMaterial;
 type CanvasTool = "select" | "pan";
@@ -587,6 +594,7 @@ function CanvasSurface({
   const selectedNode = nodes.find((node) => node.selected);
   const selectedKind = selectedNode?.type === "card" ? (selectedNode as CanvasNode).data.kind : null;
   const selectedFreeObject = selectedNode?.type === "free" ? (selectedNode as FreeCanvasNode).data.object : null;
+  const selectedAssistantObject = selectedFreeObject ? { objectType: "CANVAS_OBJECT" as const, objectId: selectedFreeObject.id, version: selectedFreeObject.contentVersion, ownership: selectedFreeObject.objectType === "TEXT" ? "PENDING" as const : "EXTERNAL" as const, whySelected: "员工当前在画布中显式选中的对象", label: selectedFreeObject.title || selectedFreeObject.materialReference?.sourceTitleSnapshot || (selectedFreeObject.objectType === "TEXT" ? "未命名文本" : "项目资料") } : null;
   const currentFocus = focused ? `稿件｜${draft.title || "未命名稿件"}` : selectedNode?.type === "free" ? selectedFreeObject?.title || "未命名文本" : selectedNode?.type === "card" ? (selectedNode as CanvasNode).data.title : "画布";
 
   useEffect(() => {
@@ -1228,11 +1236,7 @@ function CanvasSurface({
             <span>引用 · {referenceCount}</span>
           </div>
         </header>
-        <div className="workbench-assistant-body">{typeof assistant === "function" ? assistant({ focus: focused ? "draft" : selectedKind, openContext, openDraft: () => setFocused(true) }) : assistant}</div>
-        <div className="workbench-assistant-composer-preview">
-          <p>自由对话将在后续接入</p>
-          <small>现在可以使用上方与当前项目关联的快捷操作。</small>
-        </div>
+        <div className="workbench-assistant-body">{typeof assistant === "function" ? assistant({ focus: focused ? "draft" : selectedKind, openContext, openDraft: () => setFocused(true), selectedObject: selectedAssistantObject, projectMaterials: sourceOptions, onObjectCreated: (object) => { upsertObject(object); setSelectedObjectId(object.id); setEditingObjectId(null); pushCommand({ type: "CREATE", objectId: object.id }); } }) : assistant}</div>
       </aside>
 
       <WorkbenchLayoutMenu current={layoutMode} open={layoutMenuOpen} onClose={() => setLayoutMenuOpen(false)} onChange={onLayoutModeChange} />

@@ -34,6 +34,8 @@ describe("AI control foundation", () => {
   it("allows candidate results, requires confirmation for writes, and forbids viewer writes", () => {
     const policy = new ActionPermissionPolicy();
     expect(policy.evaluate({ role: "VIEWER", action: "CHECK_CONTENT" }).decision).toBe("ALLOW");
+    expect(policy.evaluate({ role: "VIEWER", action: "CREATE_FREE_TEXT_CANDIDATE" }).decision).toBe("DENY");
+    expect(policy.evaluate({ role: "EDITOR", action: "CREATE_FREE_TEXT_CANDIDATE" }).decision).toBe("ALLOW");
     expect(policy.evaluate({ role: "EDITOR", action: "OVERWRITE_PRIMARY_DRAFT" }).decision).toBe("REQUIRE_CONFIRMATION");
     expect(policy.evaluate({ role: "EDITOR", action: "OVERWRITE_PRIMARY_DRAFT", userConfirmed: true }).decision).toBe("ALLOW");
     expect(policy.evaluate({ role: "VIEWER", action: "OVERWRITE_PRIMARY_DRAFT", userConfirmed: true }).decision).toBe("DENY");
