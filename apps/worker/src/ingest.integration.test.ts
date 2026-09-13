@@ -113,7 +113,7 @@ describe("CONTENT_INGEST integration", () => {
     const source = await db.sourceItem.findUniqueOrThrow({ where: { id: run.source.id } });
     expect(source).toMatchObject({ status: "READY", title: "Local Fixture", author: "Fixture Author" });
     expect(source.rawText).toContain("deterministic text");
-    await expect(db.transcript.findUnique({ where: { sourceItemId: run.source.id } })).resolves.toBeNull();
+    await expect(db.transcript.findUnique({ where: { sourceItemId: run.source.id } })).resolves.toMatchObject({ provider: "GENERIC_URL", providerMode: "REAL", fullText: expect.stringContaining("deterministic text") });
   });
 
   it("persists a permanent SSRF failure without retrying", async () => {

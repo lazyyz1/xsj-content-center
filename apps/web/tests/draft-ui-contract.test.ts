@@ -28,7 +28,8 @@ describe("Phase 9C-2 Workbench draft UI contract", () => {
 
   it("keeps non-primary drafts away from legacy AI and platform writes", async () => {
     const shell = await readFile(new URL("../components/projects/studio-shell.tsx", import.meta.url), "utf8");
-    expect(shell).toContain("editable={editableProject && mother.isPrimary}");
+    expect(shell).toContain("selection={mother.isPrimary ? selection : null}");
+    expect(shell).toContain("onSelectionAction={mother.isPrimary ? runSelectionAction : undefined}");
     expect(shell).toContain("请先将这份稿件设为当前主稿");
     expect(shell).toContain("mother.isPrimary ? <CreationFeedback");
   });

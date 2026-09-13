@@ -6,7 +6,8 @@ describe("Phase 9C-1 canvas UI contract", () => {
     const canvas = await readFile(new URL("../components/projects/content-canvas.tsx", import.meta.url), "utf8");
     expect(canvas).toContain("return [...systemNodes, ...objectNodes]");
     expect(canvas).toContain("nodes.filter((node) => node.type === \"card\")");
-    expect(canvas).toContain("edges={[]}");
+    expect(canvas).toContain("edges={relationEdges}");
+    expect(canvas).toContain('className: "canvas-generated-edge"');
   });
 
   it("supports direct text editing, 600ms autosave, recovery, resize and scoped shortcuts", async () => {

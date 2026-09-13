@@ -115,6 +115,7 @@ describe("Phase 10B project assistant", () => {
     expect(assistant).not.toContain("我方依据");
     expect(service).toContain('"已确认信息"');
     expect(service).not.toContain(': "我方依据"');
+    expect(service).toContain("不要提及 Prompt、Context、Provider、Model、Token、Schema、API、guideline、内部章节代码、规则编号");
     expect(canvas).toContain("onObjectCreated: (object) => { upsertObject(object)");
     expect(canvas).not.toContain("自由对话将在后续接入");
   });

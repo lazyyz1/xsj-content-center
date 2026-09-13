@@ -28,5 +28,6 @@ test.describe.serial("Phase 10C canvas node AI", () => {
     expect(await db.canvasObject.findUniqueOrThrow({ where: { id: sourceObjectId } })).toMatchObject({ textContent: sourceBefore.textContent, contentVersion: sourceBefore.contentVersion });
     expect(await db.canvasObjectSnapshot.count({ where: { objectId: sourceObjectId, snapshotReason: "AI_INPUT" } })).toBe(1); expect(await db.canvasRelation.count({ where: { sourceObjectId, targetObjectId: resultId, relationType: "GENERATED_FROM" } })).toBe(1);
     const zoomAfter = await page.locator(".react-flow__viewport").evaluate((element) => new DOMMatrix(getComputedStyle(element).transform).a); expect(zoomAfter).toBeCloseTo(zoomBefore, 5); expect(consoleIssues).toEqual([]);
+    for (const viewport of [{ width: 1440, height: 900 }, { width: 1680, height: 1000 }, { width: 1920, height: 1080 }]) { await page.setViewportSize(viewport); await expect(page.locator(".content-canvas")).toBeVisible(); await expect(page.getByLabel("和鑫小助说")).toBeVisible(); await expect(page.locator(".canvas-generated-edge")).toHaveCount(1); expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true); }
   });
 });

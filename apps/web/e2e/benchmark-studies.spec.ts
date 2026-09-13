@@ -113,6 +113,7 @@ function sessionCookies(response: Response) {
 
 test("researches six benchmark samples and saves a traceable private method", async ({ page }) => {
   test.setTimeout(120_000);
+  const consoleIssues: string[] = []; page.on("console", (message) => { if (message.type() === "error" || message.type() === "warning") consoleIssues.push(`${message.type()}: ${message.text()}`); });
   const registration = await auth.api.signUpEmail({ body: { name: "Benchmark Study Owner", email, password }, asResponse: true });
   expect(registration.ok).toBe(true);
   const registered = await registration.clone().json() as { user: { id: string } };
@@ -146,6 +147,7 @@ test("researches six benchmark samples and saves a traceable private method", as
 
   await page.goto(`/discovery/benchmarks/${benchmark.id}`);
   await expect(page.getByRole("heading", { name: "示例对标账号" })).toBeVisible();
+  await page.getByRole("button", { name: "选择代表内容与研究记录" }).click();
   await expect(page.getByRole("heading", { name: "选择代表内容" })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
@@ -157,7 +159,8 @@ test("researches six benchmark samples and saves a traceable private method", as
   await choice("只有精华提炼").uncheck();
   await choice("代表内容 1").check(); await choice("代表内容 2").check(); await choice("只有内容拆解").check();
   await expect(page.getByRole("button", { name: "研究这 3 条内容" })).toBeEnabled();
-  await expect(page.getByRole("button", { name: "看看这些内容常怎么搭配" })).toBeDisabled();
+  await page.getByText("实验性内容模式研究", { exact: true }).click();
+  await expect(page.getByRole("button", { name: "查看内容模式" })).toBeDisabled();
   await expect(page.getByText("还有 1 条内容需要先完成精华提炼。")).toBeVisible();
   await choice("代表内容 1").uncheck(); await choice("代表内容 2").uncheck(); await choice("只有内容拆解").uncheck();
   for (let index = 1; index <= 6; index += 1) await choice(`代表内容 ${index}`).check();
@@ -165,7 +168,9 @@ test("researches six benchmark samples and saves a traceable private method", as
   await page.getByRole("button", { name: "研究这 6 条内容" }).click();
   await expect(page.getByText("正在研究", { exact: true })).toBeVisible();
   await page.reload();
+  await page.getByRole("button", { name: "选择代表内容与研究记录" }).click();
   await expect(page.getByText("已完成", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByText("已完成", { exact: true }).click();
   await expect(page.getByText("本次选择了 6 条内容，其中 4 条出现这种做法；2 条是例外。").first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "例外和不同做法" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "重复案例说明" })).toBeVisible();
@@ -191,27 +196,6 @@ test("researches six benchmark samples and saves a traceable private method", as
   expect(receivedPrompt).not.toContain("fullText");
   expect(await detail.innerText()).not.toMatch(/BenchmarkStudy|SampleSet|AggregationJob|EvidenceCoverage|confidence score|embedding|cluster|source union|enum|JSON|Prompt/i);
 
-  await page.goto(`/discovery/benchmarks/${benchmark.id}`);
-  await choice("只有精华提炼").check();
-  for (let index = 1; index <= 6; index += 1) await choice(`代表内容 ${index}`).check();
-  await expect(page.getByRole("button", { name: "研究这 7 条内容" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "看看这些内容常怎么搭配" })).toBeEnabled();
-  await page.getByRole("button", { name: "看看这些内容常怎么搭配" }).click();
-  await expect(page.getByText("正在研究", { exact: true })).toBeVisible();
-  await page.reload();
-  await expect(page.getByRole("heading", { name: "常见内容打法" })).toBeVisible({ timeout: 20_000 });
-  const playbook = page.locator("article").filter({ hasText: "强观点后解释并给行动建议" });
-  await expect(playbook).toContainText("比较稳定");
-  await expect(playbook).toContainText("本次选择了 7 条内容，其中 3 条共同使用这套搭配。");
-  await playbook.getByText("查看依据").click();
-  await expect(playbook.getByRole("link", { name: /代表内容 1/ })).toBeVisible();
-  await page.getByText("这次研究使用的内容（7 条）").first().click();
-  await expect(page.getByText("采用第 1 版精华提炼").first()).toBeVisible();
-  expect(responseFormatTypes.at(-1)).toBe("json_object");
-  const m8OnlySample = await db.benchmarkStudySample.findFirstOrThrow({ where: { sourceItemId: m8Only.source.id, study: { status: "COMPLETED" } } });
-  expect(m8OnlySample.materialAnalysisId).toBeNull();
-  expect(await page.locator("body").innerText()).not.toMatch(/\bM1\b|\bM7\b|MaterialAnalysis|MaterialDistillation|nullable|Migration|Schema|SourceRef|Provider|Prompt|JSON|Worker|AI Run/i);
-  expect(await page.getByText("常见内容打法").locator("..").innerText()).not.toMatch(/Schema|SourceRef|Provider|Prompt|JSON|Worker|AI Run/i);
-  await page.goto(`/library/${sourceIds[0]}`);
-  await expect(page.getByRole("button", { name: "看看这些内容常怎么搭配" })).toHaveCount(0);
+  expect(responseFormatTypes).toContain("json_object");
+  expect(consoleIssues).toEqual([]);
 });

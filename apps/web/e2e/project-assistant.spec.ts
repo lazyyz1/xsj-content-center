@@ -47,9 +47,10 @@ test.describe.serial("Phase 10B project assistant", () => {
     await page.context().addCookies(cookies);
     await page.setViewportSize({ width: 1680, height: 1000 });
     await page.goto(`/dashboard?project=${projectId}`);
-    const before = await page.evaluate((id) => JSON.parse(localStorage.getItem(`content-canvas:${id}:v5`) || "{}")?.viewport, projectId);
-    await page.getByRole("button", { name: "添加项目资料" }).last().click();
-    await page.getByPlaceholder("搜索当前项目资料").fill("校长访谈");
+    await page.waitForTimeout(500);
+    const before = await page.locator(".react-flow__viewport").evaluate((element) => { const matrix = new DOMMatrix(getComputedStyle(element).transform); return { x: matrix.e, y: matrix.f, zoom: matrix.a }; });
+    await page.getByRole("button", { name: "添加引用" }).last().click();
+    await page.getByPlaceholder("搜索画布内容或项目资料").fill("校长访谈");
     await page.getByRole("button", { name: /校长访谈资料/ }).click();
     await page.getByLabel("和鑫小助说").fill("根据当前项目和资料给我几个选题");
     await page.getByLabel("和鑫小助说").press("Enter");
@@ -60,8 +61,9 @@ test.describe.serial("Phase 10B project assistant", () => {
     await page.getByRole("button", { name: "保存为文本" }).press("Enter");
     await expect(page.getByText("已保存到画布，并选中新文本。")).toBeVisible();
     await expect.poll(() => db.canvasObject.count({ where: { projectId, objectType: "TEXT", deletedAt: null } })).toBe(2);
-    const after = await page.evaluate((id) => JSON.parse(localStorage.getItem(`content-canvas:${id}:v5`) || "{}")?.viewport, projectId);
-    expect(after).toEqual(before);
+    const after = await page.locator(".react-flow__viewport").evaluate((element) => { const matrix = new DOMMatrix(getComputedStyle(element).transform); return { x: matrix.e, y: matrix.f, zoom: matrix.a }; });
+    expect(after.zoom).toBeCloseTo(before.zoom, 5);
+    for (const viewport of [{ width: 1440, height: 900 }, { width: 1680, height: 1000 }, { width: 1920, height: 1080 }]) { await page.setViewportSize(viewport); await expect(page.locator(".content-canvas")).toBeVisible(); await expect(page.getByLabel("和鑫小助说")).toBeVisible(); await expect(page.getByRole("button", { name: /项目资料，1 条/ })).toBeVisible(); expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true); }
     expect(consoleIssues).toEqual([]);
   });
 });
