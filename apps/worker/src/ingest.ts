@@ -10,6 +10,7 @@ import {
 import { UnrecoverableError, type Job } from "bullmq";
 import type { ContentIngestPayload } from "./queue";
 import { processRedFoxIngestJob } from "./redfox-ingest";
+import { requestMaterialAnalysisJob } from "./material-analysis-request";
 
 function providerFor(source: { sourceType: string; sourceUrl: string | null }): IngestSourceProvider {
   if (source.sourceType === "TEXT") return new ManualTextSourceProvider();
@@ -156,6 +157,8 @@ export async function processContentIngestJob(job: Job<ContentIngestPayload>) {
             segments: JSON.parse(JSON.stringify(transcript.segments)),
           },
         });
+      } else if (result.data.rawText.trim()) {
+        await tx.transcript.upsert({ where: { sourceItemId: record.sourceItemId }, create: { workspaceId: record.workspaceId, sourceItemId: record.sourceItemId, provider: provider.providerName, providerMode: result.providerMode, fullText: result.data.rawText, segments: [] }, update: { provider: provider.providerName, providerMode: result.providerMode, fullText: result.data.rawText, segments: [] } });
       }
       await tx.ingestJob.update({
         where: { id: record.id },
@@ -179,6 +182,10 @@ export async function processContentIngestJob(job: Job<ContentIngestPayload>) {
         },
       });
     });
+    if (record.sourceItem.sourceType !== "IMAGE") {
+      try { await requestMaterialAnalysisJob({ workspaceId: record.workspaceId, sourceItemId: record.sourceItemId, requestedById: record.requestedById }); }
+      catch (error) { console.warn("MATERIAL_ANALYSIS_AUTO_ENQUEUE_FAILED", { sourceItemId: record.sourceItemId, errorCode: error instanceof Error ? error.message : "UNKNOWN" }); }
+    }
     console.info("CONTENT_INGEST_STATUS", {
       jobId: record.id,
       workspaceId: record.workspaceId,

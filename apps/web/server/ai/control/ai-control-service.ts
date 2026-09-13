@@ -14,12 +14,13 @@ import { ScopeGate } from "./scope-gate";
 type ControlExecutionInput<T> = {
   workspaceId: string;
   userId: string;
-  projectId: string;
+  projectId?: string;
   taskType: AIControlTask;
   requestedAction: AIControlAction;
   userInput?: string;
   selectedObjects?: SelectedContextObject[];
   conversationHistory?: ConversationContextMessage[];
+  preparedContext?: ContextBuilderV2Result;
   action: Parameters<ProjectContextBuilder["build"]>[0]["action"];
   studioAction?: Parameters<ProjectContextBuilder["build"]>[0]["studioAction"];
   operation: string;
@@ -80,7 +81,7 @@ export class AIControlService {
     if (!role) throw new AIControlError("PERMISSION_DENIED");
     const scope = this.scopeGate.evaluate(input);
     if (scope.decision === "OUT_OF_SCOPE") throw new AIControlError("OUT_OF_SCOPE", scope.employeeMessage);
-    const context = await this.contextBuilder.build({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, taskType: input.taskType, action: input.action, studioAction: input.studioAction, selectedObjects: input.selectedObjects, conversationHistory: input.conversationHistory });
+    const context = input.preparedContext ?? (input.projectId ? await this.contextBuilder.build({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, taskType: input.taskType, action: input.action, studioAction: input.studioAction, selectedObjects: input.selectedObjects, conversationHistory: input.conversationHistory }) : null);
     if (!context) throw new AIControlError("NO_CONTEXT");
     input.onContext?.(context);
     const fact = this.factGate.evaluate({ items: context.manifest.items, ownFacts: context.ownFacts.map(({ text }) => text), instruction: input.userInput });

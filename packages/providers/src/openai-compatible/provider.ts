@@ -69,12 +69,43 @@ function jsonSchemaResponseFormat(schema: ZodType, name: string): ResponseFormat
   return { type: "json_schema", json_schema: { name: name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64) || "structured_response", strict: true, schema: portableSchema } };
 }
 
+function embeddedJsonValues(text: string) {
+  const values: unknown[] = [];
+  let start = -1; let inString = false; let escaped = false; const stack: string[] = [];
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]!;
+    if (start < 0) {
+      if (character === "{" || character === "[") { start = index; stack.push(character); }
+      continue;
+    }
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') { inString = true; continue; }
+    if (character === "{" || character === "[") stack.push(character);
+    else if (character === "}" || character === "]") {
+      const expected = character === "}" ? "{" : "[";
+      if (stack.pop() !== expected) { start = -1; stack.length = 0; continue; }
+      if (!stack.length) {
+        try { values.push(JSON.parse(text.slice(start, index + 1)) as unknown); } catch { /* malformed candidates stay invalid */ }
+        start = -1;
+      }
+    }
+  }
+  return values;
+}
+
 function parseStructuredJson(text: string) {
   try { return JSON.parse(text) as unknown; }
   catch {
     const fenced = text.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-    if (!fenced?.[1]) throw new Error("INVALID_JSON");
-    return JSON.parse(fenced[1]) as unknown;
+    if (fenced?.[1]) return JSON.parse(fenced[1]) as unknown;
+    const candidates = embeddedJsonValues(text);
+    if (candidates.length !== 1) throw new Error("INVALID_JSON");
+    return candidates[0];
   }
 }
 

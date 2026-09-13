@@ -1,7 +1,7 @@
 import "server-only";
 
 import { db, type MaterialAnalysis, type Prisma } from "@content-center/db";
-import { enqueueMaterialAnalysis } from "@content-center/worker/queue";
+import { MaterialAnalysisRequestError, requestMaterialAnalysisJob } from "@content-center/worker/material-analysis-request";
 import { loadLLMRuntime, type LLMRuntime } from "../ai/llm-runtime";
 import { createProject } from "../project-service";
 import { MaterialAnalysisToBriefMapper, type MaterialAnalysisBriefDraft } from "./brief-mapper";
@@ -117,24 +117,6 @@ export async function getMaterialAnalysis(input: { workspaceId: string; sourceIt
   };
 }
 
-async function reserveAnalysis(input: { workspaceId: string; sourceItemId: string; userId: string; transcriptUpdatedAt: Date }) {
-  try {
-    return await db.$transaction(async (tx) => {
-      const processing = await tx.materialAnalysis.findFirst({ where: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, status: "PROCESSING" } });
-      if (processing) throw new MaterialAnalysisError("ANALYSIS_ALREADY_PROCESSING", "这条素材正在整理，请稍候。");
-      const latest = await tx.materialAnalysis.findFirst({ where: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId }, orderBy: { version: "desc" }, select: { version: true } });
-      const analysis = await tx.materialAnalysis.create({ data: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, version: (latest?.version ?? 0) + 1, status: "PROCESSING", tags: [], keywords: [], keyPoints: [], transcriptUpdatedAtAtAnalysis: input.transcriptUpdatedAt, createdById: input.userId } });
-      const job = await tx.ingestJob.create({ data: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, requestedById: input.userId, jobType: "ANALYZE_MATERIAL", provider: "LLM", providerMode: "REAL", status: "QUEUED", maxAttempts: 3, metadata: json({ materialAnalysisId: analysis.id, transcriptUpdatedAtAtAnalysis: input.transcriptUpdatedAt.toISOString() }) } });
-      return { analysis, job };
-    }, { isolationLevel: "Serializable" });
-  } catch (error) {
-    if (error instanceof MaterialAnalysisError) throw error;
-    const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
-    if (code === "P2002" || code === "P2034") throw new MaterialAnalysisError("ANALYSIS_ALREADY_PROCESSING", "这条素材正在整理，请稍候。");
-    throw error;
-  }
-}
-
 export async function requestMaterialAnalysis(input: { workspaceId: string; sourceItemId: string; userId: string }, dependencies: { runtime?: LLMRuntime } = {}) {
   let built;
   try {
@@ -145,16 +127,12 @@ export async function requestMaterialAnalysis(input: { workspaceId: string; sour
   }
   const runtime = dependencies.runtime ?? await loadLLMRuntime(input.workspaceId);
   if (runtime.mode === "MOCK") throw new MaterialAnalysisError("MOCK_NOT_ALLOWED", "智能整理不使用模拟结果，请先配置 AI 模型。");
-  const reserved = await reserveAnalysis({ workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, userId: input.userId, transcriptUpdatedAt: built.source.transcript!.updatedAt });
   try {
-    await enqueueMaterialAnalysis({ jobId: reserved.job.id, workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, requestedById: input.userId }, reserved.job.maxAttempts);
-    return { ...toMaterialAnalysisDTO(reserved.analysis, built.source.transcript!.updatedAt), jobId: reserved.job.id, status: "QUEUED" as const };
-  } catch {
-    await db.$transaction([
-      db.materialAnalysis.update({ where: { id: reserved.analysis.id }, data: { status: "FAILED", errorCode: "QUEUE_UNAVAILABLE", errorMessage: "内容拆解暂时无法开始。" } }),
-      db.ingestJob.update({ where: { id: reserved.job.id }, data: { status: "FAILED", errorCode: "QUEUE_UNAVAILABLE", errorMessage: "内容拆解暂时无法开始。", finishedAt: new Date() } }),
-    ]);
-    throw new MaterialAnalysisError("QUEUE_UNAVAILABLE", "内容拆解暂时无法开始。");
+    const requested = await requestMaterialAnalysisJob({ workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, requestedById: input.userId, existingProcessing: "THROW", reuseCompleted: false });
+    return { ...toMaterialAnalysisDTO(requested.analysis, built.source.transcript!.updatedAt), jobId: requested.job?.id, status: requested.created ? "QUEUED" as const : requested.analysis.status };
+  } catch (error) {
+    if (error instanceof MaterialAnalysisRequestError) throw new MaterialAnalysisError(error.code === "ALREADY_PROCESSING" ? "ANALYSIS_ALREADY_PROCESSING" : error.code === "SOURCE_NOT_READY" ? "TRANSCRIPT_REQUIRED" : "QUEUE_UNAVAILABLE", error.message);
+    throw error;
   }
 }
 

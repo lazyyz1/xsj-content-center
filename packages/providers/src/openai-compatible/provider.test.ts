@@ -38,6 +38,8 @@ beforeAll(async () => {
       if (prompt.includes("M7_COPYWRITING_REQUEST")) return send(200, completion(JSON.stringify({ sections: [] })));
       if (prompt.includes("M9_PROFILE_REQUEST")) return send(200, completion(JSON.stringify({ videos: [] })));
       if (prompt.includes("FENCED_STRUCTURED")) return send(200, completion("```json\n{\"ok\":true,\"title\":\"Fenced result\"}\n```"));
+      if (prompt.includes("EXPLAINED_STRUCTURED")) return send(200, completion("这是整理结果：\n{\"ok\":true,\"title\":\"Explained result\"}\n请查收。"));
+      if (prompt.includes("MULTIPLE_STRUCTURED")) return send(200, completion("候选一：{\"ok\":true,\"title\":\"One\"}\n候选二：{\"ok\":true,\"title\":\"Two\"}"));
       if (prompt.includes("TIMEOUT")) return setTimeout(() => send(200, completion(JSON.stringify({ ok: true }))), 100);
       if (parsed.stream) {
         response.writeHead(200, { "content-type": "text/event-stream", "x-request-id": "fixture-stream-id" });
@@ -172,6 +174,12 @@ describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
   it("accepts one JSON code fence before schema validation", async () => {
     const result = await provider().generateStructured({ prompt: "FENCED_STRUCTURED" }, z.object({ ok: z.boolean(), title: z.string() }));
     expect(result.data.value).toEqual({ ok: true, title: "Fenced result" });
+  });
+
+  it("accepts one unambiguous embedded JSON value and rejects multiple candidates", async () => {
+    const schema = z.object({ ok: z.boolean(), title: z.string() });
+    await expect(provider().generateStructured({ prompt: "EXPLAINED_STRUCTURED" }, schema)).resolves.toMatchObject({ data: { value: { ok: true, title: "Explained result" } } });
+    await expect(provider().generateStructured({ prompt: "MULTIPLE_STRUCTURED" }, schema)).rejects.toMatchObject({ code: "LLM_INVALID_RESPONSE" });
   });
 
   it.each([["STATUS_401", "LLM_AUTH_FAILED"], ["STATUS_429", "LLM_RATE_LIMITED"], ["STATUS_500", "LLM_SERVER_ERROR"]])("maps %s to %s", async (prompt, code) => {

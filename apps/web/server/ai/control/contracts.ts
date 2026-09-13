@@ -8,6 +8,7 @@ export const AI_CONTROL_TASKS = [
   "RESEARCH",
   "METHOD_GUIDANCE",
   "MATERIAL_SEARCH",
+  "MATERIAL_KNOWLEDGE_EXTRACTION",
   "GENERAL_QUERY",
 ] as const;
 
@@ -74,7 +75,7 @@ export type ContextManifest = {
   schemaVersion: "ai-context-manifest-v1";
   manifestId: string;
   generatedAt: string;
-  project: { id: string; version: string };
+  project: { id: string | null; version: string };
   currentDraft: { branchId: string; workingVersion: number; currentRevisionId: string | null } | null;
   selectedObjects: Array<Pick<ContextItem, "objectType" | "objectId" | "version" | "ownership" | "whySelected" | "truncated">>;
   methodVersions: Array<{ assetId: string; versionId: string; version: number }>;

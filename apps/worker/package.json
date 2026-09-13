@@ -6,7 +6,8 @@
   "exports": {
     "./queue": "./src/queue.ts",
     "./integrations": "./src/integrations.ts",
-    "./transcription": "./src/transcription.ts"
+    "./transcription": "./src/transcription.ts",
+    "./material-analysis-request": "./src/material-analysis-request.ts"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",

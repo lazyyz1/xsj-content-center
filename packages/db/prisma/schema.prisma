@@ -145,6 +145,21 @@ enum EvidenceType {
   EXPERIENCE
   QUESTION
   OTHER
+  ORGANIZATION
+  PRODUCT_SERVICE
+  COMMERCIAL_COMMITMENT
+}
+
+enum EvidenceOwnership {
+  OWN
+  EXTERNAL
+  UNKNOWN
+}
+
+enum EvidenceStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
 }
 
 enum PromptType {
@@ -168,6 +183,7 @@ enum PromptType {
   GENERATE_TOPIC_CANDIDATES
   GENERATE_TODAY_RECOMMENDATIONS
   PROJECT_ASSISTANT
+  MATERIAL_KNOWLEDGE_EXTRACTION
 }
 
 enum MaterialAnalysisStatus {
@@ -358,6 +374,8 @@ model User {
   apiUsages               ApiUsage[]
   createdProjects         ContentProject[]     @relation("ProjectCreatedBy")
   createdEvidenceItems    EvidenceItem[]       @relation("EvidenceCreatedBy")
+  confirmedEvidenceItems  EvidenceItem[]       @relation("EvidenceConfirmedBy")
+  rejectedEvidenceItems   EvidenceItem[]       @relation("EvidenceRejectedBy")
   createdBriefs           CreativeBrief[]      @relation("BriefCreatedBy")
   createdMotherContent    MotherContent[]      @relation("MotherContentCreatedBy")
   creatorProfiles         CreatorProfile[]
@@ -1363,24 +1381,39 @@ model MethodUsage {
 model EvidenceItem {
   id           String         @id @default(cuid())
   workspaceId  String
-  projectId    String
+  projectId    String?
   sourceItemId String?
   type         EvidenceType
   excerpt      String?
   claim        String?
   note         String?
   sourceUrl    String?
+  ownership    EvidenceOwnership @default(OWN)
+  status       EvidenceStatus    @default(CONFIRMED)
+  locator      Json?
+  confidence   Float?
+  dedupeKey    String?           @unique
+  confirmedById String?
+  confirmedAt   DateTime?
+  rejectedById  String?
+  rejectedAt    DateTime?
   sortOrder    Int            @default(0)
   createdById  String
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project      ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project      ContentProject? @relation(fields: [projectId], references: [id], onDelete: Cascade)
   sourceItem   SourceItem?    @relation(fields: [sourceItemId], references: [id], onDelete: SetNull)
   createdBy    User           @relation("EvidenceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  confirmedBy  User?          @relation("EvidenceConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
+  rejectedBy   User?          @relation("EvidenceRejectedBy", fields: [rejectedById], references: [id], onDelete: SetNull)
 
   @@index([workspaceId, projectId, sortOrder])
   @@index([sourceItemId])
+  @@index([workspaceId, sourceItemId, status])
+  @@index([projectId, ownership, status])
+  @@index([confirmedById])
+  @@index([rejectedById])
   @@index([createdById])
 }
 

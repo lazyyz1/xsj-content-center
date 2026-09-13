@@ -10,7 +10,7 @@ import { getSelectedGenerationMethods } from "../project-methods/service";
 import { getPublishedDefaultContentMethodForStudio } from "../default-content-method/service";
 import { classifyCreatorContext, extractExplicitOwnFacts, uniqueConfirmedFacts, type ConfirmedOwnFact } from "./creation-context";
 
-export type ProjectContextAction = AIAction | "PROJECT_ASSISTANT";
+export type ProjectContextAction = AIAction | "PROJECT_ASSISTANT" | "MATERIAL_KNOWLEDGE_EXTRACTION";
 
 export type ContextBudgetLimits = { perSourceChars: number; totalSourceChars: number; totalEvidenceChars: number };
 export type AdditionalExternalReference = { id: string; title: string; content: string };
@@ -36,7 +36,7 @@ export class ProjectContextBuilder {
     const needsBrief = Boolean(input.studioAction) || ["GENERATE_BRIEF", "GENERATE_MOTHER_CONTENT", "REWRITE_SELECTION", "SHORTEN", "EXPAND", "ADD_PERSONAL_VIEW", "HUMANIZE", "PROJECT_ASSISTANT"].includes(input.action);
     const [sourceRows, evidenceRows, brief] = await Promise.all([
       needsSources ? db.projectSource.findMany({ where: { projectId: project.id }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], select: { role: true, sourceItem: { select: { id: true, title: true, sourcePlatform: true, rawText: true, transcript: { select: { fullText: true } }, materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { version: true, suggestedTitle: true, summary: true, topic: true, targetAudience: true, coreViewpoint: true, keyPoints: true, coreQuestion: true, understanding: true } }, materialDistillations: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { id: true, version: true, schemaVersion: true, output: true } } } } } }) : [],
-      needsEvidence ? db.evidenceItem.findMany({ where: { projectId: project.id, workspaceId: input.workspaceId }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], select: { id: true, type: true, excerpt: true, claim: true, note: true, sourceItemId: true } }) : [],
+      needsEvidence ? db.evidenceItem.findMany({ where: { projectId: project.id, workspaceId: input.workspaceId, status: "CONFIRMED" }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], take: 12, select: { id: true, type: true, excerpt: true, claim: true, note: true, sourceItemId: true, ownership: true, status: true, dedupeKey: true } }) : [],
       needsBrief ? db.creativeBrief.findFirst({ where: { projectId: project.id, workspaceId: input.workspaceId } }) : null,
     ]);
     const useMethods = input.action === "GENERATE_MOTHER_CONTENT" || input.action === "PROJECT_ASSISTANT" || Boolean(input.studioAction);
@@ -78,18 +78,20 @@ export class ProjectContextBuilder {
       const selected = take(raw, evidenceBudget);
       evidenceBudget -= selected.value.length;
       contextTruncated ||= selected.truncated;
-      return [{ id: item.id, type: item.type, sourceItemId: item.sourceItemId, content: selected.value }];
+      const ownership = item.ownership === "EXTERNAL" || (item.sourceItemId && !item.dedupeKey) ? "EXTERNAL" : item.ownership;
+      return [{ id: item.id, type: item.type, sourceItemId: item.sourceItemId, ownership, content: selected.value }];
     });
     const profileContext = classifyCreatorContext(creatorProfile ? { displayName: creatorProfile.displayName, positioning: creatorProfile.positioning, targetAudience: creatorProfile.targetAudience, tone: creatorProfile.tone, preferredStyle: creatorProfile.preferredStyle, forbiddenStyle: creatorProfile.forbiddenStyle, coreTopics: strings(creatorProfile.coreTopics), personalViews: strings(creatorProfile.personalViews), brandTerms: strings(creatorProfile.brandTerms), forbiddenTerms: strings(creatorProfile.forbiddenTerms), hookPreferences: strings(creatorProfile.hookPreferences), structurePreferences: strings(creatorProfile.structurePreferences), ctaPreferences: strings(creatorProfile.ctaPreferences), examplePhrases: strings(creatorProfile.examplePhrases), notes: creatorProfile.notes } : null);
     const briefData = brief ? { topic: brief.topic, angle: brief.angle, audience: brief.audience, coreMessage: brief.coreMessage, coreQuestion: brief.coreQuestion, background: brief.background, keyPoints: strings(brief.keyPoints), structure: strings(brief.structure), tone: brief.tone, risks: strings(brief.risks), metadata: brief.metadata, version: brief.version } : null;
     const ownContribution = resolveOwnContribution({ coreMessage: briefData?.coreMessage, background: briefData?.background, audience: briefData?.audience });
     const hasOwnBackground = Boolean(briefData?.background?.trim());
-    const isExternalReferenceEvidence = (item: (typeof evidence)[number]) => typeof item.sourceItemId === "string" && item.sourceItemId.trim().length > 0;
+    const isExternalReferenceEvidence = (item: (typeof evidence)[number]) => item.ownership === "EXTERNAL";
     const profileFacts: ConfirmedOwnFact[] = profileContext.confirmedFacts.map((text) => ({ text, source: "CREATOR_PROFILE", kind: "EXPERIENCE" }));
     const supplementFacts: ConfirmedOwnFact[] = extractExplicitOwnFacts(`${briefData?.coreMessage ?? ""}\n${briefData?.background ?? ""}`).map((text) => ({ text, source: "MY_SUPPLEMENT", kind: "EXPERIENCE" }));
-    const projectFacts: ConfirmedOwnFact[] = evidenceRows.filter((item) => !item.sourceItemId).flatMap((item) => {
+    const projectFacts: ConfirmedOwnFact[] = evidenceRows.filter((item) => item.ownership === "OWN" && (!item.sourceItemId || item.dedupeKey)).flatMap((item) => {
       const text = item.claim?.trim() || item.excerpt?.trim() || item.note?.trim();
-      return text ? [{ text, source: "PROJECT_EVIDENCE" as const, kind: item.type, sourceId: item.id }] : [];
+      const kind = item.type === "ORGANIZATION" || item.type === "PRODUCT_SERVICE" || item.type === "COMMERCIAL_COMMITMENT" ? "FACT" as const : item.type;
+      return text ? [{ text, source: "PROJECT_EVIDENCE" as const, kind, sourceId: item.id }] : [];
     });
     const baseOwnFacts = uniqueConfirmedFacts([...profileFacts, ...supplementFacts, ...projectFacts]);
     const currentDraftFacts: ConfirmedOwnFact[] = project.motherContent ? baseOwnFacts.filter((fact) => project.motherContent!.body.includes(fact.text)).map((fact) => ({ ...fact, source: "CURRENT_DRAFT" })) : [];

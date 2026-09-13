@@ -1,0 +1,46 @@
+import { db, type Prisma } from "@content-center/db";
+import type { ContentIngestPayload } from "./queue";
+
+export class MaterialAnalysisRequestError extends Error {
+  constructor(readonly code: "SOURCE_NOT_READY" | "ALREADY_PROCESSING" | "QUEUE_UNAVAILABLE", message: string) { super(message); this.name = "MaterialAnalysisRequestError"; }
+}
+
+function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
+
+export async function requestMaterialAnalysisJob(input: { workspaceId: string; sourceItemId: string; requestedById: string; existingProcessing?: "RETURN" | "THROW"; reuseCompleted?: boolean }, dependencies: { enqueue?: (payload: ContentIngestPayload, maxAttempts: number) => Promise<unknown> } = {}) {
+  const source = await db.sourceItem.findFirst({ where: { id: input.sourceItemId, workspaceId: input.workspaceId, status: { not: "ARCHIVED" } }, include: { transcript: true } });
+  if (!source?.transcript?.fullText.trim()) throw new MaterialAnalysisRequestError("SOURCE_NOT_READY", "资料文字内容尚未准备好。");
+  const active = await db.materialAnalysis.findFirst({ where: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, status: "PROCESSING" }, orderBy: { version: "desc" } });
+  if (active) {
+    if (input.existingProcessing === "THROW") throw new MaterialAnalysisRequestError("ALREADY_PROCESSING", "这条资料正在整理，请稍候。");
+    return { analysis: active, job: null, created: false as const };
+  }
+  if (input.reuseCompleted !== false) {
+    const existing = await db.materialAnalysis.findFirst({ where: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, transcriptUpdatedAtAtAnalysis: source.transcript.updatedAt, status: "COMPLETED" }, orderBy: { version: "desc" } });
+    if (existing) return { analysis: existing, job: null, created: false as const };
+  }
+  let reserved;
+  try {
+    reserved = await db.$transaction(async (tx) => {
+      const active = await tx.materialAnalysis.findFirst({ where: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, status: "PROCESSING" } });
+      if (active) throw new MaterialAnalysisRequestError("ALREADY_PROCESSING", "这条资料正在整理，请稍候。");
+      const latest = await tx.materialAnalysis.findFirst({ where: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId }, orderBy: { version: "desc" }, select: { version: true } });
+      const analysis = await tx.materialAnalysis.create({ data: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, version: (latest?.version ?? 0) + 1, status: "PROCESSING", tags: [], keywords: [], keyPoints: [], transcriptUpdatedAtAtAnalysis: source.transcript!.updatedAt, createdById: input.requestedById } });
+      const job = await tx.ingestJob.create({ data: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, requestedById: input.requestedById, jobType: "ANALYZE_MATERIAL", provider: "LLM", providerMode: "REAL", status: "QUEUED", maxAttempts: 3, metadata: json({ materialAnalysisId: analysis.id, transcriptUpdatedAtAtAnalysis: source.transcript!.updatedAt.toISOString() }) } });
+      return { analysis, job };
+    }, { isolationLevel: "Serializable" });
+  } catch (error) {
+    if (error instanceof MaterialAnalysisRequestError) throw error;
+    const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
+    if (code === "P2002" || code === "P2034") throw new MaterialAnalysisRequestError("ALREADY_PROCESSING", "这条资料正在整理，请稍候。");
+    throw error;
+  }
+  try {
+    const enqueue = dependencies.enqueue ?? (async (payload: ContentIngestPayload, maxAttempts: number) => (await import("./queue")).enqueueMaterialAnalysis(payload, maxAttempts));
+    await enqueue({ jobId: reserved.job.id, workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, requestedById: input.requestedById }, reserved.job.maxAttempts);
+    return { ...reserved, created: true as const };
+  } catch {
+    await db.$transaction([db.materialAnalysis.update({ where: { id: reserved.analysis.id }, data: { status: "FAILED", errorCode: "QUEUE_UNAVAILABLE", errorMessage: "内容整理暂时无法开始。" } }), db.ingestJob.update({ where: { id: reserved.job.id }, data: { status: "FAILED", errorCode: "QUEUE_UNAVAILABLE", errorMessage: "内容整理暂时无法开始。", finishedAt: new Date() } })]);
+    throw new MaterialAnalysisRequestError("QUEUE_UNAVAILABLE", "内容整理暂时无法开始。");
+  }
+}

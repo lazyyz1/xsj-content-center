@@ -164,14 +164,15 @@ async function promptTemplate(workspaceId: string) {
 }
 
 function failure(error: unknown) {
-  if (error instanceof LLMError) return { code: error.code, message: error.message, retryable: error.retryable };
-  return { code: "MATERIAL_ANALYSIS_FAILED", message: "这次没有分析完成，请重试。", retryable: false };
+  if (error instanceof LLMError) return { code: error.code, message: error.message, retryable: error.retryable, details: error.details };
+  return { code: "MATERIAL_ANALYSIS_FAILED", message: "这次没有分析完成，请重试。", retryable: false, details: {} };
 }
 
-async function recordRunFailure(input: { runId?: string; workspaceId: string; userId: string; operation: string; promptVersion: number; contextTruncated: boolean; materialAnalysisId: string; errorCode: string; provider?: string; requestedModel?: string }) {
+async function recordRunFailure(input: { runId?: string; workspaceId: string; userId: string; operation: string; promptVersion: number; contextTruncated: boolean; materialAnalysisId: string; errorCode: string; failureDetails: LLMError["details"]; provider?: string; requestedModel?: string }) {
   if (input.runId) {
-    await db.aIRun.update({ where: { id: input.runId }, data: { status: "FAILED", errorCode: input.errorCode, errorMessage: "AI 拆解未完成。", finishedAt: new Date() } });
-    await db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: input.provider ?? "LLM", operation: input.operation, requestId: input.runId, success: false, units: 1, cost: null, metadata: json({ airRunId: input.runId, promptVersion: input.promptVersion, contextTruncated: input.contextTruncated, materialAnalysisId: input.materialAnalysisId, errorCode: input.errorCode, requestedModel: input.requestedModel ?? null }) } });
+    const run = await db.aIRun.findUnique({ where: { id: input.runId }, select: { metadata: true } });
+    await db.aIRun.update({ where: { id: input.runId }, data: { status: "FAILED", errorCode: input.errorCode, errorMessage: "AI 拆解未完成。", providerRequestId: input.failureDetails.providerRequestId, metadata: json({ ...object(run?.metadata), failureDetails: input.failureDetails }), finishedAt: new Date() } });
+    await db.apiUsage.create({ data: { workspaceId: input.workspaceId, userId: input.userId, provider: input.provider ?? "LLM", operation: input.operation, requestId: input.runId, providerRequestId: input.failureDetails.providerRequestId, success: false, units: 1, cost: null, metadata: json({ airRunId: input.runId, promptVersion: input.promptVersion, contextTruncated: input.contextTruncated, materialAnalysisId: input.materialAnalysisId, errorCode: input.errorCode, requestedModel: input.requestedModel ?? null, failureDetails: input.failureDetails }) } });
     await db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "ai.run_failed", resourceType: "ai_run", resourceId: input.runId, metadata: json({ errorCode: input.errorCode, materialAnalysisId: input.materialAnalysisId }) } });
   }
 }
@@ -280,7 +281,7 @@ export async function processMaterialAnalysisJob(job: Job<ContentIngestPayload>,
     return { status: "ok" as const, sourceItemId: record.sourceItemId, materialAnalysisId: analysis.id };
   } catch (error) {
     const failed = failure(error);
-    await recordRunFailure({ runId, workspaceId: record.workspaceId, userId: record.requestedById, operation: "ANALYZE_MATERIAL", promptVersion, contextTruncated, materialAnalysisId: analysis.id, errorCode: failed.code, provider: runProvider, requestedModel });
+    await recordRunFailure({ runId, workspaceId: record.workspaceId, userId: record.requestedById, operation: "ANALYZE_MATERIAL", promptVersion, contextTruncated, materialAnalysisId: analysis.id, errorCode: failed.code, failureDetails: failed.details, provider: runProvider, requestedModel });
     const willRetry = failed.retryable && attempt < record.maxAttempts;
     await db.$transaction([
       db.ingestJob.update({ where: { id: record.id }, data: { status: willRetry ? "QUEUED" : "FAILED", progress: 0, errorCode: failed.code, errorMessage: failed.message, finishedAt: willRetry ? null : new Date() } }),

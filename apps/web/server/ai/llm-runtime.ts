@@ -13,6 +13,7 @@ export type LLMRuntime = {
 };
 
 function mockFixture(prompt: string) {
+  if (prompt.includes("返回候选信息。")) { const source = prompt.match(/资料：\n([\s\S]*?)\n\n返回候选信息。/u)?.[1]?.trim() || "MOCK MODE 资料"; const excerpt = source.split(/(?<=[。！？!?])|\n/u).find((item) => item.trim())?.trim() || source.slice(0, 120); return { candidates: [{ content: excerpt.replace(/[。！？!?]$/u, ""), category: "FACT", excerpt, confidence: 0.8 }] }; }
   if (prompt.includes("【当前节点生成要求】")) return "选题一：从真实问题切入。\n选题二：拆解常见误区。\n选题三：给出下一步行动。";
   if (prompt.includes("【员工当前问题】")) return "我会基于当前项目、选中内容和已引用资料，先整理一个可以继续编辑的候选结果。";
   if (prompt.includes("Action: UNIFIED_CREATIVE_ANALYSIS")) return { creativeInterpretation: { text: "MOCK MODE：统一创作理解。", classification: "AI_INTERPRETATION", sourceItemIds: [] }, angles: [{ title: "MOCK MODE 角度", angle: "仅用于显式开发测试。", rationale: "验证统一分析流程", classification: "AI_SUGGESTION", sourceItemIds: [] }], structure: { overallApproach: "MOCK MODE 结构建议", classification: "AI_SUGGESTION", sourceItemIds: [], sections: [{ title: "验证段落", purpose: "验证展示", keyMessage: "不作为真实创作结果", supportingPoints: [], sourceItemIds: [] }] }, expressionDirection: { description: "MOCK MODE 表达方向", rationale: "显式开发测试", classification: "AI_SUGGESTION", sourceItemIds: [] }, riskNotes: [{ text: "MOCK MODE：必须人工确认。", classification: "AI_INTERPRETATION", sourceItemIds: [] }], titleReferences: [{ title: "MOCK MODE 标题参考", rationale: "仅供测试", classification: "AI_SUGGESTION", sourceItemIds: [] }] };
