@@ -297,6 +297,27 @@ enum MethodUsageFeedbackRating {
   NOT_SUITABLE
 }
 
+enum CanvasObjectType {
+  TEXT
+  MATERIAL_REFERENCE
+  IMAGE_REFERENCE
+}
+
+enum CanvasSnapshotReason {
+  MANUAL_CHECKPOINT
+  BEFORE_DELETE
+  AI_INPUT
+}
+
+enum CanvasRelationType {
+  GENERATED_FROM
+}
+
+enum CanvasReferencePurpose {
+  PRIMARY
+  CONTEXT
+}
+
 model User {
   id                      String               @id @default(cuid())
   name                    String
@@ -339,6 +360,11 @@ model User {
   methodUsages            MethodUsage[]                @relation("MethodUsageUser")
   creationFeedbacks       CreationFeedback[]           @relation("CreationFeedbackUser")
   methodUsageFeedbacks    MethodUsageFeedback[]        @relation("MethodUsageFeedbackUser")
+  createdCanvasObjects    CanvasObject[]               @relation("CanvasObjectCreatedBy")
+  updatedCanvasObjects    CanvasObject[]               @relation("CanvasObjectUpdatedBy")
+  deletedCanvasObjects    CanvasObject[]               @relation("CanvasObjectDeletedBy")
+  createdCanvasSnapshots  CanvasObjectSnapshot[]       @relation("CanvasSnapshotCreatedBy")
+  createdCanvasRelations  CanvasRelation[]             @relation("CanvasRelationCreatedBy")
 
   @@index([systemRole])
   @@index([disabledAt])
@@ -431,6 +457,10 @@ model Workspace {
   unifiedCreativeAnalyses UnifiedCreativeAnalysis[]
   methodAssets           MethodAsset[]
   creationFeedbacks      CreationFeedback[]
+  canvasObjects          CanvasObject[]
+  canvasSnapshots        CanvasObjectSnapshot[]
+  canvasRelations        CanvasRelation[]
+  canvasMaterialReferences CanvasMaterialReference[]
 }
 
 model WorkspaceMember {
@@ -513,6 +543,7 @@ model SourceItem {
   materialDistillations MaterialDistillation[]
   methodVersionsFromSource MethodVersion[] @relation("MethodVersionSourceItem")
   benchmarkStudySamples BenchmarkStudySample[]
+  canvasMaterialReferences CanvasMaterialReference[]
 
   @@unique([workspaceId, canonicalUrl])
   @@unique([workspaceId, sourcePlatform, externalId])
@@ -538,6 +569,7 @@ model SourceAsset {
   updatedAt      DateTime    @updatedAt
   workspace      Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   sourceItem     SourceItem  @relation(fields: [sourceItemId], references: [id], onDelete: Cascade)
+  canvasMaterialReferences CanvasMaterialReference[]
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, sourceItemId])
@@ -697,11 +729,126 @@ model ContentProject {
   methodSelections       ProjectMethodSelection[]
   methodUsages            MethodUsage[]
   creationFeedbacks      CreationFeedback[]
+  canvasObjects          CanvasObject[]
+  canvasSnapshots        CanvasObjectSnapshot[]
+  canvasRelations        CanvasRelation[]
+  canvasMaterialReferences CanvasMaterialReference[]
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
   @@index([createdById])
   @@index([creatorProfileId])
+}
+
+model CanvasObject {
+  id             String           @id @default(cuid())
+  workspaceId    String
+  projectId      String
+  objectType     CanvasObjectType
+  title          String?
+  textContent    String?          @db.Text
+  positionX      Float
+  positionY      Float
+  width          Float
+  height         Float
+  zIndex         Int              @default(0)
+  contentVersion Int              @default(1)
+  layoutVersion  Int              @default(1)
+  metadata       Json?
+  createdById    String
+  updatedById    String
+  deletedAt      DateTime?
+  deletedById    String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  workspace      Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project        ContentProject   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy      User             @relation("CanvasObjectCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy      User             @relation("CanvasObjectUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  deletedBy      User?            @relation("CanvasObjectDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  snapshots      CanvasObjectSnapshot[]
+  sourceRelations CanvasRelation[] @relation("CanvasRelationSource")
+  targetRelations CanvasRelation[] @relation("CanvasRelationTarget")
+  materialReference CanvasMaterialReference?
+
+  @@index([workspaceId, projectId, deletedAt, updatedAt])
+  @@index([projectId, deletedAt, zIndex])
+  @@index([createdById])
+  @@index([updatedById])
+  @@index([deletedById])
+}
+
+model CanvasObjectSnapshot {
+  id                   String               @id @default(cuid())
+  workspaceId          String
+  projectId            String
+  objectId             String
+  objectType           CanvasObjectType
+  objectContentVersion Int
+  title                String?
+  textContent          String?              @db.Text
+  contentHash          String?
+  snapshotReason       CanvasSnapshotReason
+  referenceManifest    Json?
+  createdById          String
+  createdAt            DateTime             @default(now())
+  workspace            Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project              ContentProject       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  object               CanvasObject          @relation(fields: [objectId], references: [id], onDelete: Restrict)
+  createdBy            User                  @relation("CanvasSnapshotCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  sourceRelations      CanvasRelation[]
+
+  @@index([workspaceId, projectId, createdAt])
+  @@index([objectId, objectContentVersion, createdAt])
+  @@index([createdById])
+}
+
+model CanvasRelation {
+  id               String             @id @default(cuid())
+  workspaceId      String
+  projectId        String
+  relationType     CanvasRelationType
+  sourceObjectId   String
+  targetObjectId   String
+  sourceSnapshotId String
+  createdById      String
+  createdAt        DateTime           @default(now())
+  workspace        Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project          ContentProject     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceObject     CanvasObject       @relation("CanvasRelationSource", fields: [sourceObjectId], references: [id], onDelete: Restrict)
+  targetObject     CanvasObject       @relation("CanvasRelationTarget", fields: [targetObjectId], references: [id], onDelete: Restrict)
+  sourceSnapshot   CanvasObjectSnapshot @relation(fields: [sourceSnapshotId], references: [id], onDelete: Restrict)
+  createdBy        User               @relation("CanvasRelationCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, projectId, createdAt])
+  @@index([sourceObjectId])
+  @@index([targetObjectId])
+  @@index([sourceSnapshotId])
+  @@index([createdById])
+}
+
+model CanvasMaterialReference {
+  id                      String                 @id @default(cuid())
+  workspaceId             String
+  projectId               String
+  canvasObjectId          String                 @unique
+  sourceItemId            String
+  sourceAssetId           String?
+  purpose                 CanvasReferencePurpose @default(PRIMARY)
+  excerpt                 String?                @db.Text
+  sourceTitleSnapshot     String
+  sourceTypeSnapshot      SourceType
+  sourceUpdatedAtAtAttach DateTime?
+  createdAt               DateTime               @default(now())
+  workspace               Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project                 ContentProject         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  canvasObject            CanvasObject           @relation(fields: [canvasObjectId], references: [id], onDelete: Cascade)
+  sourceItem              SourceItem             @relation(fields: [sourceItemId], references: [id], onDelete: Restrict)
+  sourceAsset             SourceAsset?           @relation(fields: [sourceAssetId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, projectId, createdAt])
+  @@index([sourceItemId])
+  @@index([sourceAssetId])
 }
 
 model BenchmarkAccount {

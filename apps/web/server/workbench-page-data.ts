@@ -13,6 +13,7 @@ import { listMotherContentVersions } from "@/server/mother-content-service";
 import { getProjectMethodState } from "@/server/project-methods/service";
 import { getProjectForUser } from "@/server/project-service";
 import { CreativeBriefPrefillService } from "@/server/studio/creative-brief-prefill";
+import { listCanvasObjects } from "@/server/canvas/service";
 
 type WorkspaceRole = "OWNER" | "ADMIN" | "EDITOR" | "VIEWER";
 
@@ -33,7 +34,7 @@ export async function loadWorkbenchPageData(input: { userId: string; workspaceId
     if (!(error instanceof CreationFeedbackError)) throw error;
     return { available: false, projectId: project.id, motherContentId: null, motherContentVersion: null, sourceAiRunId: null, methods: [], feedback: null, unavailableReason: "MOTHER_NOT_READY" as const };
   });
-  const [availableSources, llm, ownProfile, motherHistory, latestAppliedMotherRun, methodState, feedbackContext, defaultMethod, creationContext] = await Promise.all([
+  const [availableSources, llm, ownProfile, motherHistory, latestAppliedMotherRun, methodState, feedbackContext, defaultMethod, creationContext, canvasObjects] = await Promise.all([
     db.sourceItem.findMany({ where: { workspaceId: input.workspaceId, status: "READY", ...(sourceIds.length ? { id: { notIn: sourceIds } } : {}) }, select: { id: true, title: true, sourcePlatform: true, sourceType: true, createdAt: true, materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { summary: true } } }, orderBy: { createdAt: "desc" }, take: 100 }),
     new IntegrationService().getIntegrationStatus(input.workspaceId, "LLM"),
     getCreatorProfile(input.workspaceId, input.userId),
@@ -43,6 +44,7 @@ export async function loadWorkbenchPageData(input: { userId: string; workspaceId
     feedbackForPage,
     getPublishedDefaultContentMethodForStudio({ workspaceId: input.workspaceId }),
     new ProjectContextBuilder().build({ workspaceId: input.workspaceId, userId: input.userId, projectId: project.id, action: "REWRITE_SELECTION", studioAction: "TOPIC_IDEAS" }),
+    listCanvasObjects(input),
   ]);
 
   const brief = project.creativeBrief;
@@ -55,7 +57,7 @@ export async function loadWorkbenchPageData(input: { userId: string; workspaceId
     sources: project.sources.map(({ role: sourceRole, sourceItem }) => {
       const analysis = sourceItem.materialAnalyses[0];
       const parsed = materialAnalysisOutputSchema.safeParse(analysis?.understanding);
-      return { role: sourceRole, sourceItem: { id: sourceItem.id, title: sourceItem.title, displayName: sourceDisplayName({ title: sourceItem.title, summary: analysis?.summary, platformLabel: sourcePlatformLabels[sourceItem.sourcePlatform] || sourceItem.sourcePlatform, createdAt: sourceItem.createdAt }), sourcePlatform: sourceItem.sourcePlatform, sourceType: sourceItem.sourceType, rawText: sourceItem.rawText, transcript: sourceItem.transcript ? { fullText: sourceItem.transcript.fullText, updatedAt: sourceItem.transcript.updatedAt.toISOString() } : null, referenceUpdated: Boolean(sourceItem.transcript && analysis && sourceItem.transcript.updatedAt > analysis.transcriptUpdatedAtAtAnalysis), materialAnalysis: analysis ? { version: analysis.version, summary: analysis.summary, keyPoints: stringArray(analysis.keyPoints), understanding: parsed.success ? parsed.data : null, legacy: !parsed.success || !(parsed.success && "expression" in parsed.data) } : null } };
+      return { role: sourceRole, sourceItem: { id: sourceItem.id, title: sourceItem.title, description: sourceItem.description, displayName: sourceDisplayName({ title: sourceItem.title, summary: analysis?.summary, platformLabel: sourcePlatformLabels[sourceItem.sourcePlatform] || sourceItem.sourcePlatform, createdAt: sourceItem.createdAt }), sourcePlatform: sourceItem.sourcePlatform, sourceType: sourceItem.sourceType, status: sourceItem.status, thumbnailUrl: sourceItem.thumbnailUrl, assets: sourceItem.assets, rawText: sourceItem.rawText, transcript: sourceItem.transcript ? { fullText: sourceItem.transcript.fullText, updatedAt: sourceItem.transcript.updatedAt.toISOString() } : null, referenceUpdated: Boolean(sourceItem.transcript && analysis && sourceItem.transcript.updatedAt > analysis.transcriptUpdatedAtAtAnalysis), materialAnalysis: analysis ? { version: analysis.version, summary: analysis.summary, keyPoints: stringArray(analysis.keyPoints), understanding: parsed.success ? parsed.data : null, legacy: !parsed.success || !(parsed.success && "expression" in parsed.data) } : null } };
     }),
     creativePlan,
     motherContent: { title: mother?.title || "", body: mother?.body || "", outline: stringArray(mother?.outline), version: mother?.version || 0, origin: mother?.origin || "HUMAN" as const, originNote: mother?.originNote || null, confirmedVersion: mother?.confirmedVersion ?? null, confirmedWarnings: Array.isArray(mother?.confirmedWarnings) ? mother.confirmedWarnings.filter((value): value is string => typeof value === "string") : [] },
@@ -68,6 +70,7 @@ export async function loadWorkbenchPageData(input: { userId: string; workspaceId
 
   return {
     project: { ...studioProject, productionPlan: parsedProductionPlan.success ? parsedProductionPlan.data : null },
+    canvasObjects,
     methods: methodState,
     defaultMethod,
     recommendedActions: recommendStudioQuickActions({ hasTopic: Boolean(brief?.coreMessage.trim() || brief?.topic.trim()), hasDraft: Boolean(mother?.body.trim()), hasOwnEvidence: creationContext.hasOwnCaseOrData }),

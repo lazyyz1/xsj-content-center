@@ -15,7 +15,7 @@ export function findProjectForUser(
       creatorProfile: true,
       sources: {
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-        include: { sourceItem: { include: { transcript: true, materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1 } } } },
+        include: { sourceItem: { include: { transcript: true, materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1 }, assets: { where: { assetType: "IMAGE" }, orderBy: { createdAt: "asc" }, select: { id: true, assetType: true, status: true, mimeType: true } } } } },
       },
       evidenceItems: {
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],

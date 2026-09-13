@@ -47,7 +47,7 @@ export async function DELETE(_request: Request, route: RouteContext) {
   const { id } = await route.params;
   const source = await findSourceForUser(db, { userId: context.session.user.id, workspaceId: context.workspace.id, sourceItemId: id });
   if (!source) return apiError("NOT_FOUND", 404);
-  if (await hasSourceDeletionReferences(db, source.id)) return apiError("SOURCE_IN_USE", 409, "这条素材已经被研究结果或方法引用，暂时不能永久删除。你可以先归档。");
+  if (await hasSourceDeletionReferences(db, source.id)) return apiError("SOURCE_IN_USE", 409, "这条素材已经被研究结果、方法或画布引用，暂时不能永久删除。你可以先归档。");
   const storedAssets = source.assets.filter((asset) => asset.storageKey);
   const storage = storedAssets.length > 0 ? getStorageProvider() : null;
   for (const asset of storedAssets) {

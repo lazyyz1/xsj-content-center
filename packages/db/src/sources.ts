@@ -21,13 +21,14 @@ export function findSourceForUser(
 }
 
 export async function hasSourceDeletionReferences(prisma: PrismaClient, sourceItemId: string) {
-  const [methodVersion, benchmarkStudySample, materialDistillation, distillationMethodVersion] = await Promise.all([
+  const [methodVersion, benchmarkStudySample, materialDistillation, distillationMethodVersion, canvasMaterialReference] = await Promise.all([
     prisma.methodVersion.findFirst({ where: { sourceItemId }, select: { id: true } }),
     prisma.benchmarkStudySample.findFirst({ where: { sourceItemId }, select: { id: true } }),
     prisma.materialDistillation.findFirst({ where: { sourceItemId }, select: { id: true } }),
     prisma.methodVersion.findFirst({ where: { sourceMaterialDistillation: { sourceItemId } }, select: { id: true } }),
+    prisma.canvasMaterialReference.findFirst({ where: { sourceItemId }, select: { id: true } }),
   ]);
-  return Boolean(methodVersion || benchmarkStudySample || materialDistillation || distillationMethodVersion);
+  return Boolean(methodVersion || benchmarkStudySample || materialDistillation || distillationMethodVersion || canvasMaterialReference);
 }
 
 export function findIngestJobForUser(

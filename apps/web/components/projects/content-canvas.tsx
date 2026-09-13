@@ -15,14 +15,17 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import {
+  ArrowLeft,
   BookOpenCheck,
   Columns3,
   FileText,
   Grid2X2,
   Hand,
+  ImageIcon,
   LayoutGrid,
   Lightbulb,
-  Map,
+  Link2,
+  Map as MapIcon,
   Maximize2,
   Minus,
   MousePointer2,
@@ -30,10 +33,12 @@ import {
   PencilLine,
   Plus,
   Rows3,
+  Redo2,
   Settings2,
   ShieldCheck,
   Sparkles,
   Target,
+  Undo2,
   X,
 } from "lucide-react";
 import {
@@ -47,15 +52,19 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { CanvasFreeNode, FreeNodeActionsProvider, type CanvasSaveState, type FreeCanvasNode } from "./canvas-free-node";
+import type { CanvasLayoutInput, CanvasObjectDTO } from "@/server/canvas/service";
 
 export type CardKind = "brief" | "sources" | "facts" | "methods" | "suggestion" | "draft";
 export type CanvasContextKind = Extract<CardKind, "brief" | "sources" | "facts" | "methods">;
 export type CanvasAssistantContext = { focus: CardKind | null; openContext: (kind: CanvasContextKind) => void; openDraft: () => void };
 export type WorkbenchLayoutMode = "canvas-only" | "canvas-assistant" | "assistant-only";
+export type CanvasSourceOption = { id: string; title: string; description: string | null; sourcePlatform: string; sourceType: string; status: string; imageAssets: Array<{ id: string; assetType: string; status: string; mimeType: string | null }> };
 type CanvasTool = "select" | "pan";
 type ArrangeMode = "type" | "grid" | "horizontal" | "vertical";
 type CanvasBackgroundStyle = "dots" | "grid" | "solid";
 type CanvasBackgroundTone = "default" | "warm" | "cool";
+type AddChoice = CardKind | "text" | "material" | "image";
 type CardData = {
   kind: CardKind;
   title: string;
@@ -73,6 +82,7 @@ type CardData = {
   };
 };
 type CanvasNode = Node<CardData>;
+type WorkbenchNode = CanvasNode | FreeCanvasNode;
 
 const icons = {
   brief: Target,
@@ -81,9 +91,17 @@ const icons = {
   methods: BookOpenCheck,
   suggestion: Sparkles,
   draft: PencilLine,
+  text: FileText,
+  material: BookOpenCheck,
+  image: ImageIcon,
 } as const;
 
-const addGroups = [
+const addGroups: Array<{ label: string; items: Array<{ kind: AddChoice; title: string; description: string }> }> = [
+  { label: "自由内容", items: [
+    { kind: "text", title: "文本", description: "直接写下新的内容" },
+    { kind: "material", title: "资料", description: "引用当前项目的真实资料" },
+    { kind: "image", title: "图片", description: "引用资料中的真实图片" },
+  ] },
   { label: "内容", items: [
     { kind: "sources", title: "参考素材", description: "从已有资料中选择" },
     { kind: "facts", title: "我方依据", description: "查看已确认的真实依据" },
@@ -96,7 +114,7 @@ const addGroups = [
   { label: "AI", items: [
     { kind: "suggestion", title: "AI 建议", description: "查看当前已有建议" },
   ] },
-] as const;
+];
 
 const ARRANGE_POSITIONS: Record<ArrangeMode, Record<CardKind, { x: number; y: number }>> = {
   type: {
@@ -182,7 +200,7 @@ function CanvasCard({ data, selected }: NodeProps<CanvasNode>) {
   );
 }
 
-const nodeTypes = { card: CanvasCard };
+const nodeTypes = { card: CanvasCard, free: CanvasFreeNode };
 
 function CanvasToolbar({
   projectTitle,
@@ -219,7 +237,7 @@ function CanvasToolbar({
         <button type="button" title="放大画布" onClick={() => void zoomIn({ duration: motionSafe ? 160 : 0 })} aria-label="放大画布"><Plus size={17} /></button>
         <i aria-hidden="true" />
         <button type="button" title="画布设置" aria-expanded={menu === "settings"} onClick={() => onMenu("settings")} aria-label="画布设置"><Settings2 size={17} /></button>
-        <button type="button" title={miniMapOpen ? "隐藏小地图" : "显示小地图"} aria-pressed={miniMapOpen} onClick={onToggleMiniMap} aria-label={miniMapOpen ? "隐藏小地图" : "显示小地图"}><Map size={17} /></button>
+        <button type="button" title={miniMapOpen ? "隐藏小地图" : "显示小地图"} aria-pressed={miniMapOpen} onClick={onToggleMiniMap} aria-label={miniMapOpen ? "隐藏小地图" : "显示小地图"}><MapIcon size={17} /></button>
         <button type="button" title="切换工作区布局" onClick={onToggleLayout} aria-label="切换工作区布局"><PanelRightOpen size={18} /></button>
       </nav>
     </header>
@@ -232,16 +250,16 @@ function CanvasViewMenu({
   backgroundStyle,
   backgroundTone,
   onClose,
-  onNodes,
+  onArrange,
   onBackgroundStyle,
   onBackgroundTone,
 }: {
   menu: "arrange" | "settings" | null;
-  nodes: CanvasNode[];
+  nodes: WorkbenchNode[];
   backgroundStyle: CanvasBackgroundStyle;
   backgroundTone: CanvasBackgroundTone;
   onClose: () => void;
-  onNodes: (nodes: CanvasNode[]) => void;
+  onArrange: (nodes: WorkbenchNode[]) => void;
   onBackgroundStyle: (style: CanvasBackgroundStyle) => void;
   onBackgroundTone: (tone: CanvasBackgroundTone) => void;
 }) {
@@ -250,7 +268,25 @@ function CanvasViewMenu({
 
   const arrange = (mode: ArrangeMode) => {
     const positions = ARRANGE_POSITIONS[mode];
-    onNodes(nodes.map((node) => ({ ...node, position: positions[node.data.kind] })));
+    let freeX = mode === "horizontal" ? 2_204 : mode === "vertical" ? 380 : 24;
+    let freeY = mode === "vertical" ? 1_500 : mode === "horizontal" ? 250 : 720;
+    let rowHeight = 0;
+    const arranged = nodes.map((node) => {
+      if (node.type === "card") return { ...node, position: positions[(node as CanvasNode).data.kind] };
+      const freeNode = node as FreeCanvasNode;
+      const width = freeNode.measured?.width ?? freeNode.data.object.width;
+      const height = freeNode.measured?.height ?? freeNode.data.object.height;
+      const position = { x: freeX, y: freeY };
+      if (mode === "horizontal") freeX += width + 32;
+      else if (mode === "vertical") freeY += height + 32;
+      else {
+        rowHeight = Math.max(rowHeight, height);
+        freeX += width + 32;
+        if (freeX + width > 1_500) { freeX = 24; freeY += rowHeight + 32; rowHeight = 0; }
+      }
+      return { ...freeNode, position };
+    });
+    onArrange(arranged);
     window.requestAnimationFrame(() => void fitView({ padding: 0.16, maxZoom: 1.05, duration: motionSafe ? 260 : 0 }));
     onClose();
   };
@@ -289,37 +325,74 @@ function WorkbenchLayoutMenu({ current, open, onClose, onChange }: { current: Wo
   </div>;
 }
 
+function CanvasViewCoordinator({ request, onHandled }: { request: { ids: string[]; revision: number } | null; onHandled: () => void }) {
+  const { fitView } = useReactFlow();
+  useEffect(() => {
+    if (!request) return;
+    const motionSafe = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const frame = window.requestAnimationFrame(() => {
+      void fitView({ nodes: request.ids.map((id) => ({ id })), padding: 0.55, maxZoom: 1.05, duration: motionSafe ? 280 : 0 });
+      onHandled();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [fitView, onHandled, request]);
+  return null;
+}
+
 function CanvasChrome({
   addOpen,
   activeTool,
+  editable,
+  referenceMode,
+  sourceOptions,
+  canUndo,
+  canRedo,
   onAdd,
+  onBack,
   onCloseAdd,
   onChoose,
+  onChooseSource,
+  onUndo,
+  onRedo,
   onTool,
 }: {
   addOpen: boolean;
   activeTool: CanvasTool;
-  onAdd: () => void;
+  editable: boolean;
+  referenceMode: "material" | "image" | null;
+  sourceOptions: CanvasSourceOption[];
+  canUndo: boolean;
+  canRedo: boolean;
+  onAdd: (position: { x: number; y: number }) => void;
+  onBack: () => void;
   onCloseAdd: () => void;
-  onChoose: (kind: CardKind) => void;
+  onChoose: (kind: AddChoice) => void;
+  onChooseSource: (source: CanvasSourceOption, sourceAssetId?: string) => void;
+  onUndo: () => void;
+  onRedo: () => void;
   onTool: (tool: CanvasTool) => void;
 }) {
-  const choose = (kind: CardKind) => {
-    onChoose(kind);
-  };
+  const { screenToFlowPosition } = useReactFlow();
+  const referenceOptions = referenceMode === "image"
+    ? sourceOptions.flatMap((source) => source.imageAssets.map((asset) => ({ source, asset })))
+    : sourceOptions.map((source) => ({ source, asset: null }));
 
   return <>
     <nav className="canvas-bottom-toolbar" aria-label="画布工具">
-      <button type="button" className="is-primary" onClick={onAdd} aria-expanded={addOpen} aria-haspopup="dialog" title="添加到画布"><Plus size={18} /><span>添加</span></button>
+      <button type="button" className="is-primary" onClick={() => { const canvas = document.querySelector(".content-canvas .react-flow")?.getBoundingClientRect(); const point = canvas ? screenToFlowPosition({ x: canvas.left + canvas.width / 2, y: canvas.top + canvas.height / 2 }) : { x: 720, y: 180 }; onAdd(point); }} aria-expanded={addOpen} aria-haspopup="dialog" title="添加到画布"><Plus size={18} /><span>添加</span></button>
       <button type="button" aria-pressed={activeTool === "select"} onClick={() => onTool("select")} title="选择卡片"><MousePointer2 size={17} /><span>选择</span></button>
       <button type="button" aria-pressed={activeTool === "pan"} onClick={() => onTool("pan")} title="拖动画布"><Hand size={17} /><span>移动</span></button>
+      <i aria-hidden="true" />
+      <button type="button" disabled={!canUndo} onClick={onUndo} title="撤销" aria-label="撤销画布操作"><Undo2 size={16} /></button>
+      <button type="button" disabled={!canRedo} onClick={onRedo} title="重做" aria-label="重做画布操作"><Redo2 size={16} /></button>
     </nav>
 
     {addOpen ? <div className="canvas-add-layer">
       <button type="button" tabIndex={-1} aria-label="关闭添加到画布菜单" onClick={onCloseAdd} />
       <aside role="dialog" aria-modal="false" aria-labelledby="canvas-add-title">
-        <header><strong id="canvas-add-title">添加到画布</strong><button type="button" aria-label="关闭菜单" onClick={onCloseAdd}><X size={17} /></button></header>
-        {addGroups.map((group) => <section key={group.label}><h3>{group.label}</h3><div>{group.items.map((item, index) => { const Icon = icons[item.kind]; return <button type="button" key={item.kind} autoFocus={group.label === "内容" && index === 0} onClick={() => choose(item.kind)}><span aria-hidden="true"><Icon size={17} /></span><span><strong>{item.title}</strong><small>{item.description}</small></span></button>; })}</div></section>)}
+        <header>{referenceMode ? <button type="button" aria-label="返回添加菜单" onClick={onBack}><ArrowLeft size={17} /></button> : null}<strong id="canvas-add-title">{referenceMode === "image" ? "选择图片" : referenceMode === "material" ? "选择资料" : "添加到画布"}</strong><button type="button" aria-label="关闭菜单" onClick={onCloseAdd}><X size={17} /></button></header>
+        {referenceMode ? <section className="canvas-reference-picker"><h3>{referenceMode === "image" ? "当前项目中的真实图片" : "当前项目资料"}</h3><div>{referenceOptions.map(({ source, asset }, index) => <button type="button" key={`${source.id}-${asset?.id ?? "material"}`} autoFocus={index === 0} onClick={() => onChooseSource(source, asset?.id)}><span aria-hidden="true">{referenceMode === "image" ? <ImageIcon size={17} /> : <Link2 size={17} />}</span><span><strong>{source.title}</strong><small>{source.sourcePlatform} · {source.sourceType}</small></span></button>)}</div>{referenceOptions.length === 0 ? <p>{referenceMode === "image" ? "当前项目还没有可引用的真实图片。" : "当前项目还没有资料。"}</p> : null}</section>
+          : addGroups.map((group) => group.label === "自由内容" && !editable ? null : <section key={group.label}><h3>{group.label}</h3><div>{group.items.map((item, index) => { const Icon = icons[item.kind]; return <button type="button" key={item.kind} autoFocus={group.label === "自由内容" && index === 0} onClick={() => onChoose(item.kind)}><span aria-hidden="true"><Icon size={17} /></span><span><strong>{item.title}</strong><small>{item.description}</small></span></button>; })}</div></section>)}
       </aside>
     </div> : null}
   </>;
@@ -328,6 +401,9 @@ function CanvasChrome({
 type CanvasSurfaceProps = {
   projectId: string;
   projectTitle: string;
+  initialObjects: CanvasObjectDTO[];
+  sourceOptions: CanvasSourceOption[];
+  editable: boolean;
   brief: string[];
   sources: string[];
   facts: string[];
@@ -346,6 +422,32 @@ type CanvasSurfaceProps = {
   onPlatform: (platform: string) => void;
 };
 
+type CanvasCommand =
+  | { type: "CREATE"; objectId: string }
+  | { type: "DELETE"; objectId: string }
+  | { type: "LAYOUT"; objectId: string; before: CanvasLayoutInput; after: CanvasLayoutInput }
+  | { type: "BATCH_LAYOUT"; items: Array<{ objectId: string; before: CanvasLayoutInput; after: CanvasLayoutInput }> };
+type TextDraft = { title: string; textContent: string; expectedContentVersion: number; revision: number };
+
+async function canvasRequest(url: string, init?: RequestInit) {
+  const response = await fetch(url, { ...init, headers: { ...(init?.body ? { "content-type": "application/json" } : {}), ...init?.headers } });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(typeof result.message === "string" ? result.message : "画布操作失败，请重试。");
+    Object.assign(error, { status: response.status, code: result.error });
+    throw error;
+  }
+  return result as { object?: CanvasObjectDTO; objects?: CanvasObjectDTO[] };
+}
+
+function objectLayout(object: CanvasObjectDTO): CanvasLayoutInput {
+  return { positionX: object.positionX, positionY: object.positionY, width: object.width, height: object.height, zIndex: object.zIndex };
+}
+
+function recoveryKey(projectId: string, objectId: string) {
+  return `canvas-text-recovery:${projectId}:${objectId}:v1`;
+}
+
 const DEFAULT_VIEWPORT: Viewport = { x: 18, y: 48, zoom: 0.92 };
 const MIN_CANVAS_WIDTH = 340;
 const MIN_ASSISTANT_WIDTH = 260;
@@ -359,6 +461,9 @@ function clampAssistantWidth(width: number, totalWidth: number) {
 function CanvasSurface({
   projectId,
   projectTitle,
+  initialObjects,
+  sourceOptions,
+  editable,
   brief,
   sources,
   facts,
@@ -379,6 +484,7 @@ function CanvasSurface({
   const [focused, setFocused] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [referenceMode, setReferenceMode] = useState<"material" | "image" | null>(null);
   const [canvasMenu, setCanvasMenu] = useState<"arrange" | "settings" | null>(null);
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [miniMapOpen, setMiniMapOpen] = useState(true);
@@ -388,11 +494,28 @@ function CanvasSurface({
   const [backgroundTone, setBackgroundTone] = useState<CanvasBackgroundTone>("default");
   const [assistantWidth, setAssistantWidth] = useState<number | null>(null);
   const [isResizing, setIsResizing] = useState(false);
+  const [freeObjects, setFreeObjects] = useState(initialObjects);
+  const [editingObjectId, setEditingObjectId] = useState<string | null>(null);
+  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const [saveStates, setSaveStates] = useState<Record<string, CanvasSaveState>>({});
+  const [canvasError, setCanvasError] = useState("");
+  const [viewRequest, setViewRequest] = useState<{ ids: string[]; revision: number } | null>(null);
+  const [, setHistoryRevision] = useState(0);
   const workbenchRef = useRef<HTMLDivElement>(null);
   const assistantWidthRef = useRef<number | null>(null);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const viewReadyRef = useRef(false);
   const viewProjectRef = useRef(projectId);
+  const freeObjectsRef = useRef(new Map(initialObjects.map((object) => [object.id, object])));
+  const textDraftsRef = useRef(new Map<string, TextDraft>());
+  const flushTextRef = useRef<(objectId: string) => Promise<void>>(async () => undefined);
+  const saveTimersRef = useRef(new Map<string, number>());
+  const saveInFlightRef = useRef(new Set<string>());
+  const insertPositionRef = useRef<{ x: number; y: number; sourceObjectId?: string }>({ x: 720, y: 180 });
+  const dragStartRef = useRef(new Map<string, CanvasLayoutInput>());
+  const lastNodeClickAtRef = useRef(0);
+  const undoStackRef = useRef<CanvasCommand[]>([]);
+  const redoStackRef = useRef<CanvasCommand[]>([]);
   const storageKey = `content-canvas:${projectId}:v5`;
   const viewStorageKey = `content-canvas:${projectId}:view:v1`;
   const paneStorageKey = `studio-workbench-assistant-width:${projectId}:v1`;
@@ -448,21 +571,39 @@ function CanvasSurface({
     ];
   }, [brief, draft, facts, methods, onContextKindChange, onLayoutModeChange, onPlatform, savedLayout.nodes, sources, suggestions]);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(templateNodes);
+  const [nodes, setNodes, onNodesChange] = useNodesState<WorkbenchNode>(templateNodes);
   const selectedNode = nodes.find((node) => node.selected);
-  const selectedKind = selectedNode?.data.kind ?? null;
-  const currentFocus = focused ? `稿件｜${draft.title || "未命名稿件"}` : selectedNode?.data.title ?? "画布";
+  const selectedKind = selectedNode?.type === "card" ? (selectedNode as CanvasNode).data.kind : null;
+  const selectedFreeObject = selectedNode?.type === "free" ? (selectedNode as FreeCanvasNode).data.object : null;
+  const currentFocus = focused ? `稿件｜${draft.title || "未命名稿件"}` : selectedNode?.type === "free" ? selectedFreeObject?.title || "未命名文本" : selectedNode?.type === "card" ? (selectedNode as CanvasNode).data.title : "画布";
 
   useEffect(() => {
-    setNodes((current) => templateNodes.map((next) => {
-      const previous = current.find(({ id }) => id === next.id);
-      return previous ? { ...next, position: previous.position, selected: previous.selected } : next;
-    }));
-  }, [setNodes, templateNodes]);
+    setNodes((current) => {
+      const systemNodes = templateNodes.map((next) => {
+        const previous = current.find(({ id }) => id === next.id);
+        return previous ? { ...next, position: previous.position, selected: previous.selected } : next;
+      });
+      const objectNodes: FreeCanvasNode[] = freeObjects.map((object) => {
+        const id = `object:${object.id}`;
+        const previous = current.find((node) => node.id === id && node.type === "free") as FreeCanvasNode | undefined;
+        const layoutChanged = previous?.data.object.layoutVersion !== object.layoutVersion;
+        return {
+          id,
+          type: "free",
+          draggable: editable,
+          position: previous && !layoutChanged ? previous.position : { x: object.positionX, y: object.positionY },
+          style: { width: object.width, height: object.height },
+          selected: editingObjectId === object.id || selectedObjectId === object.id,
+          data: { object, editable, editing: editingObjectId === object.id, saveState: saveStates[object.id] ?? "idle" },
+        };
+      });
+      return [...systemNodes, ...objectNodes];
+    });
+  }, [editable, editingObjectId, freeObjects, saveStates, selectedObjectId, setNodes, templateNodes]);
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify({
-      nodes: Object.fromEntries(nodes.map(({ id, position }) => [id, position])),
+      nodes: Object.fromEntries(nodes.filter((node) => node.type === "card").map(({ id, position }) => [id, position])),
       viewport,
     }));
   }, [nodes, storageKey, viewport]);
@@ -486,6 +627,251 @@ function CanvasSurface({
     if (!viewReadyRef.current) return;
     window.localStorage.setItem(viewStorageKey, JSON.stringify({ miniMapOpen, toolMode, backgroundStyle, backgroundTone }));
   }, [backgroundStyle, backgroundTone, miniMapOpen, toolMode, viewStorageKey]);
+
+  const updateHistoryState = useCallback(() => setHistoryRevision((current) => current + 1), []);
+  const pushCommand = useCallback((command: CanvasCommand) => {
+    undoStackRef.current = [...undoStackRef.current.slice(-49), command];
+    redoStackRef.current = [];
+    updateHistoryState();
+  }, [updateHistoryState]);
+
+  const upsertObject = useCallback((object: CanvasObjectDTO) => {
+    freeObjectsRef.current.set(object.id, object);
+    setFreeObjects((current) => object.deletedAt
+      ? current.filter(({ id }) => id !== object.id)
+      : [...current.filter(({ id }) => id !== object.id), object].sort((a, b) => a.zIndex - b.zIndex || a.createdAt.localeCompare(b.createdAt)));
+  }, []);
+
+  useEffect(() => {
+    for (const timer of saveTimersRef.current.values()) window.clearTimeout(timer);
+    saveTimersRef.current.clear();
+    saveInFlightRef.current.clear();
+    textDraftsRef.current.clear();
+    const recoveredStates: Record<string, CanvasSaveState> = {};
+    let recoveredEditingId: string | null = null;
+    const recovered = initialObjects.map((object) => {
+      if (object.objectType !== "TEXT") return object;
+      try {
+        const cached = JSON.parse(window.localStorage.getItem(recoveryKey(projectId, object.id)) ?? "null") as { title?: unknown; textContent?: unknown; expectedContentVersion?: unknown } | null;
+        if (!cached || typeof cached.title !== "string" || typeof cached.textContent !== "string" || typeof cached.expectedContentVersion !== "number") return object;
+        const merged = { ...object, title: cached.title || null, textContent: cached.textContent };
+        textDraftsRef.current.set(object.id, { title: cached.title, textContent: cached.textContent, expectedContentVersion: object.contentVersion, revision: 1 });
+        recoveredStates[object.id] = cached.expectedContentVersion === object.contentVersion ? "save_failed" : "conflict";
+        recoveredEditingId ??= object.id;
+        return merged;
+      } catch {
+        return object;
+      }
+    });
+    freeObjectsRef.current = new Map(recovered.map((object) => [object.id, object]));
+    setFreeObjects(recovered);
+    setSaveStates(recoveredStates);
+    setEditingObjectId(recoveredEditingId);
+    setSelectedObjectId(recoveredEditingId);
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    updateHistoryState();
+  }, [initialObjects, projectId, updateHistoryState]);
+
+  const flushCanvasText = useCallback(async (objectId: string) => {
+    if (saveInFlightRef.current.has(objectId)) return;
+    const draft = textDraftsRef.current.get(objectId);
+    if (!draft) return;
+    saveInFlightRef.current.add(objectId);
+    setSaveStates((current) => ({ ...current, [objectId]: "saving" }));
+    const sentRevision = draft.revision;
+    try {
+      const result = await canvasRequest(`/api/projects/${projectId}/canvas/objects/${objectId}`, { method: "PATCH", body: JSON.stringify({ kind: "TEXT", expectedContentVersion: draft.expectedContentVersion, title: draft.title || null, textContent: draft.textContent }) });
+      if (!result.object) throw new Error("节点保存结果无效。");
+      upsertObject(result.object);
+      const latest = textDraftsRef.current.get(objectId);
+      if (!latest || latest.revision === sentRevision) {
+        textDraftsRef.current.delete(objectId);
+        window.localStorage.removeItem(recoveryKey(projectId, objectId));
+        setSaveStates((current) => ({ ...current, [objectId]: "saved" }));
+        window.setTimeout(() => setSaveStates((current) => current[objectId] === "saved" ? { ...current, [objectId]: "idle" } : current), 1_200);
+      } else {
+        textDraftsRef.current.set(objectId, { ...latest, expectedContentVersion: result.object.contentVersion });
+        window.setTimeout(() => void flushTextRef.current(objectId), 80);
+      }
+    } catch (error) {
+      const status = error && typeof error === "object" && "status" in error ? Number((error as { status?: number }).status) : 0;
+      setSaveStates((current) => ({ ...current, [objectId]: status === 409 ? "conflict" : "save_failed" }));
+    } finally {
+      saveInFlightRef.current.delete(objectId);
+    }
+  }, [projectId, upsertObject]);
+
+  useEffect(() => { flushTextRef.current = flushCanvasText; }, [flushCanvasText]);
+
+  const changeCanvasText = useCallback((objectId: string, value: { title: string; textContent: string }) => {
+    const object = freeObjectsRef.current.get(objectId);
+    if (!object || object.objectType !== "TEXT" || object.deletedAt || !editable) return;
+    const previous = textDraftsRef.current.get(objectId);
+    const draft: TextDraft = { title: value.title, textContent: value.textContent, expectedContentVersion: previous?.expectedContentVersion ?? object.contentVersion, revision: (previous?.revision ?? 0) + 1 };
+    textDraftsRef.current.set(objectId, draft);
+    const localObject = { ...object, title: value.title.trim() || null, textContent: value.textContent };
+    freeObjectsRef.current.set(objectId, localObject);
+    setFreeObjects((current) => current.map((item) => item.id === objectId ? localObject : item));
+    setSaveStates((current) => ({ ...current, [objectId]: "dirty" }));
+    window.localStorage.setItem(recoveryKey(projectId, objectId), JSON.stringify({ title: value.title, textContent: value.textContent, expectedContentVersion: draft.expectedContentVersion, savedAt: new Date().toISOString() }));
+    const timer = saveTimersRef.current.get(objectId);
+    if (timer) window.clearTimeout(timer);
+    saveTimersRef.current.set(objectId, window.setTimeout(() => void flushTextRef.current(objectId), 600));
+  }, [editable, projectId]);
+
+  const retryCanvasText = useCallback(async (objectId: string) => {
+    const draft = textDraftsRef.current.get(objectId);
+    if (!draft) return;
+    if (saveStates[objectId] === "conflict") {
+      try {
+        const result = await canvasRequest(`/api/projects/${projectId}/canvas/objects`);
+        const server = result.objects?.find(({ id }) => id === objectId);
+        if (server) textDraftsRef.current.set(objectId, { ...draft, expectedContentVersion: server.contentVersion, revision: draft.revision + 1 });
+      } catch {
+        // Keep the local recovery buffer and let the regular retry surface the error.
+      }
+    }
+    await flushTextRef.current(objectId);
+  }, [projectId, saveStates]);
+
+  const persistCanvasLayout = useCallback(async (objectId: string, layout: CanvasLayoutInput, before: CanvasLayoutInput, record = true) => {
+    const object = freeObjectsRef.current.get(objectId);
+    if (!object || object.deletedAt || !editable) return;
+    try {
+      const result = await canvasRequest(`/api/projects/${projectId}/canvas/objects/${objectId}`, { method: "PATCH", body: JSON.stringify({ kind: "LAYOUT", expectedLayoutVersion: object.layoutVersion, ...layout }) });
+      if (!result.object) throw new Error("节点位置保存结果无效。");
+      upsertObject(result.object);
+      if (record && JSON.stringify(before) !== JSON.stringify(layout)) pushCommand({ type: "LAYOUT", objectId, before, after: layout });
+    } catch {
+      setNodes((current) => current.map((node) => node.id === `object:${objectId}` ? { ...node, position: { x: before.positionX, y: before.positionY }, style: { ...node.style, width: before.width, height: before.height } } : node));
+      setSaveStates((current) => ({ ...current, [objectId]: "save_failed" }));
+    }
+  }, [editable, projectId, pushCommand, setNodes, upsertObject]);
+
+  const deleteCanvasObject = useCallback(async (objectId: string, record = true) => {
+    if (!editable) return;
+    if (textDraftsRef.current.has(objectId)) {
+      await flushTextRef.current(objectId);
+      if (textDraftsRef.current.has(objectId)) return;
+    }
+    const object = freeObjectsRef.current.get(objectId);
+    if (!object || object.deletedAt) return;
+    const result = await canvasRequest(`/api/projects/${projectId}/canvas/objects/${objectId}`, { method: "DELETE", body: JSON.stringify({ expectedContentVersion: object.contentVersion }) });
+    if (!result.object) throw new Error("节点删除结果无效。");
+    upsertObject(result.object);
+    setEditingObjectId((current) => current === objectId ? null : current);
+    setSelectedObjectId((current) => current === objectId ? null : current);
+    if (record) pushCommand({ type: "DELETE", objectId });
+  }, [editable, projectId, pushCommand, upsertObject]);
+
+  const restoreDeletedObject = useCallback(async (objectId: string) => {
+    if (!editable) return;
+    const object = freeObjectsRef.current.get(objectId);
+    if (!object?.deletedAt) return;
+    const result = await canvasRequest(`/api/projects/${projectId}/canvas/objects/${objectId}/restore`, { method: "POST", body: JSON.stringify({ expectedContentVersion: object.contentVersion }) });
+    if (!result.object) throw new Error("节点恢复结果无效。");
+    upsertObject(result.object);
+    setSelectedObjectId(objectId);
+  }, [editable, projectId, upsertObject]);
+
+  const performHistoryCommand = useCallback(async (command: CanvasCommand, direction: "undo" | "redo") => {
+    if (command.type === "CREATE") return direction === "undo" ? deleteCanvasObject(command.objectId, false) : restoreDeletedObject(command.objectId);
+    if (command.type === "DELETE") return direction === "undo" ? restoreDeletedObject(command.objectId) : deleteCanvasObject(command.objectId, false);
+    const items = command.type === "LAYOUT" ? [command] : command.items;
+    for (const item of items) {
+      const current = freeObjectsRef.current.get(item.objectId);
+      if (!current || current.deletedAt) continue;
+      const layout = direction === "undo" ? item.before : item.after;
+      await persistCanvasLayout(item.objectId, layout, objectLayout(current), false);
+    }
+  }, [deleteCanvasObject, persistCanvasLayout, restoreDeletedObject]);
+
+  const undoCanvas = useCallback(async () => {
+    const command = undoStackRef.current.pop();
+    if (!command) return;
+    updateHistoryState();
+    try {
+      await performHistoryCommand(command, "undo");
+      redoStackRef.current.push(command);
+    } catch {
+      undoStackRef.current.push(command);
+    }
+    updateHistoryState();
+  }, [performHistoryCommand, updateHistoryState]);
+
+  const redoCanvas = useCallback(async () => {
+    const command = redoStackRef.current.pop();
+    if (!command) return;
+    updateHistoryState();
+    try {
+      await performHistoryCommand(command, "redo");
+      undoStackRef.current.push(command);
+    } catch {
+      redoStackRef.current.push(command);
+    }
+    updateHistoryState();
+  }, [performHistoryCommand, updateHistoryState]);
+
+  const createFreeObject = useCallback(async (choice: "text" | "material" | "image", source?: CanvasSourceOption, sourceAssetId?: string) => {
+    if (!editable) return;
+    const point = insertPositionRef.current;
+    const width = choice === "image" ? 360 : 380;
+    const height = choice === "image" ? 260 : 220;
+    const zIndex = Math.max(0, ...Array.from(freeObjectsRef.current.values()).map((object) => object.zIndex)) + 1;
+    const payload = choice === "text"
+      ? { objectType: "TEXT", title: null, textContent: "", layout: { positionX: point.x, positionY: point.y, width, height, zIndex } }
+      : choice === "image"
+        ? { objectType: "IMAGE_REFERENCE", sourceItemId: source?.id, sourceAssetId, layout: { positionX: point.x, positionY: point.y, width, height, zIndex } }
+        : { objectType: "MATERIAL_REFERENCE", sourceItemId: source?.id, layout: { positionX: point.x, positionY: point.y, width, height, zIndex } };
+    const result = await canvasRequest(`/api/projects/${projectId}/canvas/objects`, { method: "POST", body: JSON.stringify(payload) });
+    if (!result.object) throw new Error("节点创建结果无效。");
+    upsertObject(result.object);
+    setAddOpen(false);
+    setReferenceMode(null);
+    setSelectedObjectId(result.object.id);
+    if (choice === "text") setEditingObjectId(result.object.id);
+    pushCommand({ type: "CREATE", objectId: result.object.id });
+    setViewRequest({ ids: [...(point.sourceObjectId ? [`object:${point.sourceObjectId}`] : []), `object:${result.object.id}`], revision: Date.now() });
+  }, [editable, projectId, pushCommand, upsertObject]);
+
+  useEffect(() => {
+    const onCanvasShortcut = (event: globalThis.KeyboardEvent) => {
+      const element = event.target instanceof HTMLElement ? event.target : null;
+      if (element?.closest("input, textarea, select, [contenteditable='true']")) return;
+      const modifier = event.metaKey || event.ctrlKey;
+      if (modifier && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) void redoCanvas();
+        else void undoCanvas();
+        return;
+      }
+      if (modifier && event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        void redoCanvas();
+        return;
+      }
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedObjectId) {
+        event.preventDefault();
+        void deleteCanvasObject(selectedObjectId);
+      }
+    };
+    window.addEventListener("keydown", onCanvasShortcut);
+    return () => window.removeEventListener("keydown", onCanvasShortcut);
+  }, [deleteCanvasObject, redoCanvas, selectedObjectId, undoCanvas]);
+
+  useEffect(() => {
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!textDraftsRef.current.size && !saveInFlightRef.current.size) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      for (const timer of saveTimersRef.current.values()) window.clearTimeout(timer);
+    };
+  }, []);
 
   useEffect(() => {
     const workbench = workbenchRef.current;
@@ -516,7 +902,7 @@ function CanvasSurface({
   useEffect(() => {
     if (!addOpen) return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setAddOpen(false);
+      if (event.key === "Escape") { setAddOpen(false); setReferenceMode(null); }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -604,11 +990,56 @@ function CanvasSurface({
 
   const chooseCard = (kind: CardKind) => {
     setNodes((current) => current.map((node) => ({ ...node, selected: node.id === kind })));
+    setSelectedObjectId(null);
+    setEditingObjectId(null);
     setAddOpen(false);
     if (kind === "draft") setFocused(true);
     else if (kind === "suggestion") onLayoutModeChange("canvas-assistant");
     else openContext(kind);
   };
+
+  const openAddMenu = useCallback((position: { x: number; y: number }, sourceObjectId?: string) => {
+    insertPositionRef.current = { ...position, ...(sourceObjectId ? { sourceObjectId } : {}) };
+    setReferenceMode(null);
+    setAddOpen(true);
+  }, []);
+
+  const chooseAddItem = useCallback((kind: AddChoice) => {
+    if (kind === "text") { setCanvasError(""); void createFreeObject("text").catch((error) => setCanvasError(error instanceof Error ? error.message : "节点创建失败。")); return; }
+    if (kind === "material" || kind === "image") { setReferenceMode(kind); return; }
+    chooseCard(kind);
+  }, [createFreeObject]);
+
+  const handleArrange = useCallback((arranged: WorkbenchNode[]) => {
+    setNodes(arranged);
+    const changes = arranged.flatMap((node) => {
+      if (node.type !== "free") return [];
+      const object = freeObjectsRef.current.get((node as FreeCanvasNode).data.object.id);
+      if (!object) return [];
+      const after = { ...objectLayout(object), positionX: node.position.x, positionY: node.position.y };
+      const before = objectLayout(object);
+      return JSON.stringify(before) === JSON.stringify(after) ? [] : [{ objectId: object.id, before, after }];
+    });
+    if (!changes.length) return;
+    pushCommand({ type: "BATCH_LAYOUT", items: changes });
+    void Promise.all(changes.map(({ objectId, before, after }) => persistCanvasLayout(objectId, after, before, false)));
+  }, [persistCanvasLayout, pushCommand, setNodes]);
+
+  const freeNodeActions = useMemo(() => ({
+    changeText: changeCanvasText,
+    deleteObject: (objectId: string) => { setCanvasError(""); void deleteCanvasObject(objectId).catch((error) => setCanvasError(error instanceof Error ? error.message : "节点删除失败。")); },
+    startEditing: (objectId: string) => { if (editable) { setSelectedObjectId(objectId); setEditingObjectId(objectId); } },
+    stopEditing: (objectId: string) => { setEditingObjectId((current) => current === objectId ? null : current); if (textDraftsRef.current.has(objectId)) void flushTextRef.current(objectId); },
+    retrySave: (objectId: string) => { void retryCanvasText(objectId); },
+    continueFrom: (objectId: string) => {
+      const object = freeObjectsRef.current.get(objectId);
+      if (object) openAddMenu({ x: object.positionX + object.width + 48, y: object.positionY }, objectId);
+    },
+    resizeObject: (objectId: string, layout: CanvasLayoutInput) => {
+      const object = freeObjectsRef.current.get(objectId);
+      if (object) void persistCanvasLayout(objectId, layout, objectLayout(object));
+    },
+  }), [changeCanvasText, deleteCanvasObject, editable, openAddMenu, persistCanvasLayout, retryCanvasText]);
 
   const paneStyle = {
     "--assistant-width": layoutMode === "canvas-assistant" ? (assistantWidth ? `${assistantWidth}px` : "30%") : "0px",
@@ -619,6 +1050,7 @@ function CanvasSurface({
     <div ref={workbenchRef} className={`content-workbench is-${layoutMode} tool-${activeTool} ${isResizing ? "is-resizing" : ""}`} data-layout={layoutMode} style={paneStyle}>
       <section className="content-canvas" data-background-style={backgroundStyle} data-background-tone={backgroundTone} aria-label="内容画布" aria-hidden={layoutMode === "assistant-only"}>
         <ReactFlowProvider>
+          <FreeNodeActionsProvider actions={freeNodeActions}>
           <CanvasToolbar
             projectTitle={projectTitle}
             saved={draft.updated}
@@ -633,7 +1065,47 @@ function CanvasSurface({
             edges={[]}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
-            onPaneClick={(event) => { if (event.detail === 2) setAddOpen(true); }}
+            onNodeClick={(_event, node) => {
+              lastNodeClickAtRef.current = Date.now();
+              if (activeTool !== "select") return;
+              if (node.type === "free") {
+                const objectId = (node as FreeCanvasNode).data.object.id;
+                setEditingObjectId((current) => current === objectId ? current : null);
+                setSelectedObjectId(objectId);
+              } else {
+                setEditingObjectId(null);
+                setSelectedObjectId(null);
+              }
+            }}
+            onNodeDoubleClick={(_event, node) => {
+              if (activeTool === "select" && editable && node.type === "free" && (node as FreeCanvasNode).data.object.objectType === "TEXT") {
+                const objectId = (node as FreeCanvasNode).data.object.id;
+                setSelectedObjectId(objectId);
+                setEditingObjectId(objectId);
+              }
+            }}
+            onNodeDragStart={(_event, node) => {
+              if (node.type !== "free") return;
+              const object = freeObjectsRef.current.get((node as FreeCanvasNode).data.object.id);
+              if (object) dragStartRef.current.set(object.id, objectLayout(object));
+            }}
+            onNodeDragStop={(_event, node) => {
+              if (node.type !== "free") return;
+              const object = freeObjectsRef.current.get((node as FreeCanvasNode).data.object.id);
+              if (!object) return;
+              const before = dragStartRef.current.get(object.id) ?? objectLayout(object);
+              dragStartRef.current.delete(object.id);
+              void persistCanvasLayout(object.id, { ...objectLayout(object), positionX: node.position.x, positionY: node.position.y }, before);
+            }}
+            onPaneClick={(event) => {
+              if (Date.now() - lastNodeClickAtRef.current < 180 || (event.target instanceof Element && event.target.closest(".react-flow__node"))) return;
+              setSelectedObjectId(null);
+              setEditingObjectId(null);
+              if (event.detail !== 2 || !editable) return;
+              const canvas = document.querySelector(".content-canvas .react-flow")?.getBoundingClientRect();
+              if (!canvas) return;
+              openAddMenu({ x: (event.clientX - canvas.left - viewport.x) / viewport.zoom, y: (event.clientY - canvas.top - viewport.y) / viewport.zoom });
+            }}
             onMoveEnd={(_, next) => setViewport(next)}
             defaultViewport={viewport}
             minZoom={0.72}
@@ -648,8 +1120,11 @@ function CanvasSurface({
             {backgroundStyle !== "solid" ? <Background variant={backgroundStyle === "grid" ? BackgroundVariant.Lines : BackgroundVariant.Dots} gap={backgroundStyle === "grid" ? 28 : 24} size={backgroundStyle === "grid" ? 0.7 : 1} color={backgroundColor} /> : null}
             {miniMapOpen ? <MiniMap pannable zoomable nodeStrokeWidth={2} ariaLabel="画布小地图" /> : null}
           </ReactFlow>
-          <CanvasViewMenu menu={canvasMenu} nodes={nodes} backgroundStyle={backgroundStyle} backgroundTone={backgroundTone} onClose={() => setCanvasMenu(null)} onNodes={setNodes} onBackgroundStyle={setBackgroundStyle} onBackgroundTone={setBackgroundTone} />
-          <CanvasChrome addOpen={addOpen} activeTool={activeTool} onAdd={() => setAddOpen(true)} onCloseAdd={() => setAddOpen(false)} onChoose={chooseCard} onTool={(tool) => { setToolMode(tool); setAddOpen(false); if (tool === "select") setNodes((current) => current.map((node) => ({ ...node, selected: false }))); }} />
+          <CanvasViewMenu menu={canvasMenu} nodes={nodes} backgroundStyle={backgroundStyle} backgroundTone={backgroundTone} onClose={() => setCanvasMenu(null)} onArrange={handleArrange} onBackgroundStyle={setBackgroundStyle} onBackgroundTone={setBackgroundTone} />
+          <CanvasViewCoordinator request={viewRequest} onHandled={() => setViewRequest(null)} />
+          <CanvasChrome addOpen={addOpen} activeTool={activeTool} editable={editable} referenceMode={referenceMode} sourceOptions={sourceOptions} canUndo={editable && undoStackRef.current.length > 0} canRedo={editable && redoStackRef.current.length > 0} onAdd={(position) => openAddMenu(position)} onBack={() => setReferenceMode(null)} onCloseAdd={() => { setAddOpen(false); setReferenceMode(null); }} onChoose={chooseAddItem} onChooseSource={(source, sourceAssetId) => { setCanvasError(""); void createFreeObject(referenceMode === "image" ? "image" : "material", source, sourceAssetId).catch((error) => setCanvasError(error instanceof Error ? error.message : "节点创建失败。")); }} onUndo={() => void undoCanvas()} onRedo={() => void redoCanvas()} onTool={(tool) => { setToolMode(tool); setAddOpen(false); if (tool === "select") { setSelectedObjectId(null); setEditingObjectId(null); setNodes((current) => current.map((node) => ({ ...node, selected: false }))); } }} />
+          {canvasError ? <div className="canvas-operation-error" role="alert"><span>{canvasError}</span><button type="button" onClick={() => setCanvasError("")} aria-label="关闭错误提示"><X size={15} /></button></div> : null}
+          </FreeNodeActionsProvider>
         </ReactFlowProvider>
 
         {focused ? (
