@@ -126,7 +126,11 @@ describe("AI creation engine", () => {
     await expect(applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: replacementRun.id, expectedVersion: 2 })).rejects.toMatchObject({ code: "AI_REPLACE_CONFIRMATION_REQUIRED" });
     await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: replacementRun.id, expectedVersion: 2, confirmReplace: true });
     const versions = await listMotherContentVersions({ workspaceId: workspaceAId, userId: userAId, projectId });
-    expect(versions).toMatchObject([{ version: 2, current: true, body: "Mother body" }, { version: 1, current: false, title: "Human edited V1", body: "Human work must survive" }]);
+    expect(versions).toMatchObject([
+      { version: 3, current: true, body: "Mother body" },
+      { version: 2, current: false, title: "Human edited V1", body: "Human work must survive" },
+      { version: 1, current: false, body: "Mother body" },
+    ]);
     await expect(listMotherContentVersions({ workspaceId: workspaceAId, userId: userAId, projectId: projectBId })).rejects.toMatchObject({ code: "PROJECT_NOT_FOUND" });
     const rewriteRun = await runAIAction({ workspaceId: workspaceAId, userId: userAId, projectId, action: "HUMANIZE", selectedText: "Mother body" }, { runtime });
     await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: rewriteRun.id, expectedVersion: 3, selectionStart: 0, selectionEnd: 11, mode: "REPLACE" });

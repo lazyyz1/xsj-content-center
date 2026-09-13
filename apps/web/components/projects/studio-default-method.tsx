@@ -23,7 +23,7 @@ type TextSelection = { text: string; start: number; end: number };
 type MotherSnapshot = { title: string; body: string; outline: string[]; version: number; origin: "HUMAN" | "KIMI" | "GPT_WEB"; originNote: string | null };
 
 export type StudioAssistantHandle = { executeSelection: (action: StudioSelectionAction) => void };
-type Props = { projectId: string; method: StudioDefaultContentMethodDTO | null; recommendedActions: StudioActionRecommendation[]; editable: boolean; configured: boolean; motherVersion: number; selection?: TextSelection | null; focusKind?: CardKind | null; contextStats: { sources: number; facts: number; methods: number }; onClose: () => void; onOpenContext?: (kind: CanvasContextKind) => void; onOpenDraft?: () => void; onApplied: (mother: MotherSnapshot, warnings: Array<{ code: string; message: string; reason?: string; suggestion?: string }>) => void; onUseTopic: (text: string) => void; onSelectionApplied?: () => void };
+type Props = { projectId: string; method: StudioDefaultContentMethodDTO | null; recommendedActions: StudioActionRecommendation[]; editable: boolean; configured: boolean; motherVersion: number; draftName?: string; selection?: TextSelection | null; focusKind?: CardKind | null; contextStats: { sources: number; facts: number; methods: number }; onClose: () => void; onOpenContext?: (kind: CanvasContextKind) => void; onOpenDraft?: () => void; onApplied: (mother: MotherSnapshot, warnings: Array<{ code: string; message: string; reason?: string; suggestion?: string }>) => void; onUseTopic: (text: string) => void; onSelectionApplied?: () => void };
 
 async function post(url: string, body: unknown) {
   const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -32,7 +32,7 @@ async function post(url: string, body: unknown) {
   return result;
 }
 
-export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(function StudioDefaultMethod({ projectId, method, recommendedActions, editable, configured, motherVersion, selection, focusKind, contextStats, onClose, onOpenContext, onOpenDraft, onApplied, onUseTopic, onSelectionApplied }, ref) {
+export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(function StudioDefaultMethod({ projectId, method, recommendedActions, editable, configured, motherVersion, draftName, selection, focusKind, contextStats, onClose, onOpenContext, onOpenDraft, onApplied, onUseTopic, onSelectionApplied }, ref) {
   const [methodOpen, setMethodOpen] = useState(false);
   const [view, setView] = useState<"ACTIONS" | "CHAT" | "SOURCES">("ACTIONS");
   const [instruction, setInstruction] = useState("");
@@ -78,7 +78,7 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
     finally { setBusy(false); }
   }
 
-  const focusLabel = focusKind ? ({ brief: "创作目标", sources: "参考素材", facts: "我方依据", methods: "方法", draft: "当前稿件", suggestion: "AI 建议" } as const)[focusKind] : null;
+  const focusLabel = focusKind ? ({ brief: "创作目标", sources: "参考素材", facts: "我方依据", methods: "方法", draft: draftName || "当前稿件", suggestion: "AI 建议" } as const)[focusKind] : null;
   const contextualActions = focusKind === "brief" ? [
     { label: "查看目标", detail: "查看当前主题、任务和创作方向", icon: Target, onClick: () => onOpenContext?.("brief") },
     { label: "调整创作方向", detail: "编辑已有的我方观点和背景", icon: PencilLine, onClick: () => onOpenContext?.("brief") },

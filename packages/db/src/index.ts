@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-export type { Prisma, PromptType, AIRunStatus, Platform, PlatformVariantStatus, DeepContentPackageStatus, MotherContentOrigin, ReviewResult, PublishStatus, RecommendationMode, RecommendationItemStatus, RecommendationEvidenceType, MaterialAnalysis, MaterialDistillation, SystemRole, CanvasObjectType } from "@prisma/client";
+export type { Prisma, PromptType, AIRunStatus, Platform, PlatformVariantStatus, DeepContentPackageStatus, MotherContentOrigin, DraftRevisionOrigin, ReviewResult, PublishStatus, RecommendationMode, RecommendationItemStatus, RecommendationEvidenceType, MaterialAnalysis, MaterialDistillation, SystemRole, CanvasObjectType } from "@prisma/client";
 
 const globalForPrisma = globalThis as unknown as { contentCenterDb?: PrismaClient };
 

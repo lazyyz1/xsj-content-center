@@ -114,7 +114,7 @@ export async function applyStudioQuickAction(input: { workspaceId: string; userI
   const end = typeof metadata.selectionEnd === "number" ? metadata.selectionEnd : -1;
   if (start < 0 || end <= start || mother.body.slice(start, end) !== output.original) throw new StudioQuickActionError("QUICK_ACTION_STALE", "口播稿已经变化，请重新运行这个动作。");
   const body = action === "ADD_CASE" || action === "STRENGTHEN_EVIDENCE" ? `${mother.body}\n\n${replacement}` : `${mother.body.slice(0, start)}${replacement}${mother.body.slice(end)}`;
-  const content = await saveMotherContent({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, data: { title: mother.title, outline: Array.isArray(mother.outline) ? mother.outline.filter((item): item is string => typeof item === "string") : [], body, expectedVersion: mother.version, origin: "KIMI" } });
+  const content = await saveMotherContent({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, generateRunId: run.id, data: { title: mother.title, outline: Array.isArray(mother.outline) ? mother.outline.filter((item): item is string => typeof item === "string") : [], body, expectedVersion: mother.version, origin: "KIMI" } });
   await db.$transaction([
     db.aIRun.update({ where: { id: run.id }, data: { appliedAt: new Date() } }),
     db.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "studio.quick_action_applied", resourceType: "ai_run", resourceId: run.id, metadata: json({ projectId: input.projectId, studioAction: action, motherContentVersion: content.version }) } }),

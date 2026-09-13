@@ -3124,6 +3124,29 @@ body:has(.benchmark-page) .assistant-dock-button.is-labeled span { writing-mode:
   .dashboard-workbench .free-canvas-node { transition:none!important; }
 }
 
+/* Phase 9C-2 · lightweight multi-draft drawer */
+.studio-draft-manager { display:grid; gap:1rem; }
+.studio-draft-create { display:grid; gap:.65rem; border:1px solid #e0e7f0; border-radius:.85rem; background:#f8faff; padding:.9rem; }
+.studio-draft-create label { color:#24344d; font-size:.75rem; font-weight:720; }
+.studio-draft-create input { width:100%; height:2.65rem; border:1px solid #d7e0ec; border-radius:.65rem; background:#fff; padding:0 .75rem; color:#1f2e45; font-size:.78rem; outline:0; }
+.studio-draft-create input:focus { border-color:#79a0e8; box-shadow:0 0 0 3px rgb(56 111 222 / .1); }
+.studio-draft-create > div { display:flex; flex-wrap:wrap; gap:.55rem; }
+.studio-draft-list { display:grid; gap:.7rem; }
+.studio-draft-list > article { overflow:hidden; border:1px solid #e2e7ef; border-radius:.82rem; background:#fff; transition:border-color 140ms ease,box-shadow 140ms ease; }
+.studio-draft-list > article.is-active { border-color:#8aabe8; box-shadow:0 0 0 3px rgb(56 111 222 / .08); }
+.studio-draft-open { display:flex; width:100%; min-height:4.4rem; align-items:center; justify-content:space-between; gap:1rem; border:0; background:transparent; padding:.78rem .85rem; text-align:left; }
+.studio-draft-open span { display:grid; min-width:0; gap:.3rem; }
+.studio-draft-open strong { overflow:hidden; color:#1d2c43; font-size:.8rem; text-overflow:ellipsis; white-space:nowrap; }
+.studio-draft-open small,.studio-draft-open time { color:#7a8799; font-size:.63rem; }
+.studio-draft-actions { display:flex; min-height:2.55rem; align-items:center; justify-content:flex-end; gap:.25rem; border-top:1px solid #edf0f5; padding:.28rem .55rem; }
+.studio-draft-actions button { display:inline-flex; min-height:2rem; align-items:center; gap:.25rem; border:0; border-radius:.5rem; background:transparent; padding:0 .52rem; color:#52627a; font-size:.66rem; }
+.studio-draft-actions button:disabled { cursor:not-allowed; opacity:.38; }
+@media (hover:hover) and (pointer:fine) {
+  .studio-draft-list > article:hover { border-color:#bdcbe0; box-shadow:0 12px 28px -24px rgb(31 55 91 / .45); }
+  .studio-draft-open:hover,.studio-draft-actions button:hover:not(:disabled) { background:#f3f6fb; }
+}
+@media (prefers-reduced-motion:reduce) { .studio-draft-list > article { transition:none; } }
+
 /* Phase 4 · cover-led creative project library · quiet cobalt on cool slate */
 .project-library-page {
   --project-surface:rgb(252 253 255 / .9);

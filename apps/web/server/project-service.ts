@@ -122,6 +122,10 @@ export async function createProject(input: {
         status: "DRAFT",
       },
     });
+    const primaryDraft = await tx.draftBranch.create({
+      data: { workspaceId: input.workspaceId, projectId: project.id, title: "主稿", createdById: input.userId, updatedById: input.userId },
+    });
+    await tx.contentProject.update({ where: { id: project.id }, data: { primaryDraftBranchId: primaryDraft.id } });
     await tx.auditLog.create({
       data: {
         workspaceId: input.workspaceId,
@@ -167,7 +171,7 @@ export async function createProject(input: {
         },
       });
     }
-    return project;
+    return { ...project, primaryDraftBranchId: primaryDraft.id };
   });
 }
 

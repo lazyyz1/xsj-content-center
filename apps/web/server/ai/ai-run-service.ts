@@ -204,7 +204,7 @@ export async function applyAIResult(input: { workspaceId: string; userId: string
     const output = motherContentPreviewSchema.parse(run.outputJson);
     const existing = await db.motherContent.findFirst({ where: { workspaceId: input.workspaceId, projectId: input.projectId } });
     if (existing?.body.trim() && !input.confirmReplace) throw new AIServiceError("AI_REPLACE_CONFIRMATION_REQUIRED", "当前母稿已有内容，请确认替换。");
-    const content = await saveMotherContent({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, preservePreviousVersion: Boolean(existing), data: { title: output.recommendedTitle, outline: output.outline, body: output.body, expectedVersion: input.expectedVersion ?? 0, origin: "KIMI" } });
+    const content = await saveMotherContent({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, generateRunId: run.id, preservePreviousVersion: Boolean(existing), data: { title: output.recommendedTitle, outline: output.outline, body: output.body, expectedVersion: input.expectedVersion ?? 0, origin: "KIMI" } });
     const warnings = await buildDraftWarnings({ workspaceId: input.workspaceId, projectId: input.projectId, body: content.body });
     await markApplied({ ...input, target: "mother_content", changedFields: ["title", "outline", "body"] });
     return { applied: true, target: "mother_content", warnings, productionPlan: output, motherContent: { title: content.title, body: content.body, outline: content.outline, version: content.version, origin: content.origin, originNote: content.originNote } };
@@ -217,7 +217,7 @@ export async function applyAIResult(input: { workspaceId: string; userId: string
     if (start < 0 || end <= start || existing.body.slice(start, end) !== output.original) throw new AIServiceError("AI_SELECTION_STALE", "母稿已变化，请重新选择文字。");
     const replacement = input.mode === "INSERT_AFTER" ? `${output.original}\n${output.aiVersion}` : output.aiVersion;
     const body = `${existing.body.slice(0, start)}${replacement}${existing.body.slice(end)}`;
-    const content = await saveMotherContent({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, data: { title: existing.title, outline: Array.isArray(existing.outline) ? existing.outline.filter((item): item is string => typeof item === "string") : [], body, expectedVersion: input.expectedVersion ?? existing.version } });
+    const content = await saveMotherContent({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, generateRunId: run.id, data: { title: existing.title, outline: Array.isArray(existing.outline) ? existing.outline.filter((item): item is string => typeof item === "string") : [], body, expectedVersion: input.expectedVersion ?? existing.version, origin: "KIMI" } });
     await markApplied({ ...input, target: "mother_content", changedFields: ["body"] });
     return { applied: true, target: "mother_content", motherContent: { title: content.title, body: content.body, outline: content.outline, version: content.version, origin: content.origin, originNote: content.originNote } };
   }

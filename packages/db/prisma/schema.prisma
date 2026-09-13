@@ -278,6 +278,12 @@ enum MotherContentOrigin {
   GPT_WEB
 }
 
+enum DraftRevisionOrigin {
+  HUMAN
+  AI
+  GPT_WEB
+}
+
 enum MethodStatus {
   SAVED
   TRIAL
@@ -365,6 +371,10 @@ model User {
   deletedCanvasObjects    CanvasObject[]               @relation("CanvasObjectDeletedBy")
   createdCanvasSnapshots  CanvasObjectSnapshot[]       @relation("CanvasSnapshotCreatedBy")
   createdCanvasRelations  CanvasRelation[]             @relation("CanvasRelationCreatedBy")
+  createdDraftBranches    DraftBranch[]                 @relation("DraftBranchCreatedBy")
+  updatedDraftBranches    DraftBranch[]                 @relation("DraftBranchUpdatedBy")
+  deletedDraftBranches    DraftBranch[]                 @relation("DraftBranchDeletedBy")
+  createdDraftRevisions   DraftRevision[]               @relation("DraftRevisionCreatedBy")
 
   @@index([systemRole])
   @@index([disabledAt])
@@ -461,6 +471,8 @@ model Workspace {
   canvasSnapshots        CanvasObjectSnapshot[]
   canvasRelations        CanvasRelation[]
   canvasMaterialReferences CanvasMaterialReference[]
+  draftBranches           DraftBranch[]
+  draftRevisions          DraftRevision[]
 }
 
 model WorkspaceMember {
@@ -709,6 +721,7 @@ model ContentProject {
   goal                String?
   audience            String?
   status              ContentProjectStatus @default(DRAFT)
+  primaryDraftBranchId String?              @unique
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   workspace           Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -733,11 +746,80 @@ model ContentProject {
   canvasSnapshots        CanvasObjectSnapshot[]
   canvasRelations        CanvasRelation[]
   canvasMaterialReferences CanvasMaterialReference[]
+  draftBranches          DraftBranch[]      @relation("ProjectDraftBranches")
+  draftRevisions         DraftRevision[]
+  primaryDraftBranch     DraftBranch?       @relation("PrimaryDraftBranch", fields: [primaryDraftBranchId], references: [id], onDelete: SetNull)
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
   @@index([createdById])
   @@index([creatorProfileId])
+}
+
+model DraftBranch {
+  id                  String          @id @default(cuid())
+  workspaceId         String
+  projectId           String
+  title               String
+  workingTitle        String              @default("")
+  workingBody         String              @default("") @db.Text
+  workingOutline      Json                @default("[]")
+  workingOrigin       DraftRevisionOrigin @default(HUMAN)
+  workingOriginNote   String?
+  workingGenerateRunId String?
+  currentRevisionId   String?         @unique
+  confirmedRevisionId String?         @unique
+  version             Int             @default(0)
+  createdById         String
+  updatedById         String
+  deletedAt           DateTime?
+  deletedById         String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  workspace           Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project             ContentProject  @relation("ProjectDraftBranches", fields: [projectId], references: [id], onDelete: Cascade)
+  primaryForProject   ContentProject? @relation("PrimaryDraftBranch")
+  currentRevision     DraftRevision?  @relation("CurrentDraftRevision", fields: [currentRevisionId], references: [id], onDelete: SetNull)
+  confirmedRevision   DraftRevision?  @relation("ConfirmedDraftRevision", fields: [confirmedRevisionId], references: [id], onDelete: SetNull)
+  revisions           DraftRevision[] @relation("DraftBranchRevisions")
+  createdBy           User            @relation("DraftBranchCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy           User            @relation("DraftBranchUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  deletedBy           User?           @relation("DraftBranchDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, projectId, deletedAt, updatedAt])
+  @@index([projectId, deletedAt])
+  @@index([createdById])
+  @@index([updatedById])
+  @@index([deletedById])
+}
+
+model DraftRevision {
+  id              String              @id @default(cuid())
+  workspaceId     String
+  projectId       String
+  draftBranchId   String
+  revision        Int
+  title           String
+  body            String              @db.Text
+  outline         Json
+  origin          DraftRevisionOrigin @default(HUMAN)
+  originNote      String?
+  generateRunId   String?
+  warningSnapshot Json?
+  createdById     String
+  createdAt       DateTime            @default(now())
+  workspace       Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project         ContentProject      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  draftBranch     DraftBranch         @relation("DraftBranchRevisions", fields: [draftBranchId], references: [id], onDelete: Cascade)
+  currentFor      DraftBranch?        @relation("CurrentDraftRevision")
+  confirmedFor    DraftBranch?        @relation("ConfirmedDraftRevision")
+  createdBy       User                @relation("DraftRevisionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([draftBranchId, revision])
+  @@index([workspaceId, projectId, createdAt])
+  @@index([projectId, draftBranchId, createdAt])
+  @@index([createdById])
+  @@index([generateRunId])
 }
 
 model CanvasObject {

@@ -9,7 +9,7 @@ import { CreationFeedbackError, getCreationFeedbackContext, type CreationFeedbac
 import { getCreatorProfile } from "@/server/creator-profile-service";
 import { getPublishedDefaultContentMethodForStudio } from "@/server/default-content-method/service";
 import { materialAnalysisOutputSchema } from "@/server/material-analysis/schemas";
-import { listMotherContentVersions } from "@/server/mother-content-service";
+import { getPrimaryDraft, listDraftBranches } from "@/server/drafts/service";
 import { getProjectMethodState } from "@/server/project-methods/service";
 import { getProjectForUser } from "@/server/project-service";
 import { CreativeBriefPrefillService } from "@/server/studio/creative-brief-prefill";
@@ -34,11 +34,12 @@ export async function loadWorkbenchPageData(input: { userId: string; workspaceId
     if (!(error instanceof CreationFeedbackError)) throw error;
     return { available: false, projectId: project.id, motherContentId: null, motherContentVersion: null, sourceAiRunId: null, methods: [], feedback: null, unavailableReason: "MOTHER_NOT_READY" as const };
   });
-  const [availableSources, llm, ownProfile, motherHistory, latestAppliedMotherRun, methodState, feedbackContext, defaultMethod, creationContext, canvasObjects] = await Promise.all([
+  const [availableSources, llm, ownProfile, primaryDraft, draftBranches, latestAppliedMotherRun, methodState, feedbackContext, defaultMethod, creationContext, canvasObjects] = await Promise.all([
     db.sourceItem.findMany({ where: { workspaceId: input.workspaceId, status: "READY", ...(sourceIds.length ? { id: { notIn: sourceIds } } : {}) }, select: { id: true, title: true, sourcePlatform: true, sourceType: true, createdAt: true, materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { summary: true } } }, orderBy: { createdAt: "desc" }, take: 100 }),
     new IntegrationService().getIntegrationStatus(input.workspaceId, "LLM"),
     getCreatorProfile(input.workspaceId, input.userId),
-    listMotherContentVersions(input),
+    getPrimaryDraft(input),
+    listDraftBranches(input),
     db.aIRun.findFirst({ where: { workspaceId: input.workspaceId, projectId: project.id, userId: input.userId, action: "GENERATE_MOTHER_CONTENT", appliedAt: { not: null }, status: "SUCCEEDED" }, orderBy: { appliedAt: "desc" }, select: { outputJson: true } }),
     getProjectMethodState(input),
     feedbackForPage,
@@ -49,9 +50,10 @@ export async function loadWorkbenchPageData(input: { userId: string; workspaceId
 
   const brief = project.creativeBrief;
   const mother = project.motherContent;
-  const initialWarnings = mother?.body.trim() ? await buildDraftWarnings({ workspaceId: input.workspaceId, projectId: project.id, body: mother.body }) : [];
+  const currentDraft = primaryDraft.workingState;
+  const initialWarnings = currentDraft?.body.trim() ? await buildDraftWarnings({ workspaceId: input.workspaceId, projectId: project.id, body: currentDraft.body }) : [];
   const storedBrief = brief ? { topic: brief.topic, angle: brief.angle, audience: brief.audience, coreMessage: brief.coreMessage, coreQuestion: brief.coreQuestion || "", background: brief.background || "", keyPoints: stringArray(brief.keyPoints), structure: stringArray(brief.structure), tone: brief.tone, risks: stringArray(brief.risks), version: brief.version, metadata: brief.metadata } : null;
-  const creativePlan = CreativeBriefPrefillService.build({ project: { title: project.title, audience: project.audience, status: project.status }, sources: project.sources, existingBrief: storedBrief, hasMotherContent: Boolean(mother?.body.trim()) });
+  const creativePlan = CreativeBriefPrefillService.build({ project: { title: project.title, audience: project.audience, status: project.status }, sources: project.sources, existingBrief: storedBrief, hasMotherContent: Boolean(currentDraft?.body.trim()) });
   const studioProject = {
     id: project.id, title: project.title, status: project.status, description: project.description, goal: project.goal, audience: project.audience,
     sources: project.sources.map(({ role: sourceRole, sourceItem }) => {
@@ -60,8 +62,7 @@ export async function loadWorkbenchPageData(input: { userId: string; workspaceId
       return { role: sourceRole, sourceItem: { id: sourceItem.id, title: sourceItem.title, description: sourceItem.description, displayName: sourceDisplayName({ title: sourceItem.title, summary: analysis?.summary, platformLabel: sourcePlatformLabels[sourceItem.sourcePlatform] || sourceItem.sourcePlatform, createdAt: sourceItem.createdAt }), sourcePlatform: sourceItem.sourcePlatform, sourceType: sourceItem.sourceType, status: sourceItem.status, thumbnailUrl: sourceItem.thumbnailUrl, assets: sourceItem.assets, rawText: sourceItem.rawText, transcript: sourceItem.transcript ? { fullText: sourceItem.transcript.fullText, updatedAt: sourceItem.transcript.updatedAt.toISOString() } : null, referenceUpdated: Boolean(sourceItem.transcript && analysis && sourceItem.transcript.updatedAt > analysis.transcriptUpdatedAtAtAnalysis), materialAnalysis: analysis ? { version: analysis.version, summary: analysis.summary, keyPoints: stringArray(analysis.keyPoints), understanding: parsed.success ? parsed.data : null, legacy: !parsed.success || !(parsed.success && "expression" in parsed.data) } : null } };
     }),
     creativePlan,
-    motherContent: { title: mother?.title || "", body: mother?.body || "", outline: stringArray(mother?.outline), version: mother?.version || 0, origin: mother?.origin || "HUMAN" as const, originNote: mother?.originNote || null, confirmedVersion: mother?.confirmedVersion ?? null, confirmedWarnings: Array.isArray(mother?.confirmedWarnings) ? mother.confirmedWarnings.filter((value): value is string => typeof value === "string") : [] },
-    motherHistory,
+    motherContent: { title: currentDraft.title, body: currentDraft.body, outline: currentDraft.outline, version: mother?.version || 0, origin: currentDraft.origin === "AI" ? "KIMI" as const : currentDraft.origin, originNote: currentDraft.originNote, confirmedVersion: primaryDraft.confirmedRevisionId === primaryDraft.currentRevisionId ? mother?.version ?? null : null, confirmedWarnings: Array.isArray(mother?.confirmedWarnings) ? mother.confirmedWarnings.filter((value): value is string => typeof value === "string") : [], draftBranchId: primaryDraft.id, draftBranchTitle: primaryDraft.title, draftBranchVersion: primaryDraft.version, draftRevision: primaryDraft.currentRevision?.revision || 0, draftConfirmed: Boolean(primaryDraft.currentRevisionId && primaryDraft.confirmedRevisionId === primaryDraft.currentRevisionId), isPrimary: true },
     platformVariants: project.platformVariants.map((variant) => ({ id: variant.id, platform: variant.platform, version: variant.version, title: variant.title, body: variant.body, hook: variant.hook, summary: variant.summary, hashtags: stringArray(variant.hashtags), mediaPlan: variant.mediaPlan, metadata: variant.metadata, status: variant.status, sourceMotherVersion: variant.sourceMotherVersion, isStale: variant.sourceMotherVersion < (mother?.version ?? 0) })),
   };
   const profile = project.creatorProfile || ownProfile;
@@ -70,10 +71,11 @@ export async function loadWorkbenchPageData(input: { userId: string; workspaceId
 
   return {
     project: { ...studioProject, productionPlan: parsedProductionPlan.success ? parsedProductionPlan.data : null },
+    draftBranches,
     canvasObjects,
     methods: methodState,
     defaultMethod,
-    recommendedActions: recommendStudioQuickActions({ hasTopic: Boolean(brief?.coreMessage.trim() || brief?.topic.trim()), hasDraft: Boolean(mother?.body.trim()), hasOwnEvidence: creationContext.hasOwnCaseOrData }),
+    recommendedActions: recommendStudioQuickActions({ hasTopic: Boolean(brief?.coreMessage.trim() || brief?.topic.trim()), hasDraft: Boolean(currentDraft?.body.trim()), hasOwnEvidence: creationContext.hasOwnCaseOrData }),
     availableSources: availableSources.map((source) => ({ ...source, displayName: sourceDisplayName({ title: source.title, summary: source.materialAnalyses[0]?.summary, platformLabel: sourcePlatformLabels[source.sourcePlatform] || source.sourcePlatform, createdAt: source.createdAt }) })),
     feedback: feedbackContext,
     editable: input.role !== "VIEWER",
