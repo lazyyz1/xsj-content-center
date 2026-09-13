@@ -18,6 +18,19 @@ export const sourceTypeLabels: Record<string, string> = {
   DOCUMENT: "文档",
 };
 
+export const employeeSourceTypeLabels: Record<string, string> = {
+  ...sourceTypeLabels,
+  TEXT: "文字资料",
+  URL: "链接",
+  LINK: "链接",
+};
+
+export function employeeSourceMeta(sourceType: string, sourcePlatform: string) {
+  const type = employeeSourceTypeLabels[sourceType] || "资料";
+  const platform = sourcePlatform === "GENERIC" ? null : sourcePlatformLabels[sourcePlatform];
+  return [type, platform].filter(Boolean).join(" · ");
+}
+
 export const sourceStatusLabels: Record<string, string> = {
   PENDING: "待处理",
   PROCESSING: "处理中",

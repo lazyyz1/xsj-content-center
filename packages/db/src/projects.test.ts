@@ -45,6 +45,19 @@ describe("content project persistence", () => {
     await expect(db.projectSource.create({ data: { projectId: projectBId, sourceItemId: sourceBId } })).rejects.toMatchObject({ code: "P2002" });
   });
 
+  it("loads only project-scoped material metadata, tags, and stored image assets", async () => {
+    const source = await db.sourceItem.create({ data: { workspaceId: workspaceAId, createdById: userAId, sourceType: "IMAGE", sourcePlatform: "GENERIC", status: "READY", title: "Project material", author: "Real author", description: "Real description" } });
+    const tag = await db.contentTag.create({ data: { workspaceId: workspaceAId, name: "真实标签", slug: `material-${runId}` } });
+    const project = await db.contentProject.create({ data: { workspaceId: workspaceAId, createdById: userAId, title: "Material project", sources: { create: { sourceItemId: source.id } } } });
+    await Promise.all([
+      db.sourceItemTag.create({ data: { sourceItemId: source.id, tagId: tag.id } }),
+      db.sourceAsset.create({ data: { workspaceId: workspaceAId, sourceItemId: source.id, assetType: "IMAGE", sourceProvider: "TEST", status: "STORED", storageKey: `tests/${runId}/image.png`, mimeType: "image/png" } }),
+    ]);
+    const loaded = await findProjectForUser(db, { userId: userAId, workspaceId: workspaceAId, projectId: project.id });
+    expect(loaded?.sources[0]?.sourceItem).toMatchObject({ id: source.id, author: "Real author", tags: [{ tag: { id: tag.id, name: "真实标签" } }], assets: [{ assetType: "IMAGE", status: "STORED" }] });
+    await expect(findProjectForUser(db, { userId: userBId, workspaceId: workspaceBId, projectId: project.id })).resolves.toBeNull();
+  });
+
   it("cascades project children while preserving source items", async () => {
     const source = await db.sourceItem.create({ data: { workspaceId: workspaceAId, createdById: userAId, sourceType: "TEXT", sourcePlatform: "GENERIC", status: "READY", rawText: "keep me" } });
     const project = await db.contentProject.create({ data: { workspaceId: workspaceAId, createdById: userAId, title: "Cascade project", sources: { create: { sourceItemId: source.id } }, evidenceItems: { create: { workspaceId: workspaceAId, createdById: userAId, type: "FACT", claim: "A fact", sourceItemId: source.id } }, creativeBrief: { create: { workspaceId: workspaceAId, createdById: userAId, topic: "Topic", angle: "", audience: "", coreMessage: "Core", keyPoints: [], structure: [], tone: "", risks: [] } }, motherContent: { create: { workspaceId: workspaceAId, createdById: userAId, title: "", body: "Body", outline: [] } } } });

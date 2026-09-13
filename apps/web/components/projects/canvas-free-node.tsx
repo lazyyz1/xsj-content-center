@@ -4,6 +4,7 @@ import { NodeResizer, type Node, type NodeProps } from "@xyflow/react";
 import { FileText, ImageIcon, Link2, Plus, RotateCcw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { createContext, memo, useContext, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { employeeSourceMeta } from "@/lib/content-labels";
 import type { CanvasObjectDTO, CanvasLayoutInput } from "@/server/canvas/service";
 
 export type CanvasSaveState = "idle" | "dirty" | "saving" | "saved" | "save_failed" | "conflict";
@@ -65,6 +66,7 @@ function FreeCanvasNodeView({ data, selected }: NodeProps<FreeCanvasNode>) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { object, editable, editing, saveState } = data;
   const reference = object.materialReference;
+  const sourceMeta = reference ? [employeeSourceMeta(reference.sourceItem.sourceType, reference.sourceItem.sourcePlatform), reference.sourceItem.status === "ARCHIVED" ? "来源已归档" : null].filter(Boolean).join(" · ") : "";
 
   useEffect(() => {
     if (editing) textareaRef.current?.focus();
@@ -110,7 +112,7 @@ function FreeCanvasNodeView({ data, selected }: NodeProps<FreeCanvasNode>) {
 
     {object.objectType === "MATERIAL_REFERENCE" && reference ? <div className="canvas-material-content">
       <p>{reference.excerpt || reference.sourceItem.description || "这是一条来自资料库的真实引用。"}</p>
-      <span>{reference.sourceItem.sourcePlatform} · {reference.sourceItem.status === "ARCHIVED" ? "来源已归档" : reference.sourceItem.sourceType}</span>
+      <span>{sourceMeta}</span>
     </div> : null}
 
     {object.objectType === "IMAGE_REFERENCE" ? <CanvasImage object={object} /> : null}
