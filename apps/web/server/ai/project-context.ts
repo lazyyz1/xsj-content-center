@@ -10,7 +10,7 @@ import { getSelectedGenerationMethods } from "../project-methods/service";
 import { getPublishedDefaultContentMethodForStudio } from "../default-content-method/service";
 import { classifyCreatorContext, extractExplicitOwnFacts, uniqueConfirmedFacts, type ConfirmedOwnFact } from "./creation-context";
 
-export type ProjectContextAction = AIAction | "PROJECT_ASSISTANT" | "MATERIAL_KNOWLEDGE_EXTRACTION";
+export type ProjectContextAction = AIAction | "PROJECT_ASSISTANT" | "MATERIAL_KNOWLEDGE_EXTRACTION" | "METHOD_SUGGESTION_FROM_RESEARCH" | "CREATOR_PROFILE_SUGGESTION";
 
 export type ContextBudgetLimits = { perSourceChars: number; totalSourceChars: number; totalEvidenceChars: number };
 export type AdditionalExternalReference = { id: string; title: string; content: string };

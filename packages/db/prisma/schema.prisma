@@ -184,6 +184,8 @@ enum PromptType {
   GENERATE_TODAY_RECOMMENDATIONS
   PROJECT_ASSISTANT
   MATERIAL_KNOWLEDGE_EXTRACTION
+  METHOD_SUGGESTION_FROM_RESEARCH
+  CREATOR_PROFILE_SUGGESTION
 }
 
 enum MaterialAnalysisStatus {
@@ -321,6 +323,38 @@ enum MethodStatus {
   DISABLED
 }
 
+enum SuggestionStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum MethodSuggestionType {
+  OPENING
+  STRUCTURE
+  VIEWPOINT_PROGRESSION
+  CASE_USAGE
+  EVIDENCE_USAGE
+  ENDING
+  RHYTHM
+  BOUNDARY
+}
+
+enum MethodSuggestionStability {
+  LIMITED
+  STABLE
+}
+
+enum CreatorProfileSuggestionType {
+  CORE_TOPIC
+  PERSONAL_VIEW
+  HOOK_PREFERENCE
+  STRUCTURE_PREFERENCE
+  PREFERRED_STYLE
+  FORBIDDEN_STYLE
+  EXAMPLE_PHRASE
+}
+
 enum CreationFeedbackOutcome {
   DIRECTLY_USED
   USED_AFTER_EDIT
@@ -409,6 +443,10 @@ model User {
   createdDraftRevisions   DraftRevision[]               @relation("DraftRevisionCreatedBy")
   createdAssistantThreads AssistantThread[]             @relation("AssistantThreadCreatedBy")
   createdCanvasGenerateRuns CanvasGenerateRun[]          @relation("CanvasGenerateRunCreatedBy")
+  generatedMethodSuggestions MethodSuggestion[]          @relation("MethodSuggestionGeneratedBy")
+  reviewedMethodSuggestions  MethodSuggestion[]          @relation("MethodSuggestionReviewedBy")
+  generatedProfileSuggestions CreatorProfileSuggestion[] @relation("ProfileSuggestionGeneratedBy")
+  reviewedProfileSuggestions  CreatorProfileSuggestion[] @relation("ProfileSuggestionReviewedBy")
 
   @@index([systemRole])
   @@index([disabledAt])
@@ -509,6 +547,8 @@ model Workspace {
   draftRevisions          DraftRevision[]
   assistantThreads        AssistantThread[]
   canvasGenerateRuns      CanvasGenerateRun[]
+  methodSuggestions       MethodSuggestion[]
+  creatorProfileSuggestions CreatorProfileSuggestion[]
 }
 
 model WorkspaceMember {
@@ -1044,6 +1084,7 @@ model BenchmarkStudy {
   aiRun             AIRun?                @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
   samples           BenchmarkStudySample[]
   methodVersions    MethodVersion[]
+  methodSuggestions MethodSuggestion[]
 
   @@unique([benchmarkAccountId, version])
   @@index([workspaceId, benchmarkAccountId, createdAt])
@@ -1298,8 +1339,45 @@ model MethodAsset {
   versions       MethodVersion[]
   projectMethodSelections ProjectMethodSelection[]
   methodUsages            MethodUsage[]
+  sourceSuggestion        MethodSuggestion?
 
   @@index([workspaceId, ownerUserId, status, updatedAt])
+}
+
+model MethodSuggestion {
+  id                     String                    @id @default(cuid())
+  workspaceId            String
+  ownerUserId            String
+  sourceBenchmarkStudyId String
+  sourceMethodIndex      Int
+  type                    MethodSuggestionType
+  title                   String
+  steps                   Json
+  applicableScenarios     Json
+  boundaries              Json
+  rationale               String
+  stability               MethodSuggestionStability
+  sampleCount             Int
+  sourceRefs              Json
+  evidence                Json
+  status                  SuggestionStatus          @default(PENDING)
+  dedupeKey               String                    @unique
+  savedMethodAssetId      String?                   @unique
+  generatedById           String
+  reviewedById            String?
+  reviewedAt              DateTime?
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  workspace               Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceBenchmarkStudy    BenchmarkStudy            @relation(fields: [sourceBenchmarkStudyId], references: [id], onDelete: Cascade)
+  savedMethodAsset        MethodAsset?              @relation(fields: [savedMethodAssetId], references: [id], onDelete: SetNull)
+  generatedBy             User                      @relation("MethodSuggestionGeneratedBy", fields: [generatedById], references: [id], onDelete: Restrict)
+  reviewedBy              User?                     @relation("MethodSuggestionReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, ownerUserId, status, createdAt])
+  @@index([sourceBenchmarkStudyId, status])
+  @@index([generatedById])
+  @@index([reviewedById])
 }
 
 model MethodVersion {
@@ -1541,9 +1619,39 @@ model CreatorProfile {
   contentIdeas         ContentIdea[]
   deepContentPackages  DeepContentPackage[]
   recommendationBatches RecommendationBatch[]
+  suggestions           CreatorProfileSuggestion[]
 
   @@unique([workspaceId, userId])
   @@index([userId])
+}
+
+model CreatorProfileSuggestion {
+  id               String                       @id @default(cuid())
+  workspaceId      String
+  creatorProfileId String?
+  targetUserId     String
+  type             CreatorProfileSuggestionType
+  currentValue     Json
+  proposedValue    String
+  rationale        String
+  evidenceRefs     Json
+  sampleCount      Int
+  status           SuggestionStatus             @default(PENDING)
+  dedupeKey        String                       @unique
+  generatedById    String
+  reviewedById     String?
+  reviewedAt       DateTime?
+  createdAt        DateTime                     @default(now())
+  updatedAt        DateTime                     @updatedAt
+  workspace        Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creatorProfile   CreatorProfile?              @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  generatedBy      User                         @relation("ProfileSuggestionGeneratedBy", fields: [generatedById], references: [id], onDelete: Restrict)
+  reviewedBy       User?                        @relation("ProfileSuggestionReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, targetUserId, status, createdAt])
+  @@index([creatorProfileId, status])
+  @@index([generatedById])
+  @@index([reviewedById])
 }
 
 model DeepContentPackage {

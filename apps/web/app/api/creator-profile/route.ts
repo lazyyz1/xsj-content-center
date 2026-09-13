@@ -20,6 +20,7 @@ export async function GET() {
 export async function PUT(request: Request) {
   const context = await getApiWorkspaceContext();
   if (!context) return apiError("UNAUTHORIZED", 401);
+  if (context.role === "VIEWER") return apiError("FORBIDDEN", 403);
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return apiError("INVALID_INPUT", 400, "请检查创作画像字段长度。");
   return NextResponse.json(await saveCreatorProfile({ workspaceId: context.workspace.id, userId: context.session.user.id, data: parsed.data }));

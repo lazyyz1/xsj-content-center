@@ -10,7 +10,8 @@ import type { BenchmarkCandidateDTO, BenchmarkStudyDTO } from "@/server/discover
 import { ArrowRight, BookmarkPlus, ChevronDown, ChevronRight, Ellipsis, FlaskConical, History, Loader2, RefreshCw, Search, Settings2, Trash2, Video, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { MethodSuggestionPanel } from "@/components/learning-suggestion-panels";
 
 type Work = Omit<ExternalContent, "rawProviderMetadata"> & { sourceItemId: string | null; inIdea: boolean };
 
@@ -28,7 +29,7 @@ async function request(url: string, init?: RequestInit) {
 
 function list(value: string | string[]) { return typeof value === "string" ? [value] : value; }
 
-export function BenchmarkWorkspace({ profile, candidates, studies: initialStudies, canRefresh, canManage }: { profile: BenchmarkCreatorDetailDTO; candidates: BenchmarkCandidateDTO[]; studies: BenchmarkStudyDTO[]; canRefresh: boolean; canManage: boolean }) {
+export function BenchmarkWorkspace({ profile, candidates, studies: initialStudies, methodSuggestions, suggestionStudyId, canRefresh, canManage }: { profile: BenchmarkCreatorDetailDTO; candidates: BenchmarkCandidateDTO[]; studies: BenchmarkStudyDTO[]; methodSuggestions: ComponentProps<typeof MethodSuggestionPanel>["initial"]; suggestionStudyId: string | null; canRefresh: boolean; canManage: boolean }) {
   const benchmark = profile.account;
   const router = useRouter();
   const [view, setView] = useState<BenchmarkView>("OVERVIEW");
@@ -86,7 +87,7 @@ export function BenchmarkWorkspace({ profile, candidates, studies: initialStudie
     <WorkspaceTabs value={view} onChange={setView} />
     {view === "OVERVIEW" ? <BenchmarkCreatorProfile profile={profile} onShowContent={() => setView("CONTENT")} onShowResearch={() => openResearch("content")} canGenerateTopics={canRefresh && profile.creatorProfile?.schemaVersion === "benchmark-creator-profile-v4"} /> : null}
     {view === "CONTENT" ? <BenchmarkCreatorContent profile={profile} /> : null}
-    {view === "METHOD" ? <BenchmarkCreatorMethod profile={profile} selectedProfileCount={selected.length} canGenerateProfile={profileSelectionReady} profileBusy={action === "profile" || profileProcessing} onShowResearch={() => setView("RESEARCH")} onGenerateProfile={() => void startStudy("CREATOR_PROFILE")} /> : null}
+    {view === "METHOD" ? <div className="benchmark-profile-stack"><MethodSuggestionPanel benchmarkAccountId={benchmark.id} studyId={suggestionStudyId} initial={methodSuggestions} editable={canRefresh} /><BenchmarkCreatorMethod profile={profile} selectedProfileCount={selected.length} canGenerateProfile={profileSelectionReady} profileBusy={action === "profile" || profileProcessing} onShowResearch={() => setView("RESEARCH")} onGenerateProfile={() => void startStudy("CREATOR_PROFILE")} /></div> : null}
     {view === "LEARN" ? <BenchmarkCreatorLearn profile={profile} canGenerate={canRefresh && profile.creatorProfile?.schemaVersion === "benchmark-creator-profile-v4"} /> : null}
     {view === "RESEARCH" ? <div data-testid="benchmark-research-view" role="tabpanel" className="benchmark-research-panel benchmark-glass">
       <div id="benchmark-content-browser"><RepresentativeContent candidates={candidates} selected={selected} canStudy={canRefresh} action={action} onToggle={toggleCandidate} onClear={() => setSelected([])} onStart={(kind) => void startStudy(kind)} /></div>

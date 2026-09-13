@@ -9,7 +9,7 @@ const explicitlyUnrelated = [
 ];
 
 const contentRelated = /(选题|写稿|改写|口播|标题|内容|资料|素材|研究|方法|表达|事实|来源|项目|创作|脚本|文章|视频|检查)/u;
-const projectNativeTasks = new Set<AIControlTask>(["CONTENT_CHECK", "TOPIC_CANDIDATES", "DRAFT_SUGGESTION", "SOURCE_UNDERSTANDING", "RESEARCH", "METHOD_GUIDANCE", "MATERIAL_SEARCH", "MATERIAL_KNOWLEDGE_EXTRACTION"]);
+const projectNativeTasks = new Set<AIControlTask>(["CONTENT_CHECK", "TOPIC_CANDIDATES", "DRAFT_SUGGESTION", "SOURCE_UNDERSTANDING", "RESEARCH", "METHOD_GUIDANCE", "MATERIAL_SEARCH", "MATERIAL_KNOWLEDGE_EXTRACTION", "METHOD_SUGGESTION_FROM_RESEARCH", "CREATOR_PROFILE_SUGGESTION"]);
 
 export type ScopeGateInput = {
   userId: string;
