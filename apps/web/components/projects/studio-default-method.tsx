@@ -8,6 +8,7 @@ import type { AssistantMessageDTO, AssistantResultAction, AssistantStreamEvent, 
 import type { CanvasObjectDTO } from "@/server/canvas/service";
 import type { ProjectMaterial } from "./project-materials-panel";
 import type { StudioSelectionAction } from "./mother-content-editor";
+import { AssistantResultRenderer } from "./assistant-result-renderer";
 
 type TextSelection = { text: string; start: number; end: number };
 type SelectedCanvasReference = { objectType: "CANVAS_OBJECT"; objectId: string; version: number; ownership: "EXTERNAL" | "PENDING"; whySelected: string; label: string };
@@ -44,12 +45,15 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
   const abortRef = useRef<AbortController | null>(null);
   const streamRef = useRef<HTMLDivElement>(null);
   const lastPromptRef = useRef("");
+  const createdObjectIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
+    const preserveCreatedResult = selectedObject?.objectId === createdObjectIdRef.current;
     setLoading(true);
+    if (!preserveCreatedResult) { setMessages([]); setError(""); }
     const url = selectedObject ? `/api/projects/${projectId}/canvas/objects/${selectedObject.objectId}/assistant` : `/api/projects/${projectId}/assistant`;
-    void jsonRequest(url).then((thread: { messages?: AssistantMessageDTO[] }) => { if (active) setMessages(thread.messages ?? []); }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : "对话记录加载失败。"); }).finally(() => { if (active) setLoading(false); });
+    void jsonRequest(url).then((thread: { messages?: AssistantMessageDTO[] }) => { if (!active) return; if (thread.messages?.length || !preserveCreatedResult) setMessages(thread.messages ?? []); if (preserveCreatedResult) createdObjectIdRef.current = null; }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : "对话记录加载失败。"); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; abortRef.current?.abort(); };
   }, [projectId, selectedObject?.objectId]);
 
@@ -87,7 +91,7 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
           const event = JSON.parse(line.slice(6)) as AssistantStreamEvent | NodeAssistantStreamEvent;
           if (event.type === "start") setMessages((current) => [...current, event.userMessage, event.assistantMessage]);
           else if (event.type === "delta") setMessages((current) => current.map((message) => message.id === event.messageId ? { ...message, status: "STREAMING", content: message.content + event.delta } : message));
-          else if (event.type === "done" || event.type === "stopped") { setMessages((current) => current.map((message) => message.id === event.message.id ? event.message : message)); if (event.type === "done" && "resultObject" in event) onObjectCreated(event.resultObject); }
+          else if (event.type === "done" || event.type === "stopped") { setMessages((current) => current.map((message) => message.id === event.message.id ? event.message : message)); if (event.type === "done" && "resultObject" in event) { createdObjectIdRef.current = event.resultObject.id; onObjectCreated(event.resultObject); } }
           else if (event.type === "error") { setMessages((current) => current.map((message) => message.id === event.messageId ? { ...message, status: "FAILED" } : message)); setError(event.message); }
         }
       }
@@ -99,10 +103,10 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
 
   useImperativeHandle(ref, () => ({ executeSelection: (action) => { if (selection) void send(`${actionPrompts[action]}\n\n${selection.text}`); } }));
 
-  const saveResult = async (message: AssistantMessageDTO, action: AssistantResultAction) => {
+  const saveResult = async (message: AssistantMessageDTO, action: AssistantResultAction, topicIndex?: number) => {
     setError(""); setNotice("");
     try {
-      const result = await jsonRequest(`/api/projects/${projectId}/assistant/messages/${message.id}/save`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action }) }) as { object?: CanvasObjectDTO };
+      const result = await jsonRequest(`/api/projects/${projectId}/assistant/messages/${message.id}/save`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, ...(topicIndex === undefined ? {} : { topicIndex }) }) }) as { object?: CanvasObjectDTO };
       if (result.object) onObjectCreated(result.object);
       setNotice(action === "TEXT" ? "已保存到画布，并选中新文本。" : action === "TOPIC" ? "已保存到选题库。" : "已创建新的候选稿，不会覆盖主稿。");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "保存失败，请重试。"); }
@@ -114,12 +118,12 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
     <div className="studio-assistant-stream" ref={streamRef} aria-live="polite">
       {loading ? <div className="studio-assistant-loading"><LoaderCircle size={18} />正在载入项目对话…</div> : null}
       {!loading && !messages.length ? <section className="studio-assistant-empty"><strong>{selectedObject ? `基于“${selectedObject.label}”继续` : "从当前项目继续"}</strong><p>{selectedObject ? "生成结果会成为右侧的新文本，不会覆盖当前内容。" : "我会自动参考项目目标、当前稿件、选中内容和你添加的资料。"}</p><div>{(selectedObject ? ["基于这个给我出 3 个选题", "提炼这个内容的核心观点", "生成另一种表达"] : ["帮我看看这个项目下一步该做什么", "根据当前资料出几个选题", "帮我检查当前稿件"]).map((prompt) => <button type="button" key={prompt} disabled={!configured || Boolean(selectedObject && !editable)} onClick={() => void send(prompt)}>{prompt}</button>)}</div></section> : null}
-      {messages.map((message, index) => <article key={message.id} className={`studio-assistant-message is-${message.role.toLowerCase()} is-${message.status.toLowerCase()}`}>
+      {messages.map((message, index) => <article key={message.id} className={`studio-assistant-message is-${message.role.toLowerCase()} is-${message.status.toLowerCase()} ${message.role === "ASSISTANT" && message.structuredResult ? "has-structured-result" : ""}`}>
         <header><strong>{message.role === "USER" ? "你" : "鑫小助"}</strong><time>{new Date(message.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time>{message.status === "STREAMING" ? <span><i />正在回复</span> : message.status === "STOPPED" ? <span>已停止</span> : message.status === "FAILED" ? <span>未完成</span> : null}</header>
-        <div className="studio-assistant-message-content">{message.content || (message.status === "PENDING" ? "正在准备项目上下文…" : "")}</div>
+        {message.role === "ASSISTANT" ? <AssistantResultRenderer message={message} onContinue={(instruction) => void send(instruction)} onTopicContinue={(topic) => void send(`继续展开这个选题：${topic.title}${topic.angle ? `。切入角度：${topic.angle}` : ""}`)} onTopicSave={(topicIndex) => void saveResult(message, "TEXT", topicIndex)} /> : <div className="studio-assistant-message-content">{message.content || (message.status === "PENDING" ? "正在准备项目上下文…" : "")}</div>}
         {message.warnings.length ? <div className="studio-assistant-warnings" role="alert"><strong>需要确认</strong>{message.warnings.map((warning) => <p key={warning}>{warning}</p>)}</div> : null}
         {message.sources.length ? <details className="studio-assistant-citations"><summary>来源 {message.sources.length}<ChevronDown size={14} /></summary><div>{message.sources.map((source, sourceIndex) => <section key={`${source.title}-${sourceIndex}`}><span>{source.type}</span><strong>{source.title}</strong><p>{source.excerpt}</p></section>)}</div></details> : null}
-        {message.actions.length ? <footer>{message.actions.map((action) => <button type="button" key={action} disabled={!editable} title={editable ? saveLabels[action] : "当前权限只能查看"} onClick={() => void saveResult(message, action)}>{action === "TEXT" ? <Save size={14} /> : action === "TOPIC" ? <Check size={14} /> : <FilePlus2 size={14} />}{saveLabels[action]}</button>)}</footer> : null}
+        {message.actions.filter((action) => !(message.structuredResult?.type === "TOPIC" && (action === "TEXT" || action === "TOPIC"))).length ? <footer>{message.actions.filter((action) => !(message.structuredResult?.type === "TOPIC" && (action === "TEXT" || action === "TOPIC"))).map((action) => <button type="button" key={action} disabled={!editable} title={editable ? saveLabels[action] : "当前权限只能查看"} onClick={() => void saveResult(message, action)}>{action === "TEXT" ? <Save size={14} /> : action === "TOPIC" ? <Check size={14} /> : <FilePlus2 size={14} />}{saveLabels[action]}</button>)}</footer> : null}
         {message.status === "FAILED" ? <button type="button" className="studio-assistant-retry" disabled={sending} onClick={() => { const previous = messages.slice(0, index).reverse().find((item) => item.role === "USER"); void send(previous?.content || lastPromptRef.current); }}><RefreshCw size={14} />重新试一次</button> : null}
       </article>)}
     </div>

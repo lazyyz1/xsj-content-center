@@ -84,7 +84,7 @@ export function ProjectMaterialsPanel({ open, sources, editable, onClose, onAdd,
 
   const chooseView = (next: "GRID" | "LIST") => { setView(next); window.localStorage.setItem("project-materials-view:v1", next); };
 
-  return <aside className="project-materials-panel" data-open={open} aria-hidden={!open} inert={!open} aria-label="项目资料">
+  return <aside className="project-materials-panel" role="dialog" aria-modal="false" data-open={open} aria-hidden={!open} inert={!open} aria-label="项目资料">
     <header><div><strong>项目资料</strong><span>{sources.length} 条当前项目资料</span></div><button type="button" aria-label="关闭项目资料" onClick={onClose}><X size={17} /></button></header>
     <div className="project-material-search"><Search size={15} /><input aria-label="搜索项目资料" value={searchInput} placeholder="搜索标题、作者或摘要" onChange={(event) => setSearchInput(event.target.value)} /></div>
     <div className="project-material-filters">

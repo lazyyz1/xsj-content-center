@@ -18,8 +18,16 @@ const assistantSystemPrompt = `你是“鑫世界内部内容研究与创作协�
 回答使用简洁自然的中文，先给可执行结论，再说明依据。不要提及 Prompt、Context、Provider、Model、Token、Schema、API、guideline、内部章节代码、规则编号或内部对象编号；引用方法时只说员工能理解的方法名称。上下文缺少真实资料或已确认信息时要明确说明，不得用假设场景补成项目事实。不要输出隐藏推理过程。`;
 
 export type AssistantSourceDTO = { title: string; type: string; excerpt: string };
+export type AssistantTopicResultItem = { title: string; angle?: string; reason?: string; sourceRefs?: string[] };
+export type AssistantCheckResultItem = { originalText: string; issue: string; reason?: string; suggestion?: string; severity?: "HIGH" | "MEDIUM" | "LOW"; sourceRefs?: string[] };
+export type AssistantStructuredResult =
+  | { type: "TOPIC"; topics: AssistantTopicResultItem[] }
+  | { type: "REWRITE"; original: string; aiVersion: string; changeSummary?: string[] }
+  | { type: "CHECK"; issues: AssistantCheckResultItem[] }
+  | { type: "NEXT_STEP"; recommendedAction: string; reason: string; secondaryActions?: string[] }
+  | { type: "TEXT"; content: string };
 export type AssistantResultAction = "TEXT" | "TOPIC" | "DRAFT";
-export type AssistantMessageDTO = { id: string; role: "USER" | "ASSISTANT"; content: string; status: "PENDING" | "STREAMING" | "COMPLETED" | "FAILED" | "STOPPED"; createdAt: string; sources: AssistantSourceDTO[]; warnings: string[]; resultType: "TEXT" | "TOPIC" | "DRAFT" | "CHECK"; actions: AssistantResultAction[] };
+export type AssistantMessageDTO = { id: string; role: "USER" | "ASSISTANT"; content: string; status: "PENDING" | "STREAMING" | "COMPLETED" | "FAILED" | "STOPPED"; createdAt: string; sources: AssistantSourceDTO[]; warnings: string[]; resultType: "TEXT" | "TOPIC" | "REWRITE" | "DRAFT" | "CHECK" | "NEXT_STEP"; structuredResult: AssistantStructuredResult | null; actions: AssistantResultAction[] };
 export type AssistantThreadDTO = { id: string; messages: AssistantMessageDTO[] };
 export type AssistantStreamEvent = { type: "start"; threadId: string; userMessage: AssistantMessageDTO; assistantMessage: AssistantMessageDTO } | { type: "delta"; messageId: string; delta: string } | { type: "done" | "stopped"; message: AssistantMessageDTO } | { type: "error"; messageId: string; code: string; message: string };
 export type NodeAssistantStreamEvent = { type: "start"; threadId: string; generateRunId: string; userMessage: AssistantMessageDTO; assistantMessage: AssistantMessageDTO } | { type: "delta"; messageId: string; delta: string } | { type: "done"; message: AssistantMessageDTO; resultObject: CanvasObjectDTO; relationCount: number } | { type: "stopped"; message: AssistantMessageDTO } | { type: "error"; messageId: string; code: string; message: string };
@@ -33,7 +41,9 @@ function record(value: unknown): Record<string, unknown> { return value && typeo
 function strings(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
 
 function resultType(input: string): AssistantMessageDTO["resultType"] {
+  if (/(下一步|接下来|继续做什么|先做什么|优先做)/u.test(input) && !/(选题|主题|方向|角度)/u.test(input)) return "NEXT_STEP";
   if (/(检查|核对|事实|风险)/u.test(input)) return "CHECK";
+  if (/(改写|重写|换一种表达|更自然|精简|润色|改开头)/u.test(input)) return "REWRITE";
   if (/(选题|主题|方向|角度)/u.test(input)) return "TOPIC";
   if (/(稿|改写|正文|开头|口播|脚本)/u.test(input)) return "DRAFT";
   return "TEXT";
@@ -42,8 +52,54 @@ function resultType(input: string): AssistantMessageDTO["resultType"] {
 function resultActions(type: AssistantMessageDTO["resultType"]): AssistantResultAction[] {
   if (type === "TOPIC") return ["TOPIC", "TEXT"];
   if (type === "DRAFT") return ["DRAFT", "TEXT"];
-  if (type === "CHECK") return [];
+  if (type === "CHECK" || type === "NEXT_STEP") return [];
   return ["TEXT"];
+}
+
+function resultLines(content: string) {
+  return content.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+}
+
+function removeResultMarker(line: string) {
+  return line.replace(/^(?:[-*•]|\d+[.)、]|选题\s*[一二三四五六七八九十\d]+\s*[:：]?|方向\s*[一二三四五六七八九十\d]+\s*[:：]?)\s*/u, "").trim();
+}
+
+function structuredResultFor(type: AssistantMessageDTO["resultType"], content: string): AssistantStructuredResult {
+  const lines = resultLines(content);
+  if (type === "TOPIC") {
+    const topics = lines.slice(0, 8).map((line) => {
+      const value = removeResultMarker(line);
+      const separator = value.search(/[：:｜|]/u);
+      if (separator > 0 && separator < 80) return { title: value.slice(0, separator).trim(), angle: value.slice(separator + 1).trim() };
+      return { title: value };
+    }).filter(({ title }) => title.length > 0);
+    return { type: "TOPIC", topics: topics.length ? topics : [{ title: content.trim().slice(0, 160) || "值得继续研究的选题" }] };
+  }
+  if (type === "REWRITE") {
+    const original = lines.find((line) => /^原文\s*[:：]/u.test(line))?.replace(/^原文\s*[:：]\s*/u, "").trim() || "";
+    const aiVersion = lines.find((line) => /^(?:新版本|改写后|修改后)\s*[:：]/u.test(line))?.replace(/^(?:新版本|改写后|修改后)\s*[:：]\s*/u, "").trim() || content.trim();
+    return { type: "REWRITE", original, aiVersion, changeSummary: lines.filter((line) => /^[-*•]\s*(?:更|保留|缩短|精简)/u.test(line)).map(removeResultMarker).slice(0, 4) };
+  }
+  if (type === "CHECK") {
+    const issues = lines.slice(0, 8).map((line) => ({ originalText: line.replace(/^【需要确认】\s*/u, ""), issue: "这处表达需要核对", suggestion: "请回到原始资料确认后再使用。", severity: "MEDIUM" as const }));
+    return { type: "CHECK", issues: issues.length ? issues : [{ originalText: content.trim().slice(0, 180), issue: "这段内容需要核对", suggestion: "请回到原始资料确认后再使用。", severity: "MEDIUM" }] };
+  }
+  if (type === "NEXT_STEP") {
+    const recommendedAction = removeResultMarker(lines[0] || content.trim()).replace(/^(?:下一步|建议)\s*[:：]\s*/u, "");
+    return { type: "NEXT_STEP", recommendedAction: recommendedAction || "继续整理当前项目", reason: lines.slice(1).join(" ") || "先完成这一步，后续内容会更容易继续。" };
+  }
+  return { type: "TEXT", content };
+}
+
+function structuredResultFromMetadata(value: unknown, type: AssistantMessageDTO["resultType"], content: string, completed: boolean) {
+  const metadata = record(value);
+  const candidate = record(metadata.structuredResult);
+  if (candidate.type === "TOPIC" && Array.isArray(candidate.topics)) return candidate as AssistantStructuredResult;
+  if (candidate.type === "REWRITE" && typeof candidate.aiVersion === "string") return candidate as AssistantStructuredResult;
+  if (candidate.type === "CHECK" && Array.isArray(candidate.issues)) return candidate as AssistantStructuredResult;
+  if (candidate.type === "NEXT_STEP" && typeof candidate.recommendedAction === "string") return candidate as AssistantStructuredResult;
+  if (candidate.type === "TEXT" && typeof candidate.content === "string") return candidate as AssistantStructuredResult;
+  return completed && content.trim() ? structuredResultFor(type, content) : null;
 }
 
 function sourceSnapshot(item: ContextItem): AssistantSourceDTO | null {
@@ -79,9 +135,9 @@ function postCheck(content: string, ownFacts: string[]) {
 
 function messageDTO(message: { id: string; role: "USER" | "ASSISTANT"; content: string; status: AssistantMessageDTO["status"]; metadata: unknown; createdAt: Date }): AssistantMessageDTO {
   const metadata = record(message.metadata);
-  const type = ["TEXT", "TOPIC", "DRAFT", "CHECK"].includes(String(metadata.resultType)) ? metadata.resultType as AssistantMessageDTO["resultType"] : "TEXT";
+  const type = ["TEXT", "TOPIC", "REWRITE", "DRAFT", "CHECK", "NEXT_STEP"].includes(String(metadata.resultType)) ? metadata.resultType as AssistantMessageDTO["resultType"] : "TEXT";
   const sources = Array.isArray(metadata.sources) ? metadata.sources.flatMap((source) => { const value = record(source); return typeof value.title === "string" && typeof value.type === "string" && typeof value.excerpt === "string" ? [{ title: value.title, type: value.type, excerpt: value.excerpt }] : []; }) : [];
-  return { id: message.id, role: message.role, content: message.content, status: message.status, createdAt: message.createdAt.toISOString(), sources, warnings: strings(metadata.warnings), resultType: type, actions: message.role === "ASSISTANT" && message.status === "COMPLETED" && metadata.nodeResult !== true ? resultActions(type) : [] };
+  return { id: message.id, role: message.role, content: message.content, status: message.status, createdAt: message.createdAt.toISOString(), sources, warnings: strings(metadata.warnings), resultType: type, structuredResult: message.role === "ASSISTANT" ? structuredResultFromMetadata(metadata, type, message.content, message.status === "COMPLETED") : null, actions: message.role === "ASSISTANT" && message.status === "COMPLETED" && metadata.nodeResult !== true ? resultActions(type) : [] };
 }
 
 async function scopedProject(input: { workspaceId: string; userId: string; projectId: string }) {
@@ -135,7 +191,8 @@ export async function runProjectAssistant(input: { workspaceId: string; userId: 
       },
     });
     const value = run.output as { content: string; warnings: string[]; resultType: AssistantMessageDTO["resultType"] };
-    const completed = await db.assistantMessage.update({ where: { id: assistantMessage.id }, data: { content: value.content, status: "COMPLETED", metadata: json({ resultType: value.resultType, warnings: value.warnings, sources: contextManifest ? sourcesFromManifest(contextManifest) : [] }) } });
+    const structuredResult = structuredResultFor(value.resultType, value.content);
+    const completed = await db.assistantMessage.update({ where: { id: assistantMessage.id }, data: { content: value.content, status: "COMPLETED", metadata: json({ resultType: value.resultType, structuredResult, warnings: value.warnings, sources: contextManifest ? sourcesFromManifest(contextManifest) : [] }) } });
     emit({ type: "done", message: messageDTO(completed) });
     return messageDTO(completed);
   } catch (error) {
@@ -148,20 +205,25 @@ export async function runProjectAssistant(input: { workspaceId: string; userId: 
   }
 }
 
-export async function saveAssistantMessageResult(input: { workspaceId: string; userId: string; projectId: string; messageId: string; action: AssistantResultAction }): Promise<{ object?: CanvasObjectDTO; idea?: { id: string; title: string }; draft?: DraftBranchDTO }> {
+export async function saveAssistantMessageResult(input: { workspaceId: string; userId: string; projectId: string; messageId: string; action: AssistantResultAction; topicIndex?: number }): Promise<{ object?: CanvasObjectDTO; idea?: { id: string; title: string }; draft?: DraftBranchDTO }> {
   const project = await scopedProject(input);
   const message = await db.assistantMessage.findFirst({ where: { id: input.messageId, role: "ASSISTANT", status: "COMPLETED", thread: { projectId: input.projectId, workspaceId: input.workspaceId } } });
   if (!message) throw new AssistantServiceError("MESSAGE_NOT_FOUND", "这条回复不存在或还没有完成。");
   const savedType = record(message.metadata).resultType;
-  if (!resultActions(["TEXT", "TOPIC", "DRAFT", "CHECK"].includes(String(savedType)) ? savedType as AssistantMessageDTO["resultType"] : "TEXT").includes(input.action)) throw new AssistantServiceError("INVALID_INPUT", "这条回复不支持该保存方式。");
+  if (!resultActions(["TEXT", "TOPIC", "REWRITE", "DRAFT", "CHECK", "NEXT_STEP"].includes(String(savedType)) ? savedType as AssistantMessageDTO["resultType"] : "TEXT").includes(input.action)) throw new AssistantServiceError("INVALID_INPUT", "这条回复不支持该保存方式。");
   const permission = new ActionPermissionPolicy().evaluate({ role: project.role, action: input.action === "TEXT" ? "CREATE_FREE_TEXT_CANDIDATE" : "CREATE_RESEARCH_CANDIDATE" });
   if (permission.decision !== "ALLOW") throw new AssistantServiceError("PERMISSION_DENIED", "当前权限可以查看回复，但不能保存候选内容。");
-  const title = message.content.split(/\n/u).map((line) => line.replace(/^#+\s*/, "").trim()).find(Boolean)?.slice(0, 80) || "鑫小助候选内容";
+  const messageResult = structuredResultFromMetadata(message.metadata, ["TEXT", "TOPIC", "REWRITE", "DRAFT", "CHECK", "NEXT_STEP"].includes(String(savedType)) ? savedType as AssistantMessageDTO["resultType"] : "TEXT", message.content, true);
+  const selectedTopic = input.topicIndex === undefined ? null : messageResult?.type === "TOPIC" && Number.isInteger(input.topicIndex) && input.topicIndex >= 0 ? messageResult.topics[input.topicIndex] ?? null : null;
+  if (input.topicIndex !== undefined && !selectedTopic) throw new AssistantServiceError("INVALID_INPUT", "请选择一条有效的选题。");
+  const selectedContent = selectedTopic ? [selectedTopic.title, selectedTopic.angle, selectedTopic.reason].filter(Boolean).join("\n") : message.content;
+  const structuredTitle = selectedTopic?.title || (messageResult?.type === "TOPIC" ? messageResult.topics[0]?.title : messageResult?.type === "REWRITE" ? "改写后的新版本" : null);
+  const title = structuredTitle || message.content.split(/\n/u).map((line) => line.replace(/^#+\s*/, "").trim()).find(Boolean)?.slice(0, 80) || "鑫小助候选内容";
   if (input.action === "TEXT") {
     const count = await db.canvasObject.count({ where: { projectId: input.projectId, deletedAt: null } });
-    return { object: await createCanvasTextObject({ ...input, title, textContent: message.content, layout: { positionX: 720 + count % 5 * 28, positionY: 180 + count % 5 * 28, width: 380, height: 240, zIndex: count + 1 } }) };
+    return { object: await createCanvasTextObject({ ...input, title, textContent: selectedContent, layout: { positionX: 720 + count % 5 * 28, positionY: 180 + count % 5 * 28, width: 380, height: 240, zIndex: count + 1 } }) };
   }
-  if (input.action === "TOPIC") return { idea: await createIdea({ workspaceId: input.workspaceId, userId: input.userId, title, description: message.content }) };
+  if (input.action === "TOPIC") return { idea: await createIdea({ workspaceId: input.workspaceId, userId: input.userId, title, description: selectedContent }) };
   const branch = await createDraftBranch({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, title: `候选稿 · ${title.slice(0, 60)}` });
   const draft = await createDraftRevision({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, branchId: branch.id, expectedVersion: branch.version, title, body: message.content, outline: [], origin: "AI", originNote: "由项目级鑫小助生成，尚未设为主稿", generateRunId: message.aiRunId });
   return { draft: draft.branch };
@@ -223,13 +285,14 @@ export async function runNodeAssistant(input: { workspaceId: string; userId: str
       return { ...streamed, data: { ...streamed.data, value: { content: checked.content, warnings: checked.warnings, resultType: resultType(instruction) } } };
     } });
     const value = run.output as { content: string; warnings: string[]; resultType: AssistantMessageDTO["resultType"] };
+    const structuredResult = structuredResultFor(value.resultType, value.content);
     const allObjects = await db.canvasObject.findMany({ where: { projectId: input.projectId, deletedAt: null }, select: { positionX: true, positionY: true, width: true, height: true, zIndex: true } });
     const primary = ordered[0]!; const placement = nextResultPosition(primary, allObjects); const title = value.content.split(/\n/u).map((line) => line.replace(/^#+\s*/, "").trim()).find(Boolean)?.slice(0, 100) || "鑫小助生成内容";
     const transaction = await db.$transaction(async (tx) => {
       const result = await tx.canvasObject.create({ data: { workspaceId: input.workspaceId, projectId: input.projectId, objectType: "TEXT", title, textContent: value.content, ...placement, zIndex: Math.max(0, ...allObjects.map(({ zIndex }) => zIndex)) + 1, metadata: json({ candidate: true, canvasGenerateRunId: generateRun.id }), createdById: input.userId, updatedById: input.userId } });
       await tx.canvasRelation.createMany({ data: ordered.map((object, index) => ({ workspaceId: input.workspaceId, projectId: input.projectId, relationType: "GENERATED_FROM", sourceObjectId: object.id, targetObjectId: result.id, sourceSnapshotId: snapshots[index]!.id, createdById: input.userId })) });
       await tx.canvasGenerateRun.update({ where: { id: generateRun.id }, data: { resultCanvasObjectId: result.id, status: "SUCCEEDED", completedAt: new Date() } });
-      const completed = await tx.assistantMessage.update({ where: { id: assistantMessage.id }, data: { content: value.content, status: "COMPLETED", metadata: json({ nodeResult: true, resultType: value.resultType, warnings: value.warnings, sources: contextManifest ? sourcesFromManifest(contextManifest) : [] }) } });
+      const completed = await tx.assistantMessage.update({ where: { id: assistantMessage.id }, data: { content: value.content, status: "COMPLETED", metadata: json({ nodeResult: true, resultType: value.resultType, structuredResult, warnings: value.warnings, sources: contextManifest ? sourcesFromManifest(contextManifest) : [] }) } });
       await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "canvas.ai_result_created", resourceType: "canvas_generate_run", resourceId: generateRun.id, metadata: json({ projectId: input.projectId, sourceCount: ordered.length, resultObjectId: result.id }) } });
       return { result, completed };
     });

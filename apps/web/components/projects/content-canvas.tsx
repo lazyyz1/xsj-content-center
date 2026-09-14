@@ -31,7 +31,6 @@ import {
   Maximize2,
   Minus,
   MousePointer2,
-  PanelRightOpen,
   PencilLine,
   Plus,
   Rows3,
@@ -52,11 +51,13 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
   type ReactNode,
 } from "react";
 import { CanvasFreeNode, FreeNodeActionsProvider, type CanvasSaveState, type FreeCanvasNode } from "./canvas-free-node";
 import { PROJECT_MATERIAL_DRAG_TYPE, ProjectMaterialsPanel, type ProjectMaterial, type ProjectMaterialDrop } from "./project-materials-panel";
 import type { CanvasLayoutInput, CanvasObjectDTO } from "@/server/canvas/service";
+import { employeeSourceMeta } from "@/lib/content-labels";
 
 export type CardKind = "brief" | "sources" | "facts" | "methods" | "suggestion" | "draft";
 export type CanvasContextKind = Extract<CardKind, "brief" | "sources" | "facts" | "methods">;
@@ -108,22 +109,10 @@ const icons = {
 } as const;
 
 const addGroups: Array<{ label: string; items: Array<{ kind: AddChoice; title: string; description: string }> }> = [
-  { label: "自由内容", items: [
+  { label: "添加内容", items: [
     { kind: "text", title: "文本", description: "直接写下新的内容" },
-    { kind: "material", title: "资料", description: "引用当前项目的真实资料" },
+    { kind: "material", title: "项目资料", description: "引用当前项目的真实资料" },
     { kind: "image", title: "图片", description: "引用资料中的真实图片" },
-  ] },
-  { label: "内容", items: [
-    { kind: "sources", title: "参考素材", description: "从已有资料中选择" },
-    { kind: "facts", title: "我方依据", description: "查看已确认的真实依据" },
-  ] },
-  { label: "创作", items: [
-    { kind: "brief", title: "创作目标", description: "定位并查看唯一目标" },
-    { kind: "methods", title: "方法", description: "从当前可用方法中选择" },
-    { kind: "draft", title: "当前稿件", description: "打开唯一当前稿件" },
-  ] },
-  { label: "AI", items: [
-    { kind: "suggestion", title: "AI 建议", description: "查看当前已有建议" },
   ] },
 ];
 
@@ -189,7 +178,7 @@ function CanvasCard({ data, selected }: NodeProps<CanvasNode>) {
             <span>{data.draft?.status}</span>
           </div>
           <p className="canvas-draft-preview">
-            {data.draft?.body.trim() || "当前还没有稿件内容，从创作目标或素材开始组织第一版吧。"}
+            {data.draft?.body.trim() || "当前还没有稿件内容，从项目资料或你的想法开始组织第一版吧。"}
           </p>
         </>
       ) : (
@@ -211,29 +200,23 @@ function CanvasCard({ data, selected }: NodeProps<CanvasNode>) {
   );
 }
 
-const nodeTypes = { card: CanvasCard, free: CanvasFreeNode };
-
 function CanvasToolbar({
   projectTitle,
   saved,
   menu,
-  miniMapOpen,
   materialsOpen,
   materialCount,
+  materialsButtonRef,
   onMenu,
-  onToggleMiniMap,
-  onToggleLayout,
   onToggleMaterials,
 }: {
   projectTitle: string;
   saved: string;
   menu: "arrange" | "settings" | null;
-  miniMapOpen: boolean;
   materialsOpen: boolean;
   materialCount: number;
+  materialsButtonRef?: RefObject<HTMLButtonElement | null>;
   onMenu: (menu: "arrange" | "settings") => void;
-  onToggleMiniMap: () => void;
-  onToggleLayout: () => void;
   onToggleMaterials: () => void;
 }) {
   const { zoomIn, zoomOut } = useReactFlow();
@@ -247,16 +230,12 @@ function CanvasToolbar({
         <span>{saved}</span>
       </div>
       <nav aria-label="画布操作">
-        <button type="button" title="整理画布" aria-expanded={menu === "arrange"} onClick={() => onMenu("arrange")} aria-label="整理画布"><LayoutGrid size={17} /></button>
-        <i aria-hidden="true" />
         <button type="button" title="缩小画布" onClick={() => void zoomOut({ duration: motionSafe ? 160 : 0 })} aria-label="缩小画布"><Minus size={17} /></button>
         <output aria-label="当前缩放比例">{Math.round(zoom * 100)}%</output>
         <button type="button" title="放大画布" onClick={() => void zoomIn({ duration: motionSafe ? 160 : 0 })} aria-label="放大画布"><Plus size={17} /></button>
         <i aria-hidden="true" />
-        <button type="button" title="画布设置" aria-expanded={menu === "settings"} onClick={() => onMenu("settings")} aria-label="画布设置"><Settings2 size={17} /></button>
-        <button type="button" title={miniMapOpen ? "隐藏小地图" : "显示小地图"} aria-pressed={miniMapOpen} onClick={onToggleMiniMap} aria-label={miniMapOpen ? "隐藏小地图" : "显示小地图"}><MapIcon size={17} /></button>
-        <button type="button" title="项目资料" aria-pressed={materialsOpen} onClick={onToggleMaterials} aria-label={`项目资料，${materialCount} 条`}><FolderOpen size={17} /></button>
-        <button type="button" title="切换工作区布局" onClick={onToggleLayout} aria-label="切换工作区布局"><PanelRightOpen size={18} /></button>
+        <button ref={materialsButtonRef} type="button" className="canvas-materials-button" title="项目资料" aria-pressed={materialsOpen} onClick={onToggleMaterials} aria-label={`项目资料，${materialCount} 条`}><FolderOpen size={17} /><span>资料</span></button>
+        <button type="button" className="canvas-view-button" title="视图与更多" aria-expanded={menu !== null} onClick={() => onMenu("settings")} aria-label="视图与更多"><Settings2 size={17} /><span>视图</span></button>
       </nav>
     </header>
   );
@@ -267,19 +246,27 @@ function CanvasViewMenu({
   nodes,
   backgroundStyle,
   backgroundTone,
+  layoutMode,
+  miniMapOpen,
   onClose,
   onArrange,
   onBackgroundStyle,
   onBackgroundTone,
+  onLayoutModeChange,
+  onToggleMiniMap,
 }: {
   menu: "arrange" | "settings" | null;
   nodes: WorkbenchNode[];
   backgroundStyle: CanvasBackgroundStyle;
   backgroundTone: CanvasBackgroundTone;
+  layoutMode: WorkbenchLayoutMode;
+  miniMapOpen: boolean;
   onClose: () => void;
   onArrange: (nodes: WorkbenchNode[]) => void;
   onBackgroundStyle: (style: CanvasBackgroundStyle) => void;
   onBackgroundTone: (tone: CanvasBackgroundTone) => void;
+  onLayoutModeChange: (mode: WorkbenchLayoutMode) => void;
+  onToggleMiniMap: () => void;
 }) {
   const { fitView } = useReactFlow();
   const motionSafe = typeof window === "undefined" || !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -310,6 +297,11 @@ function CanvasViewMenu({
   };
 
   if (!menu) return null;
+  const layoutOptions: Array<{ mode: WorkbenchLayoutMode; label: string }> = [
+    { mode: "canvas-only", label: "仅画布" },
+    { mode: "canvas-assistant", label: "画布 + 鑫小助" },
+    { mode: "assistant-only", label: "仅鑫小助" },
+  ];
   return <div className="canvas-view-menu-layer">
     <button type="button" tabIndex={-1} aria-label="关闭画布菜单" onClick={onClose} />
     <aside className={`canvas-view-menu is-${menu}`} aria-label={menu === "arrange" ? "整理画布" : "画布设置"}>
@@ -323,8 +315,11 @@ function CanvasViewMenu({
         </div>
         <button type="button" className="canvas-fit-action" onClick={() => { void fitView({ padding: 0.14, duration: motionSafe ? 240 : 0 }); onClose(); }}><Maximize2 size={16} />适配画布</button>
       </> : <>
+        <fieldset><legend>整理画布</legend><div className="canvas-view-arrange-grid">{(["type", "grid", "horizontal", "vertical"] as const).map((mode) => <button key={mode} type="button" onClick={() => arrange(mode)}>{mode === "type" ? "按类型" : mode === "grid" ? "网格" : mode === "horizontal" ? "水平" : "垂直"}</button>)}</div></fieldset>
         <fieldset><legend>背景</legend><div>{(["dots", "grid", "solid"] as const).map((style) => <button key={style} type="button" aria-pressed={backgroundStyle === style} onClick={() => onBackgroundStyle(style)}>{style === "dots" ? "点阵" : style === "grid" ? "网格" : "纯色"}</button>)}</div></fieldset>
         <fieldset><legend>色调</legend><div>{(["default", "warm", "cool"] as const).map((tone) => <button key={tone} type="button" aria-pressed={backgroundTone === tone} onClick={() => onBackgroundTone(tone)}><i className={`canvas-tone-swatch is-${tone}`} />{tone === "default" ? "默认" : tone === "warm" ? "暖灰" : "冷灰"}</button>)}</div></fieldset>
+        <fieldset><legend>工作区</legend><div className="canvas-view-layout-options">{layoutOptions.map((option) => <button key={option.mode} type="button" aria-pressed={layoutMode === option.mode} onClick={() => { onLayoutModeChange(option.mode); onClose(); }}>{option.label}</button>)}</div></fieldset>
+        <button type="button" className="canvas-view-toggle-map" aria-pressed={miniMapOpen} onClick={() => { onToggleMiniMap(); onClose(); }}><MapIcon size={15} />{miniMapOpen ? "隐藏小地图" : "显示小地图"}</button>
       </>}
     </aside>
   </div>;
@@ -400,7 +395,7 @@ function CanvasChrome({
 
   return <>
     <nav className="canvas-bottom-toolbar" aria-label="画布工具">
-      <button type="button" className="is-primary" onClick={() => { const canvas = document.querySelector(".content-canvas .react-flow")?.getBoundingClientRect(); const point = canvas ? screenToFlowPosition({ x: canvas.left + canvas.width / 2, y: canvas.top + canvas.height / 2 }) : { x: 720, y: 180 }; onAdd(point); }} aria-expanded={addOpen} aria-haspopup="dialog" title="添加到画布"><Plus size={18} /><span>添加</span></button>
+      <button type="button" className="is-primary" disabled={!editable} onClick={() => { const canvas = document.querySelector(".content-canvas .react-flow")?.getBoundingClientRect(); const point = canvas ? screenToFlowPosition({ x: canvas.left + canvas.width / 2, y: canvas.top + canvas.height / 2 }) : { x: 720, y: 180 }; onAdd(point); }} aria-expanded={addOpen} aria-haspopup="dialog" title={editable ? "添加到画布" : "当前权限只能查看画布"}><Plus size={18} /><span>添加</span></button>
       <button type="button" aria-pressed={activeTool === "select"} onClick={() => onTool("select")} title="选择卡片"><MousePointer2 size={17} /><span>选择</span></button>
       <button type="button" aria-pressed={activeTool === "pan"} onClick={() => onTool("pan")} title="拖动画布"><Hand size={17} /><span>移动</span></button>
       <i aria-hidden="true" />
@@ -410,10 +405,10 @@ function CanvasChrome({
 
     {addOpen ? <div className="canvas-add-layer">
       <button type="button" tabIndex={-1} aria-label="关闭添加到画布菜单" onClick={onCloseAdd} />
-      <aside role="dialog" aria-modal="false" aria-labelledby="canvas-add-title">
-        <header>{referenceMode ? <button type="button" aria-label="返回添加菜单" onClick={onBack}><ArrowLeft size={17} /></button> : null}<strong id="canvas-add-title">{referenceMode === "image" ? "选择图片" : referenceMode === "material" ? "选择资料" : "添加到画布"}</strong><button type="button" aria-label="关闭菜单" onClick={onCloseAdd}><X size={17} /></button></header>
-        {referenceMode ? <section className="canvas-reference-picker"><h3>{referenceMode === "image" ? "当前项目中的真实图片" : "当前项目资料"}</h3><div>{referenceOptions.map(({ source, asset }, index) => <button type="button" key={`${source.id}-${asset?.id ?? "material"}`} autoFocus={index === 0} onClick={() => onChooseSource(source, asset?.id)}><span aria-hidden="true">{referenceMode === "image" ? <ImageIcon size={17} /> : <Link2 size={17} />}</span><span><strong>{source.title}</strong><small>{source.sourcePlatform} · {source.sourceType}</small></span></button>)}</div>{referenceOptions.length === 0 ? <p>{referenceMode === "image" ? "当前项目还没有可引用的真实图片。" : "当前项目还没有资料。"}</p> : null}</section>
-          : addGroups.map((group) => group.label === "自由内容" && !editable ? null : <section key={group.label}><h3>{group.label}</h3><div>{group.items.map((item, index) => { const Icon = icons[item.kind]; return <button type="button" key={item.kind} autoFocus={group.label === "自由内容" && index === 0} onClick={() => onChoose(item.kind)}><span aria-hidden="true"><Icon size={17} /></span><span><strong>{item.title}</strong><small>{item.description}</small></span></button>; })}</div></section>)}
+          <aside role="dialog" aria-modal="false" aria-labelledby="canvas-add-title">
+            <header>{referenceMode ? <button type="button" aria-label="返回添加菜单" onClick={onBack}><ArrowLeft size={17} /></button> : null}<strong id="canvas-add-title">{referenceMode === "image" ? "选择图片" : referenceMode === "material" ? "选择资料" : "添加到画布"}</strong><button type="button" aria-label="关闭菜单" onClick={onCloseAdd}><X size={17} /></button></header>
+        {referenceMode ? <section className="canvas-reference-picker"><h3>{referenceMode === "image" ? "当前项目中的真实图片" : "当前项目资料"}</h3><div>{referenceOptions.map(({ source, asset }, index) => <button type="button" key={`${source.id}-${asset?.id ?? "material"}`} autoFocus={index === 0} onClick={() => onChooseSource(source, asset?.id)}><span aria-hidden="true">{referenceMode === "image" ? <ImageIcon size={17} /> : <Link2 size={17} />}</span><span><strong>{source.title}</strong><small>{employeeSourceMeta(source.sourceType, source.sourcePlatform)}</small></span></button>)}</div>{referenceOptions.length === 0 ? <p>{referenceMode === "image" ? "当前项目还没有可引用的真实图片。" : "当前项目还没有资料。"}</p> : null}</section>
+          : editable ? addGroups.map((group) => <section key={group.label}><h3>{group.label}</h3><div>{group.items.map((item, index) => { const Icon = icons[item.kind]; return <button type="button" key={item.kind} autoFocus={index === 0} onClick={() => onChoose(item.kind)}><span aria-hidden="true"><Icon size={17} /></span><span><strong>{item.title}</strong><small>{item.description}</small></span></button>; })}</div></section>) : <p className="canvas-add-readonly">当前权限只能查看画布内容。</p>}
       </aside>
     </div> : null}
   </>;
@@ -442,6 +437,26 @@ type CanvasSurfaceProps = {
   onContextKindChange?: (kind: CanvasContextKind) => void;
   onPlatform: (platform: string) => void;
 };
+
+function CanvasContextBar({ brief, sources, facts, methods, draft, onOpenContext, onOpenDraft }: {
+  brief: string[];
+  sources: string[];
+  facts: string[];
+  methods: string[];
+  draft: CanvasSurfaceProps["draft"];
+  onOpenContext: (kind: CanvasContextKind) => void;
+  onOpenDraft: () => void;
+}) {
+  const hasDraft = Boolean(draft.characters > 0 || draft.body.trim());
+  return <div className="canvas-context-bar" data-testid="canvas-context-bar" aria-label="项目上下文">
+    <span className="canvas-context-label">项目上下文</span>
+    <button type="button" className="canvas-context-chip is-topic" aria-label={`当前目标，${brief[0] || "尚未设置"}`} onClick={() => onOpenContext("brief")}><Target size={14} /><span><small>当前目标</small><strong>{brief[0] || "尚未设置"}</strong></span></button>
+    <button type="button" className="canvas-context-chip" aria-label={`资料，${sources.length ? `${sources.length} 条` : "暂无"}`} onClick={() => onOpenContext("sources")}><FileText size={14} /><span><small>资料</small><strong>{sources.length ? `${sources.length} 条` : "暂无"}</strong></span></button>
+    <button type="button" className="canvas-context-chip" aria-label={`已确认信息，${facts.length ? `${facts.length} 条` : "暂无"}`} onClick={() => onOpenContext("facts")}><ShieldCheck size={14} /><span><small>已确认信息</small><strong>{facts.length ? `${facts.length} 条` : "暂无"}</strong></span></button>
+    <button type="button" className="canvas-context-chip" aria-label={`方法，${methods.length ? methods[0] : "默认方式"}`} onClick={() => onOpenContext("methods")}><BookOpenCheck size={14} /><span><small>方法</small><strong>{methods.length ? methods[0] : "默认方式"}</strong></span></button>
+    {hasDraft ? <button type="button" className="canvas-context-chip is-draft" aria-label={`当前稿件，${draft.title || "未命名稿件"}`} onClick={onOpenDraft}><PencilLine size={14} /><span><small>当前稿件</small><strong>{draft.title || "未命名稿件"}</strong></span></button> : null}
+  </div>;
+}
 
 type CanvasCommand =
   | { type: "CREATE"; objectId: string }
@@ -489,7 +504,6 @@ function CanvasSurface({
   sources,
   facts,
   methods,
-  suggestions,
   draft,
   draftToolbar,
   draftEditor,
@@ -525,6 +539,7 @@ function CanvasSurface({
   const [viewRequest, setViewRequest] = useState<{ ids: string[]; revision: number; mode?: "fit" | "follow" } | null>(null);
   const [, setHistoryRevision] = useState(0);
   const workbenchRef = useRef<HTMLDivElement>(null);
+  const materialsButtonRef = useRef<HTMLButtonElement>(null);
   const assistantWidthRef = useRef<number | null>(null);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const viewReadyRef = useRef(false);
@@ -540,7 +555,7 @@ function CanvasSurface({
   const undoStackRef = useRef<CanvasCommand[]>([]);
   const redoStackRef = useRef<CanvasCommand[]>([]);
   const materialDropGuardRef = useRef(new Map<string, number>());
-  const storageKey = `content-canvas:${projectId}:v5`;
+  const storageKey = `content-canvas:${projectId}:v6`;
   const viewStorageKey = `content-canvas:${projectId}:view:v1`;
   const paneStorageKey = `studio-workbench-assistant-width:${projectId}:v1`;
 
@@ -564,36 +579,28 @@ function CanvasSurface({
   const [viewport, setViewport] = useState<Viewport>(savedLayout.viewport ?? DEFAULT_VIEWPORT);
   const activeTool: CanvasTool = spacePanning ? "pan" : toolMode;
   const referenceCount = [sources.length > 0, facts.length > 0, methods.length > 0].filter(Boolean).length;
+  const hasDraft = Boolean(draft.characters > 0 || draft.body.trim());
+  const nodeTypes = useMemo(() => ({ card: CanvasCard, free: CanvasFreeNode }), []);
 
   const templateNodes = useMemo<CanvasNode[]>(() => {
     const positions = savedLayout.nodes ?? {};
     const item = (id: string, position: { x: number; y: number }, data: CardData): CanvasNode => ({ id, type: "card", position: positions[id] ?? position, data });
-    const openContext = (kind: CanvasContextKind) => () => { onContextKindChange?.(kind); setContextOpen(true); };
-    const openAssistant = () => onLayoutModeChange("canvas-assistant");
-
-    return [
-      item("brief", { x: 48, y: 42 }, { kind: "brief", title: "创作目标", lines: brief, actionLabel: "查看目标", onAction: openContext("brief") }),
-      item("sources", { x: 22, y: 266 }, { kind: "sources", title: "参考素材", lines: sources, meta: `${sources.length} 条`, actionLabel: "管理素材", onAction: openContext("sources") }),
-      item("facts", { x: 30, y: 520 }, { kind: "facts", title: "我方依据", lines: facts, meta: `${facts.length} 条`, actionLabel: "核对依据", onAction: openContext("facts") }),
-      item("methods", { x: 410, y: 58 }, { kind: "methods", title: "方法", lines: methods, meta: `${methods.length} 个`, actionLabel: "选择方法", onAction: openContext("methods") }),
-      item("draft", { x: 350, y: 292 }, {
-        kind: "draft",
-        title: draft.title || "未命名稿件",
-        lines: [],
-        onFocus: () => setFocused(true),
-        onPlatform,
-        draft: { body: draft.body, version: draft.version, characters: draft.characters, status: "已保存" },
-      }),
-      item("suggestion", { x: 840, y: 326 }, {
-        kind: "suggestion",
-        title: "AI 建议",
-        lines: suggestions.length ? suggestions : ["选中稿件或内容卡片后，我会在这里给你建议。"],
-        meta: `${suggestions.length} 条`,
-        actionLabel: "打开鑫小助",
-        onAction: openAssistant,
-      }),
-    ];
-  }, [brief, draft, facts, methods, onContextKindChange, onLayoutModeChange, onPlatform, savedLayout.nodes, sources, suggestions]);
+    const overlapsAt = (position: { x: number; y: number }) => freeObjects.some((object) => position.x < object.positionX + object.width && position.x + 640 > object.positionX && position.y < object.positionY + object.height && position.y + 420 > object.positionY);
+    let draftPosition = { x: 96, y: 520 };
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      if (!overlapsAt(draftPosition)) break;
+      draftPosition = { x: draftPosition.x + 96, y: draftPosition.y + 72 };
+    }
+    const draftNode = item("draft", draftPosition, {
+      kind: "draft",
+      title: draft.title || "未命名稿件",
+      lines: [],
+      onFocus: () => setFocused(true),
+      onPlatform,
+      draft: { body: draft.body, version: draft.version, characters: draft.characters, status: draft.updated },
+    });
+    return hasDraft ? [{ ...draftNode, position: draftPosition }] : [];
+  }, [draft, freeObjects, hasDraft, onPlatform, savedLayout.nodes]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<WorkbenchNode>(templateNodes);
   const selectedNode = nodes.find((node) => node.selected);
@@ -605,7 +612,7 @@ function CanvasSurface({
 
   useEffect(() => {
     setNodes((current) => {
-      const systemNodes = templateNodes.map((next) => {
+      const draftNodes = templateNodes.map((next) => {
         const previous = current.find(({ id }) => id === next.id);
         return previous ? { ...next, position: previous.position, selected: previous.selected } : next;
       });
@@ -623,7 +630,7 @@ function CanvasSurface({
           data: { object, editable, editing: editingObjectId === object.id, saveState: saveStates[object.id] ?? "idle" },
         };
       });
-      return [...systemNodes, ...objectNodes];
+      return [...draftNodes, ...objectNodes];
     });
   }, [editable, editingObjectId, freeObjects, saveStates, selectedObjectId, setNodes, templateNodes]);
 
@@ -970,6 +977,9 @@ function CanvasSurface({
       if (event.key === "Escape") {
         setCanvasMenu(null);
         setLayoutMenuOpen(false);
+        setContextOpen(false);
+        setMaterialsOpen(false);
+        setMaterialDragging(false);
         return;
       }
       if (event.code !== "Space" || event.repeat || isEditableTarget(event.target)) return;
@@ -1039,7 +1049,32 @@ function CanvasSurface({
     window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>("[data-draft-edit]")?.focus());
   };
 
-  const openContext = (kind: CanvasContextKind) => { onContextKindChange?.(kind); setContextOpen(true); };
+  const openContext = (kind: CanvasContextKind) => {
+    onContextKindChange?.(kind);
+    setMaterialsOpen(false);
+    setMaterialDragging(false);
+    setCanvasMenu(null);
+    setLayoutMenuOpen(false);
+    setContextOpen(true);
+  };
+
+  const closeMaterials = () => {
+    setMaterialsOpen(false);
+    setMaterialDragging(false);
+    window.requestAnimationFrame(() => materialsButtonRef.current?.focus());
+  };
+
+  const toggleMaterials = () => {
+    if (materialsOpen) closeMaterials();
+    else { setContextOpen(false); setMaterialsOpen(true); setCanvasMenu(null); setLayoutMenuOpen(false); }
+  };
+
+  const clearSelection = () => {
+    setSelectedObjectId(null);
+    setEditingObjectId(null);
+    setFocused(false);
+    setNodes((current) => current.map((node) => node.selected ? { ...node, selected: false } : node));
+  };
 
   const chooseCard = (kind: CardKind) => {
     setNodes((current) => current.map((node) => ({ ...node, selected: node.id === kind })));
@@ -1053,6 +1088,9 @@ function CanvasSurface({
 
   const openAddMenu = useCallback((position: { x: number; y: number }, sourceObjectId?: string) => {
     insertPositionRef.current = { ...position, ...(sourceObjectId ? { sourceObjectId } : {}) };
+    setContextOpen(false);
+    setMaterialsOpen(false);
+    setMaterialDragging(false);
     setReferenceMode(null);
     setAddOpen(true);
   }, []);
@@ -1084,20 +1122,13 @@ function CanvasSurface({
     startEditing: (objectId: string) => { if (editable) { setSelectedObjectId(objectId); setEditingObjectId(objectId); } },
     stopEditing: (objectId: string) => { setEditingObjectId((current) => current === objectId ? null : current); if (textDraftsRef.current.has(objectId)) void flushTextRef.current(objectId); },
     retrySave: (objectId: string) => { void retryCanvasText(objectId); },
-    continueFrom: (objectId: string) => {
-      const object = freeObjectsRef.current.get(objectId);
-      if (object) openAddMenu({ x: object.positionX + object.width + 48, y: object.positionY }, objectId);
-    },
-    resizeObject: (objectId: string, layout: CanvasLayoutInput) => {
-      const object = freeObjectsRef.current.get(objectId);
-      if (object) void persistCanvasLayout(objectId, layout, objectLayout(object));
-    },
-  }), [changeCanvasText, deleteCanvasObject, editable, openAddMenu, persistCanvasLayout, retryCanvasText]);
+  }), [changeCanvasText, deleteCanvasObject, editable, retryCanvasText]);
 
   const paneStyle = {
     "--assistant-width": layoutMode === "canvas-assistant" ? (assistantWidth ? `${assistantWidth}px` : "30%") : "0px",
   } as CSSProperties;
   const backgroundColor = backgroundTone === "warm" ? "#ddcdb9" : backgroundTone === "cool" ? "#c8d9ee" : "#d9e2ef";
+  const canvasIsEmpty = freeObjects.length === 0 && !hasDraft;
 
   return (
     <div ref={workbenchRef} className={`content-workbench is-${layoutMode} tool-${activeTool} ${isResizing ? "is-resizing" : ""}`} data-layout={layoutMode} style={paneStyle}>
@@ -1108,14 +1139,14 @@ function CanvasSurface({
             projectTitle={projectTitle}
             saved={draft.updated}
             menu={canvasMenu}
-            miniMapOpen={miniMapOpen}
             materialsOpen={materialsOpen}
             materialCount={sourceOptions.length}
-            onMenu={(menu) => { setCanvasMenu((current) => current === menu ? null : menu); setLayoutMenuOpen(false); }}
-            onToggleMiniMap={() => setMiniMapOpen((current) => !current)}
-            onToggleLayout={() => { setLayoutMenuOpen((current) => !current); setCanvasMenu(null); }}
-            onToggleMaterials={() => { setMaterialsOpen((current) => !current); setCanvasMenu(null); setLayoutMenuOpen(false); }}
+            materialsButtonRef={materialsButtonRef}
+            onMenu={(menu) => { setCanvasMenu((current) => current === menu ? null : menu); setContextOpen(false); setMaterialsOpen(false); setMaterialDragging(false); setLayoutMenuOpen(false); }}
+            onToggleMaterials={toggleMaterials}
           />
+          <CanvasContextBar brief={brief} sources={sources} facts={facts} methods={methods} draft={draft} onOpenContext={openContext} onOpenDraft={() => setFocused(true)} />
+          {canvasIsEmpty ? <div className="canvas-empty-state" data-testid="canvas-empty-state"><span><FileText size={19} /></span><strong>画布暂时没有内容</strong><p>从一段文字或项目资料开始，内容会留在这里，方便继续创作。</p><div><button type="button" onClick={() => openAddMenu({ x: 320, y: 180 })} disabled={!editable}>添加内容</button><button type="button" onClick={() => { onContextKindChange?.("sources"); toggleMaterials(); }}>查看项目资料</button></div></div> : null}
           <ReactFlow
             nodes={nodes}
             edges={relationEdges}
@@ -1141,9 +1172,14 @@ function CanvasSurface({
                 const objectId = (node as FreeCanvasNode).data.object.id;
                 setEditingObjectId((current) => current === objectId ? current : null);
                 setSelectedObjectId(objectId);
-              } else {
-                setEditingObjectId(null);
+                setFocused(false);
+                setNodes((current) => current.map((item) => ({ ...item, selected: item.id === node.id })));
+              } else if (node.type === "card") {
                 setSelectedObjectId(null);
+                setEditingObjectId(null);
+                setNodes((current) => current.map((item) => ({ ...item, selected: item.id === node.id })));
+              } else {
+                clearSelection();
               }
             }}
             onNodeDoubleClick={(_event, node) => {
@@ -1168,8 +1204,7 @@ function CanvasSurface({
             }}
             onPaneClick={(event) => {
               if (Date.now() - lastNodeClickAtRef.current < 180 || (event.target instanceof Element && event.target.closest(".react-flow__node"))) return;
-              setSelectedObjectId(null);
-              setEditingObjectId(null);
+              clearSelection();
               if (event.detail !== 2 || !editable) return;
               const canvas = document.querySelector(".content-canvas .react-flow")?.getBoundingClientRect();
               if (!canvas) return;
@@ -1189,10 +1224,10 @@ function CanvasSurface({
             {backgroundStyle !== "solid" ? <Background variant={backgroundStyle === "grid" ? BackgroundVariant.Lines : BackgroundVariant.Dots} gap={backgroundStyle === "grid" ? 28 : 24} size={backgroundStyle === "grid" ? 0.7 : 1} color={backgroundColor} /> : null}
             {miniMapOpen ? <MiniMap pannable zoomable nodeStrokeWidth={2} ariaLabel="画布小地图" /> : null}
           </ReactFlow>
-          <ProjectMaterialsPanel open={materialsOpen} sources={sourceOptions} editable={editable} onClose={() => { setMaterialsOpen(false); setMaterialDragging(false); }} onAdd={(source, payload) => void addProjectMaterial(source, payload)} onDragState={setMaterialDragging} />
-          <CanvasViewMenu menu={canvasMenu} nodes={nodes} backgroundStyle={backgroundStyle} backgroundTone={backgroundTone} onClose={() => setCanvasMenu(null)} onArrange={handleArrange} onBackgroundStyle={setBackgroundStyle} onBackgroundTone={setBackgroundTone} />
+          <ProjectMaterialsPanel open={materialsOpen} sources={sourceOptions} editable={editable} onClose={closeMaterials} onAdd={(source, payload) => void addProjectMaterial(source, payload)} onDragState={setMaterialDragging} />
+          <CanvasViewMenu menu={canvasMenu} nodes={nodes} backgroundStyle={backgroundStyle} backgroundTone={backgroundTone} layoutMode={layoutMode} miniMapOpen={miniMapOpen} onClose={() => setCanvasMenu(null)} onArrange={handleArrange} onBackgroundStyle={setBackgroundStyle} onBackgroundTone={setBackgroundTone} onLayoutModeChange={onLayoutModeChange} onToggleMiniMap={() => setMiniMapOpen((current) => !current)} />
           <CanvasViewCoordinator request={viewRequest} onHandled={() => setViewRequest(null)} />
-          <CanvasChrome addOpen={addOpen} activeTool={activeTool} editable={editable} referenceMode={referenceMode} sourceOptions={sourceOptions} canUndo={editable && undoStackRef.current.length > 0} canRedo={editable && redoStackRef.current.length > 0} onAdd={(position) => openAddMenu(position)} onBack={() => setReferenceMode(null)} onCloseAdd={() => { setAddOpen(false); setReferenceMode(null); }} onChoose={chooseAddItem} onChooseSource={(source, sourceAssetId) => { setCanvasError(""); void createFreeObject(referenceMode === "image" ? "image" : "material", source, sourceAssetId).catch((error) => setCanvasError(error instanceof Error ? error.message : "节点创建失败。")); }} onUndo={() => void undoCanvas()} onRedo={() => void redoCanvas()} onTool={(tool) => { setToolMode(tool); setAddOpen(false); if (tool === "select") { setSelectedObjectId(null); setEditingObjectId(null); setNodes((current) => current.map((node) => ({ ...node, selected: false }))); } }} />
+          <CanvasChrome addOpen={addOpen} activeTool={activeTool} editable={editable} referenceMode={referenceMode} sourceOptions={sourceOptions} canUndo={editable && undoStackRef.current.length > 0} canRedo={editable && redoStackRef.current.length > 0} onAdd={(position) => openAddMenu(position)} onBack={() => setReferenceMode(null)} onCloseAdd={() => { setAddOpen(false); setReferenceMode(null); }} onChoose={chooseAddItem} onChooseSource={(source, sourceAssetId) => { setCanvasError(""); void createFreeObject(referenceMode === "image" ? "image" : "material", source, sourceAssetId).catch((error) => setCanvasError(error instanceof Error ? error.message : "节点创建失败。")); }} onUndo={() => void undoCanvas()} onRedo={() => void redoCanvas()} onTool={(tool) => { setToolMode(tool); setAddOpen(false); if (tool === "select") clearSelection(); }} />
           {canvasError ? <div className="canvas-operation-error" role="alert"><span>{canvasError}</span><button type="button" onClick={() => setCanvasError("")} aria-label="关闭错误提示"><X size={15} /></button></div> : null}
           </FreeNodeActionsProvider>
         </ReactFlowProvider>
@@ -1248,9 +1283,8 @@ function CanvasSurface({
       <WorkbenchLayoutMenu current={layoutMode} open={layoutMenuOpen} onClose={() => setLayoutMenuOpen(false)} onChange={onLayoutModeChange} />
 
       {contextOpen ? (
-        <div className="canvas-tools-layer">
-          <button type="button" aria-label="关闭当前创作内容" onClick={() => setContextOpen(false)} />
-          <aside>
+        <div className="canvas-tools-layer" onPointerDown={(event) => { if (event.target === event.currentTarget) setContextOpen(false); }}>
+          <aside role="dialog" aria-modal="false" aria-label="当前创作内容">
             <header><strong>当前创作内容</strong><button type="button" aria-label="关闭当前创作内容" onClick={() => setContextOpen(false)}><X size={18} /></button></header>
             {contextTools}
           </aside>

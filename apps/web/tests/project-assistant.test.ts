@@ -48,7 +48,7 @@ describe("Phase 10B project assistant", () => {
     expect(second.id).toBe(first.id);
     const events: AssistantStreamEvent[] = [];
     const completed = await runProjectAssistant({ workspaceId, userId: ownerId, projectId, content: "根据当前资料出几个选题", selectedObject: { objectType: "CANVAS_OBJECT", objectId: canvasObjectId, version: 1, ownership: "PENDING", whySelected: "当前选中" }, sourceItemIds: [sourceId] }, (event) => events.push(event), { runtime });
-    expect(completed).toMatchObject({ role: "ASSISTANT", status: "COMPLETED", resultType: "TOPIC", actions: ["TOPIC", "TEXT"] });
+    expect(completed).toMatchObject({ role: "ASSISTANT", status: "COMPLETED", resultType: "TOPIC", actions: ["TOPIC", "TEXT"], structuredResult: { type: "TOPIC", topics: expect.any(Array) } });
     expect(events.some(({ type }) => type === "delta")).toBe(true);
     expect(completed.sources).toEqual(expect.arrayContaining([expect.objectContaining({ title: "校长访谈整理", type: "项目资料" }), expect.objectContaining({ title: "当前选中的观点", type: "当前选中内容" })]));
     const stored = await db.assistantMessage.findUniqueOrThrow({ where: { id: completed.id }, include: { aiRun: true } });
@@ -62,19 +62,32 @@ describe("Phase 10B project assistant", () => {
     const message = await runProjectAssistant({ workspaceId, userId: ownerId, projectId, content: "帮我检查并整理这段表达" }, (event) => events.push(event), { runtime });
     expect(message.content).toContain("【需要确认】");
     expect(message.warnings.length).toBeGreaterThan(0);
+    expect(message.structuredResult).toMatchObject({ type: "CHECK", issues: expect.any(Array) });
     await expect(saveAssistantMessageResult({ workspaceId, userId: ownerId, projectId, messageId: message.id, action: "TEXT" })).rejects.toMatchObject({ code: "INVALID_INPUT" });
 
-    fixtureText = "选题一：校长为什么需要先讲真实问题。";
+    fixtureText = "选题一：校长为什么需要先讲真实问题。\n选题二：如何让家长听懂内容价值。\n选题三：把资料整理成可复用框架。";
     const topicMessage = await runProjectAssistant({ workspaceId, userId: ownerId, projectId, content: "根据当前项目给我一个选题" }, () => undefined, { runtime });
-    const text = await saveAssistantMessageResult({ workspaceId, userId: ownerId, projectId, messageId: topicMessage.id, action: "TEXT" });
-    expect(text.object).toMatchObject({ objectType: "TEXT", textContent: topicMessage.content });
-    const topic = await saveAssistantMessageResult({ workspaceId, userId: ownerId, projectId, messageId: topicMessage.id, action: "TOPIC" });
-    expect(topic.idea?.title).toBeTruthy();
+    expect(topicMessage.structuredResult).toMatchObject({ type: "TOPIC", topics: expect.arrayContaining([expect.objectContaining({ title: expect.stringContaining("如何让家长听懂") })]) });
+    const text = await saveAssistantMessageResult({ workspaceId, userId: ownerId, projectId, messageId: topicMessage.id, action: "TEXT", topicIndex: 1 });
+    expect(text.object).toMatchObject({ objectType: "TEXT", title: "如何让家长听懂内容价值。", textContent: "如何让家长听懂内容价值。" });
+    expect(text.object?.textContent).not.toContain("校长为什么需要先讲真实问题");
+    const topic = await saveAssistantMessageResult({ workspaceId, userId: ownerId, projectId, messageId: topicMessage.id, action: "TOPIC", topicIndex: 2 });
+    expect(topic.idea?.title).toBe("把资料整理成可复用框架。");
+    await expect(saveAssistantMessageResult({ workspaceId, userId: ownerId, projectId, messageId: topicMessage.id, action: "TEXT", topicIndex: 9 })).rejects.toMatchObject({ code: "INVALID_INPUT" });
     fixtureText = "这是一版新的候选口播稿。";
     const draftMessage = await runProjectAssistant({ workspaceId, userId: ownerId, projectId, content: "请写一版候选稿" }, () => undefined, { runtime });
     const draft = await saveAssistantMessageResult({ workspaceId, userId: ownerId, projectId, messageId: draftMessage.id, action: "DRAFT" });
     expect(draft.draft).toMatchObject({ isPrimary: false, workingState: { body: draftMessage.content } });
     await expect(saveAssistantMessageResult({ workspaceId, userId: viewerId, projectId, messageId: topicMessage.id, action: "TEXT" })).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+  });
+
+  it("returns rewrite and plain-text results through the same contract", async () => {
+    fixtureText = "原文：这段话有点绕。\n新版本：先说清楚，再补充细节。\n- 更直接";
+    const rewrite = await runProjectAssistant({ workspaceId, userId: ownerId, projectId, content: "请改写这段表达" }, () => undefined, { runtime });
+    expect(rewrite).toMatchObject({ resultType: "REWRITE", structuredResult: { type: "REWRITE", original: "这段话有点绕。", aiVersion: "先说清楚，再补充细节。" } });
+    fixtureText = "这是一条普通说明。";
+    const text = await runProjectAssistant({ workspaceId, userId: ownerId, projectId, content: "告诉我当前项目的状态" }, () => undefined, { runtime });
+    expect(text).toMatchObject({ resultType: "TEXT", structuredResult: { type: "TEXT", content: "这是一条普通说明。" } });
   });
 
   it("blocks unrelated questions before provider invocation and supports stop plus retry", async () => {
@@ -93,7 +106,7 @@ describe("Phase 10B project assistant", () => {
 
     fixtureText = "重试后已经完成。";
     const retried = await runProjectAssistant({ workspaceId, userId: ownerId, projectId, content: "根据项目给我下一步建议" }, () => undefined, { runtime });
-    expect(retried.status).toBe("COMPLETED");
+    expect(retried).toMatchObject({ status: "COMPLETED", resultType: "NEXT_STEP", structuredResult: { type: "NEXT_STEP" } });
   });
 
   it("keeps the additive thread/message migration contract", async () => {

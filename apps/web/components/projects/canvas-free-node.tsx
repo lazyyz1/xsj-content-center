@@ -1,11 +1,11 @@
 "use client";
 
-import { Handle, NodeResizer, Position, type Node, type NodeProps } from "@xyflow/react";
-import { FileText, ImageIcon, Link2, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
+import { FileText, ImageIcon, Link2, RotateCcw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { createContext, memo, useContext, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { employeeSourceMeta } from "@/lib/content-labels";
-import type { CanvasObjectDTO, CanvasLayoutInput } from "@/server/canvas/service";
+import type { CanvasObjectDTO } from "@/server/canvas/service";
 
 export type CanvasSaveState = "idle" | "dirty" | "saving" | "saved" | "save_failed" | "conflict";
 export type FreeCanvasNodeData = {
@@ -22,8 +22,6 @@ type FreeNodeActions = {
   startEditing: (objectId: string) => void;
   stopEditing: (objectId: string) => void;
   retrySave: (objectId: string) => void;
-  continueFrom: (objectId: string) => void;
-  resizeObject: (objectId: string, layout: CanvasLayoutInput) => void;
 };
 
 const FreeNodeActionsContext = createContext<FreeNodeActions | null>(null);
@@ -87,14 +85,6 @@ function FreeCanvasNodeView({ data, selected }: NodeProps<FreeCanvasNode>) {
   >
     <Handle type="target" position={Position.Left} isConnectable={false} className="canvas-system-handle" />
     <Handle type="source" position={Position.Right} isConnectable={false} className="canvas-system-handle" />
-    <NodeResizer
-      isVisible={selected && editable}
-      minWidth={object.objectType === "IMAGE_REFERENCE" ? 260 : 300}
-      minHeight={object.objectType === "IMAGE_REFERENCE" ? 190 : 180}
-      maxWidth={1_200}
-      maxHeight={1_600}
-      onResizeEnd={(_event, params) => actions.resizeObject(object.id, { positionX: params.x, positionY: params.y, width: params.width, height: params.height, zIndex: object.zIndex })}
-    />
     <header>
       <span aria-hidden="true">{object.objectType === "TEXT" ? <FileText size={17} /> : object.objectType === "IMAGE_REFERENCE" ? <ImageIcon size={17} /> : <Link2 size={17} />}</span>
       {editing ? <input className="nodrag nowheel" aria-label="文本标题" value={object.title ?? ""} maxLength={200} placeholder="未命名文本" onKeyDown={onEditorKeyDown} onChange={(event) => actions.changeText(object.id, { title: event.target.value, textContent: object.textContent ?? "" })} /> : <strong>{object.title || (object.objectType === "TEXT" ? "未命名文本" : reference?.sourceTitleSnapshot || "未命名资料")}</strong>}
@@ -113,8 +103,9 @@ function FreeCanvasNodeView({ data, selected }: NodeProps<FreeCanvasNode>) {
     /> : <button type="button" className="free-canvas-text nodrag" aria-label={`编辑 ${object.title || "未命名文本"}`} disabled={!editable} onClick={() => actions.startEditing(object.id)}>{object.textContent?.trim() || "点击开始输入内容"}</button> : null}
 
     {object.objectType === "MATERIAL_REFERENCE" && reference ? <div className="canvas-material-content">
+      <div className="canvas-material-heading"><strong>{reference.sourceTitleSnapshot || "项目资料"}</strong><span>{sourceMeta}</span></div>
       <p>{reference.excerpt || reference.sourceItem.description || "这是一条来自资料库的真实引用。"}</p>
-      <span>{sourceMeta}</span>
+      <small>可继续使用</small>
     </div> : null}
 
     {object.objectType === "IMAGE_REFERENCE" ? <CanvasImage object={object} /> : null}
@@ -127,7 +118,6 @@ function FreeCanvasNodeView({ data, selected }: NodeProps<FreeCanvasNode>) {
       {reference ? <Link className="nodrag" href={`/library/${reference.sourceItem.id}`}>打开资料</Link> : null}
     </footer>
 
-    {selected && editable ? <button className="nodrag canvas-node-plus" type="button" title="从这里继续添加内容" aria-label="从这里继续添加内容" onClick={() => actions.continueFrom(object.id)}><Plus size={17} /></button> : null}
   </article>;
 }
 
