@@ -2,14 +2,13 @@ import { randomUUID } from "node:crypto";
 import { QueueEvents } from "bullmq";
 import { describe, expect, it } from "vitest";
 import { createHealthQueue, createHealthWorker, SYSTEM_HEALTH_CHECK, SYSTEM_QUEUE } from "./queue";
+import { createRedisConnection } from "./redis-connection";
 
 describe("Redis / BullMQ integration", () => {
   it("moves a web-created health job through Redis to the worker", async () => {
     const queue = createHealthQueue();
     const worker = createHealthWorker();
-    const events = new QueueEvents(SYSTEM_QUEUE, {
-      connection: { host: "localhost", port: 6379 },
-    });
+    const events = new QueueEvents(SYSTEM_QUEUE, { connection: createRedisConnection() });
 
     try {
       await Promise.all([worker.waitUntilReady(), events.waitUntilReady()]);

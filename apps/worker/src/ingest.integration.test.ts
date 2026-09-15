@@ -6,6 +6,7 @@ import { buildSourceAssetObjectKey, minioStorageFromEnv, readSourceMetadataEnvel
 import { QueueEvents } from "bullmq";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONTENT_INGEST, CONTENT_INGEST_QUEUE, createContentIngestQueue, createContentIngestWorker } from "./queue";
+import { createRedisConnection } from "./redis-connection";
 
 describe("CONTENT_INGEST integration", () => {
   const originalEncryptionKey = process.env.INTEGRATION_ENCRYPTION_KEY;
@@ -17,7 +18,7 @@ describe("CONTENT_INGEST integration", () => {
   let transientRequests = 0;
   let redfoxRequests = 0;
   const worker = createContentIngestWorker();
-  const events = new QueueEvents(CONTENT_INGEST_QUEUE, { connection: { host: "localhost", port: 6379 } });
+  const events = new QueueEvents(CONTENT_INGEST_QUEUE, { connection: createRedisConnection() });
 
   beforeAll(async () => {
     process.env.INTEGRATION_ENCRYPTION_KEY = randomBytes(32).toString("base64");

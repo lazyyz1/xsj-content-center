@@ -5,6 +5,10 @@ process.env.INTEGRATION_ENCRYPTION_KEY ||= randomBytes(32).toString("base64");
 process.env.ALLOW_PUBLIC_SIGNUP ??= "true";
 process.env.SYSTEM_MANAGED_PROVIDERS ??= "false";
 
+if (process.env.ENVIRONMENT_ID !== "LOCAL_TEST") {
+  throw new Error("PLAYWRIGHT_ENVIRONMENT_GUARD_FAILED: E2E must run with ENVIRONMENT_ID=LOCAL_TEST");
+}
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
@@ -17,9 +21,9 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "pnpm dev",
+    command: "pnpm --filter @content-center/web dev",
     url: process.env.APP_URL ?? "http://localhost:3000",
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });

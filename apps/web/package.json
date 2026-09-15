@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint app components lib server tests e2e --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run tests",
+    "test": "vitest run tests --no-file-parallelism",
     "test:e2e": "playwright test",
     "admin:bootstrap": "tsx scripts/bootstrap-admin.ts"
   },

@@ -25,14 +25,15 @@
 ## First Run
 
 ```bash
-copy .env.example .env
+copy config\environments\local-real.env.example .env.local-real
 pnpm install
-docker compose -f docker-compose.dev.yml up -d
-pnpm db:migrate
-pnpm dev
+# The one-command local runtime: Docker infra + safe migration deploy + ASR + Worker + Web.
+pnpm dev:up
 ```
 
 Web 默认运行在 `http://localhost:3000`，MinIO Console 默认运行在 `http://localhost:9001`。
+
+`pnpm dev:up` 使用现有 `content-center_postgres_data`、`content-center_redis_data`、`content-center_minio_data` 持久卷，不执行 `down -v`、reset 或 seed 覆盖。`pnpm dev` / `pnpm dev:real` 只接受显式的 `.env.local-real`，不会再隐式加载根 `.env`；该文件不能指向 Render staging 或 native 临时 55432 cluster。测试使用独立的 `.env.local-test`，见 [`config/environments/README.md`](config/environments/README.md)。
 
 标准生产 Blueprint 设计为使用 Render Media Relay：Render Web 独占 Persistent Disk，Worker 通过受保护的内部 HTTP 流式读写；MinIO / S3-compatible（包括 R2 兼容配置）保留为可选部署模式。free-staging 配置不包含相同的独立 Worker/Persistent Disk 拓扑；当前实际平台绑定待核实。配置与安全边界见 [`docs/render-media-storage.md`](docs/render-media-storage.md) 和 [`docs/production-storage.md`](docs/production-storage.md)。
 
@@ -42,15 +43,19 @@ Web 默认运行在 `http://localhost:3000`，MinIO Console 默认运行在 `htt
 | --- | --- | --- |
 | Web | Next.js App Router | `3000` |
 | Worker | BullMQ 系统健康、内容采集与独立转写任务消费者 | 本机进程 |
-| PostgreSQL | Auth、Workspace、素材、采集任务、标签、Collection、AuditLog | `55432`（容器内 `5432`） |
-| Redis | BullMQ 队列 | `6379` |
-| MinIO | S3-compatible 对象存储 | `9000` / `9001` |
+| PostgreSQL | Auth、Workspace、素材、采集任务、标签、Collection、AuditLog | local-real Compose `55432`（容器内 `5432`）；local-test `55433` |
+| Redis | BullMQ 队列 | local-real Compose `6379`；local-test `6380` |
+| MinIO | S3-compatible 对象存储 | local-real Compose `9000` / `9001`；local-test `9002` / `9003` |
 | Local ASR | localhost-only FunASR 语音转写 | `8765` |
 
 ## Commands
 
 ```bash
-pnpm dev
+pnpm dev:up
+pnpm run doctor
+pnpm dev:down
+
+pnpm dev:real
 pnpm dev:web
 pnpm dev:worker
 pnpm dev:asr
@@ -60,8 +65,8 @@ pnpm asr:benchmark
 
 pnpm lint
 pnpm typecheck
-pnpm test
-pnpm test:e2e
+pnpm test:isolated
+pnpm test:e2e:isolated
 pnpm build
 
 pnpm db:generate

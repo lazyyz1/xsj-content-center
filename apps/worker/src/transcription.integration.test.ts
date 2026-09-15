@@ -16,6 +16,7 @@ import {
   TRANSCRIBE_SOURCE,
   TRANSCRIBE_SOURCE_QUEUE,
 } from "./queue";
+import { createRedisConnection } from "./redis-connection";
 import { requestSourceTranscription, resolveWorkspaceTranscriptionPlan, TranscriptionAlreadyRunningError } from "./transcription";
 
 const execFileAsync = promisify(execFile);
@@ -33,7 +34,7 @@ describe("TRANSCRIBE_SOURCE integration", () => {
   let fixtureMode: "SUCCESS" | "EMPTY" = "SUCCESS";
   let completedSourceId = "";
   const worker = createTranscribeSourceWorker();
-  const events = new QueueEvents(TRANSCRIBE_SOURCE_QUEUE, { connection: { host: "localhost", port: 6379 } });
+  const events = new QueueEvents(TRANSCRIBE_SOURCE_QUEUE, { connection: createRedisConnection() });
 
   beforeAll(async () => {
     process.env.INTEGRATION_ENCRYPTION_KEY = randomBytes(32).toString("base64");
