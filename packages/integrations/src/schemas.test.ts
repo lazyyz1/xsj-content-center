@@ -20,10 +20,11 @@ describe("provider config schemas", () => {
     const parsed = parseProviderConfig("DOUBAO_ASR", {
       authMode: "API_KEY",
       apiKey: "fake-api-key",
+      protocol: "RECORDING_FILE_2_0",
       boostingTableId: "table-id",
     });
     const split = splitProviderConfig("DOUBAO_ASR", parsed);
-    expect(split.publicConfig).toMatchObject({ authMode: "API_KEY", resourceId: "volc.bigasr.auc_turbo", boostingTableId: "table-id" });
+    expect(split.publicConfig).toMatchObject({ authMode: "API_KEY", resourceId: "volc.bigasr.auc_turbo", protocol: "RECORDING_FILE_2_0", boostingTableId: "table-id" });
     expect(split.secretConfig).toEqual({ apiKey: "fake-api-key" });
   });
 

@@ -140,9 +140,14 @@ export class IntegrationService {
     const existing = await this.prisma.integrationConfig.findUnique({
       where: { workspaceId_provider: { workspaceId: input.workspaceId, provider: input.provider } },
     });
-    const { publicConfig, secretConfig: suppliedSecrets } = splitProviderConfig(input.provider, parsed);
+    const { publicConfig: parsedPublicConfig, secretConfig: suppliedSecrets } = splitProviderConfig(input.provider, parsed);
     const existingSecrets = existing?.encryptedConfig && key ? decryptConfig(existing.encryptedConfig, key) : {};
     const existingPublicConfig = existing ? normalizePublicProviderConfig(input.provider, jsonObject(existing.publicConfig)) : {};
+    const publicConfig = input.provider === "DOUBAO_ASR"
+      && parsedPublicConfig.protocol === undefined
+      && (existingPublicConfig.protocol === "FLASH" || existingPublicConfig.protocol === "RECORDING_FILE_2_0")
+      ? { ...parsedPublicConfig, protocol: existingPublicConfig.protocol }
+      : parsedPublicConfig;
     const llmProviderChanged = input.provider === "LLM" && existing && existingPublicConfig.provider !== publicConfig.provider;
     const secretConfig = { ...(llmProviderChanged ? {} : existingSecrets), ...suppliedSecrets };
     const combinedConfig = { ...publicConfig, ...secretConfig };

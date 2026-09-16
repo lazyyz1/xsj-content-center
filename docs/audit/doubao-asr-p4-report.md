@@ -1,7 +1,7 @@
 # 鑫世界 Studio P4：Doubao ASR 诊断与验证报告
 
-- 检查日期：2026-09-16
-- 项目基线：`ebea1dfd9dafc80e86bd353850c60dbcebf136a6`
+- 检查日期：2026-09-17
+- 项目基线：`13c649015641c35a464f40fa70bcffca49407ffc`
 - 分支：`feat/production-readiness-v1b`
 - 检查范围：真实运行环境与真实数据库只读审查、代码路径审查、隔离测试验证
 - 本轮结论：未修改转录架构，未删除 Local FunASR，未提交或推送
@@ -9,10 +9,25 @@
 ## 结论摘要
 
 1. 历史 Doubao 真实失败的主因是 provider 授权边界拒绝，不是 Workspace 配置缺失，也不是本地无法连接。13 次失败都有 provider request id，且 API Usage 记录了 `statusCode=45000030`；当前代码只有在 HTTP 403 分支才映射为 `DOUBAO_PERMISSION_DENIED`。
-2. 另有 1 次独立的音频地址前置失败：当前 LOCAL_REAL 使用本机 MinIO，签名 URL 的 origin 是 `http://127.0.0.1:9000`，被公网地址安全检查判定为 `SSRF_BLOCKED`。该请求没有到达豆包。
-3. Workspace 的 Doubao 配置当前存在且可以解密：`API_KEY`、`https://openspeech.bytedance.com`、`volc.bigasr.auc_turbo`。凭证形态与当前 Flash client 的 header 分支匹配；但“该 key 是否被授予该 resource/service”不能仅由本地配置证明，历史真实响应已经证明授权仍未通过。
-4. “资料 → 视频 → FFmpeg 音频 → 存储 → Doubao → Transcript”的代码链在隔离环境中完整通过；LOCAL_REAL 当前不能宣称真实成功，因为仍被 Doubao 授权和公网音频两个前置条件阻断。
-5. Local FunASR 保留为 Transitional：用于本地开发、诊断和显式 fallback，不代表未来生产主路径。当前 `鑫世界` Workspace 已明确选择 `DOUBAO`，且 `fallbackToDoubao=false`。
+2. 另有 1 次历史的音频地址前置失败：当时 LOCAL_REAL 使用本机 MinIO，签名 URL 的 origin 是 `http://127.0.0.1:9000`，被公网地址安全检查判定为 `SSRF_BLOCKED`。该请求没有到达豆包。
+3. Workspace 的 Doubao 配置当前仍存在且可以解密：`API_KEY`、`https://openspeech.bytedance.com`、`RECORDING_FILE_2_0`、`volc.seedasr.auc`；当前 `TRANSCRIPTION` 已切回 `LOCAL_FUNASR`，所以 LOCAL_REAL 不会调用它。
+4. “资料 → 视频 → FFmpeg 音频 → 存储 → Local FunASR → Transcript”的 LOCAL_REAL 链路已真实通过；Doubao 生产链路保留，但公网 Relay 和真实云端 smoke 延后到生产就绪阶段。
+5. Local FunASR 作为 LOCAL_REAL 的本地开发主路径已真实通过；生产主路径仍为 Doubao Recording File 2.0，当前公网 Relay 与云端 smoke 延后到生产就绪阶段。
+
+## Current Phase Decision
+
+当前 P4 收口策略已经明确：
+
+- Development / LOCAL_REAL：`Local FunASR` primary；本地资料转写使用 `http://127.0.0.1:8765`，不要求公网 URL，也不调用 Doubao。
+- Production：`Doubao Recording File 2.0` primary，Resource ID 为 `volc.seedasr.auc`。
+- Local FunASR role：`DEV_FALLBACK`；生产环境不允许静默 fallback。
+
+以下事项统一标记为 `DEFERRED_TO_PRODUCTION_READINESS`，这不是失败或取消：
+
+- Render Media Relay 部署
+- 公网 signed media URL 验证
+- Doubao Recording File 2.0 real smoke
+- Production Worker → Transcript end-to-end 验证
 
 ## 1. 真实环境启动与健康检查
 
@@ -101,64 +116,58 @@ pnpm run doctor
 | 配置 | 当前值/状态 |
 | --- | --- |
 | `TRANSCRIPTION` | `CONFIGURED` |
-| 转写来源 | `DOUBAO` |
+| 转写来源 | `LOCAL_FUNASR` |
 | quality | `BALANCED` |
 | selection | `AUTO` |
 | fallback | `false` |
 | `DOUBAO_ASR` | `CONFIGURED` |
 | auth mode | `API_KEY` |
 | base URL origin | `https://openspeech.bytedance.com` |
-| resource id | `volc.bigasr.auc_turbo` |
+| protocol | `RECORDING_FILE_2_0` |
+| resource id | `volc.seedasr.auc` |
 | 加密配置 | 可解密，secret keys 只有 `apiKey` |
 | app/access token | 未使用 |
 
 这说明：
 
 - Workspace 配置存在；
+- LOCAL_REAL 当前明确选择 `LOCAL_FUNASR`，不会因为 Doubao 配置存在而自动调用云端；
 - 加密配置可用；
 - `API_KEY` 形态与当前 client 的 `X-Api-Key` 分支一致；
-- 不是因为 app/token 与 API key 两套鉴权字段被混用而失败；
-- resource id 已配置，但本地配置本身不能证明豆包账号拥有该 resource 的实际服务授权。
+- Doubao 的标准版 Resource ID 已保留为 `volc.seedasr.auc`，但本阶段不发起真实云端请求；
+- 保存的 Doubao API Key 没有删除或替换。
 
 System Configuration 里另有一条配置，但当前 `SYSTEM_MANAGED_PROVIDERS=false`，不会被本次 LOCAL_REAL Workspace 路径采用，不能把它误认为当前生效配置。
 
 ## 4. Doubao Provider 实现核对
 
-### 当前 Workspace 实际走的接口
+### LOCAL_REAL 当前实际走的接口
 
-Workspace DB schema 没有保存 `protocol` 字段。`loadDoubaoConfig()` 只有在解密配置中明确出现 `protocol=RECORDING_FILE_2_0` 时才选择录音文件识别 2.0；当前 Workspace 配置没有该字段，所以当前计划解析为 `FLASH`。
+当前 Workspace 的 `TRANSCRIPTION.source=LOCAL_FUNASR`，`resolveWorkspaceTranscriptionPlan()` 先检查本地 ASR 健康状态和模型策略，再由 Worker 选择 `LocalFunASRTranscriptionProvider`。该路径使用本地二进制音频，不需要公网 URL，也不调用 Doubao。
 
-实际路径为：
+本次 LOCAL_REAL smoke 已通过：
 
 ```text
-POST https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash
+SourceItem → STORED VIDEO → FFmpeg → MinIO → TRANSCRIBE_SOURCE
+→ Worker → Local FunASR → Transcript
 ```
 
-请求方式和鉴权：
+### Production 保留的 Doubao 路径
 
-- method：`POST`
-- content type：`application/json`
-- API key 模式：`X-Api-Key`、`X-Api-Resource-Id`
-- legacy app/token 模式才使用 `X-Api-App-Key`、`X-Api-Access-Key`
-- request：`model_name=bigmodel`、`show_utterances=true`
-- 音频输入：公网 URL 或 base64 二进制数据
-- 成功状态：HTTP OK 且 `X-Api-Status-Code=20000000`
-- 结果：解析 `result.text` 与 utterances，再写入 Transcript
-
-代码位置：
-
-- `packages/providers/src/doubao/client.ts`
-- `packages/providers/src/doubao/recording-file-client.ts`
-- `apps/worker/src/transcription.ts`
-
-录音文件识别 2.0 的另一条实现使用：
+生产 system-managed 路径保留 `DoubaoRecordingFileClient`，使用：
 
 ```text
 POST /api/v3/auc/bigmodel/submit
 POST /api/v3/auc/bigmodel/query
 ```
 
-该 client 强制要求 `REMOTE_URL`，不接受二进制输入，并带有提交后轮询机制。它是 system-managed `RECORDING_FILE_2_0` 路径，不是当前 Workspace 这次历史 `TRANSCRIBE_FLASH` 记录所走的接口。
+该 client 强制要求 `REMOTE_URL`，不接受二进制输入，并带有提交后轮询机制。Resource ID 固定使用 `volc.seedasr.auc`。当前 LOCAL_REAL 不调用这条路径；公网 Relay 和真实云端 smoke 延后到生产就绪阶段。
+
+代码位置：
+
+- `packages/providers/src/doubao/client.ts`
+- `packages/providers/src/doubao/recording-file-client.ts`
+- `apps/worker/src/transcription.ts`
 
 ### 错误映射
 
@@ -215,11 +224,11 @@ resolvePublicAddress=BLOCKED / SSRF_BLOCKED
    - Worker 到 Web 配置可达的 `MEDIA_RELAY_INTERNAL_BASE_URL`（必要时配置 `MEDIA_RELAY_BASE_URL`）
    - 由 `/api/media/<token>?purpose=doubao` 提供带 `purpose=doubao` 绑定的临时 URL
 
-当前本地 `APP_URL=http://127.0.0.1:3000` 和本地 MinIO 只适合开发/隔离验证，不足以验证真实豆包下载能力。
+当前本地 `APP_URL=http://localhost:3000` 和本地 MinIO 只适合本地开发，不足以验证真实豆包下载能力；本阶段不提前部署公网 Relay。
 
 ## 6. “资料 → 音频 → 豆包 → Transcript”代码链
 
-当前生产入口与 Worker 顺序如下：
+当前生产入口与 Worker 的两种策略如下：
 
 ```text
 POST /api/source-items/[id]/transcribe
@@ -230,9 +239,9 @@ POST /api/source-items/[id]/transcribe
   → FFmpeg 从视频生成 audio/mpeg
   → storage.upload()
   → storage.getSignedUrl()
-  → doubaoAudioInput()
-  → Doubao Flash client 或 Recording File 2.0 client
-  → normalizeDoubaoTranscript()
+  → LOCAL_REAL: localAudioInput() → Local FunASR
+  → PRODUCTION: doubaoAudioInput() → Recording File 2.0
+  → normalize transcript
   → upsert Transcript
   → IngestJob=SUCCEEDED
 ```
@@ -243,21 +252,19 @@ POST /api/source-items/[id]/transcribe
 - 其中 `runs VIDEO STORED through FFmpeg, MinIO, Doubao and Transcript` 通过；
 - provider 套件：24 个测试文件、156 个测试全部通过；
 - 全仓 `pnpm test`：56 个测试文件中 55 个通过，唯一失败仍是既有 `apps/web/tests/studio-default-method.test.ts` 的 Canvas 文案 stale assertion（`参考素材`），不属于 P4；
-- 这证明代码链具备完成能力，但 fixture 使用隔离 provider，不等于当前 Doubao 账号已经真实成功。
+- LOCAL_REAL 短 fixture smoke：`IngestJob=SUCCEEDED`，`Transcript.provider=LOCAL_FUNASR`、`providerMode=REAL`，文本非空，当前 Job 的 Doubao usage 为 0；
+- 这证明本地开发主路径已经真实可用，但不等于 Doubao 生产权限和公网媒体链路已经验证。
 
-本轮没有使用真实 SourceItem 发起重转：当前真实库没有可复用的 `STORED` 音频候选，Doubao 失败音频均为 `FAILED` 且没有 `storageKey`；历史 13 次真实 403 已足以证明当前权限阻塞，额外重试会制造新的真实 Job/审计记录和新的 provider 请求，没有必要。
+本轮没有对现有业务 SourceItem 发起重转；LOCAL_REAL smoke 使用独立的短非敏感 fixture，验证后已清理。当前真实库中 Doubao 失败音频均为 `FAILED` 且没有 `storageKey`；历史 13 次真实 403 已足以证明云端路径不应在本地阶段重复调用。
 
 ## 7. Local FunASR 的角色
 
-Local FunASR 的长期角色应定为：
+- Development / LOCAL_REAL：`Local FunASR primary`；
+- Production：`Doubao Recording File 2.0 primary`；
+- Local FunASR role：`DEV_FALLBACK`；生产环境不允许静默 fallback；
+- 本轮没有删除或修改 Local FunASR 实现。
 
-- `TRANSITIONAL`
-- 本地开发与链路诊断
-- Doubao 尚未完成授权/公网存储配置时的恢复路径
-- 仅在 Workspace 明确选择或启用 fallback 时运行
-- 不作为未来正式生产默认 provider
-
-本轮没有删除 Local FunASR，也没有修改其实现。当前真实数据中的 11 条成功记录应继续保留，直到 Doubao 在目标环境完成一次真实成功并确认公网音频下载链路稳定。
+当前真实数据中的 11 条成功记录继续保留。
 
 ## 8. Verification
 
@@ -270,12 +277,14 @@ Local FunASR 的长期角色应定为：
 | Doubao provider tests | 24/24 files、156/156 tests 通过 |
 | Worker transcription integration | 14/14 files、124/124 tests 通过 |
 | `pnpm test` | 55/56 files、282/283 tests 通过；唯一为既有 Canvas stale assertion |
+| LOCAL_REAL local smoke | 通过；`LOCAL_FUNASR / REAL`、Transcript 非空、当前 Job 无 Doubao usage |
 | `git diff --check` | 通过 |
-| LOCAL_REAL 数据库 | 只读审查；没有发起真实重转 |
+| Doubao real smoke | 延后；未发起真实云端请求 |
 
 ## 9. Data Safety
 
-- 没有写入 LOCAL_REAL 业务数据；调查 SQL 在 read-only transaction 中执行并回滚；
+- 通过现有 `IntegrationService` 只更新了 LOCAL_REAL Workspace 的 `TRANSCRIPTION` 非 Secret 策略为 `LOCAL_FUNASR`；Doubao `DOUBAO_ASR` 配置和加密 API Key 保留；
+- 本地 smoke 使用短的非敏感 fixture，验证后删除了对应 SourceItem、SourceAsset、IngestJob、Transcript、API Usage、审计记录和 MinIO 对象；
 - `pnpm dev:up` 调用了项目既定的 `pnpm db:migrate` 检查，报告 `45 migrations found`、`No pending migrations to apply`，没有新增迁移执行；
 - 没有修改 Prisma Schema；
 - 没有修改 migration；
@@ -284,12 +293,17 @@ Local FunASR 的长期角色应定为：
 - 没有删除历史文件；
 - 没有删除 Local FunASR；
 - 隔离测试使用独立 `LOCAL_TEST` 数据库 `content_center_test`、Redis `6380`、MinIO `9002`，测试数据只属于测试环境；
-- 临时只读审计脚本已删除；`apps/web/next-env.d.ts` 被开发服务器短暂改写后已恢复，当前没有留下产品代码改动。
+- 临时审计和 smoke 脚本已删除；`apps/web/next-env.d.ts` 被开发服务器短暂改写后已恢复。
 
-## 10. P4 后续最小前置条件
+## 10. Deferred Until Production Readiness
 
-本轮不执行产品代码重构。要让 Doubao 真实成功，下一次变更前只需要先在外部配置侧确认：
+本轮不推进公网 Relay，也不执行 Doubao 真实请求。正式上线时依次完成：
 
-1. 豆包账号/key 对 `volc.bigasr.auc_turbo` 与当前 Flash 接口的授权；
-2. 真实部署使用公网可下载的音频 URL，或启用配置完整的 Render Media Relay；
-3. 用一个明确授权的、单个现有视频做一次真实验证，确认返回成功后再评估是否将 Local FunASR 降级为纯 fallback。
+1. 配置 Production Secrets；
+2. 部署或启用现有 Render Media Relay；
+3. 验证公网 signed audio URL；
+4. 执行一次 Doubao Recording File 2.0 real smoke；
+5. 执行 Worker → Transcript end-to-end；
+6. 确认 `provider=DOUBAO_ASR` 后，再允许正式员工使用云端转写。
+
+当前状态：`DEFERRED_TO_PRODUCTION_READINESS`。

@@ -25,6 +25,16 @@ SYSTEM_MANAGED_PROVIDERS=false
 
 不要把 `DOUBAO_API_KEY` 写入 `.env.local-real` 后期待它覆盖当前 Workspace 配置。只有开启 system-managed 模式时，环境变量 Provider 才会生效。
 
+P4 收口后的 LOCAL_REAL 当前策略为：
+
+```text
+TRANSCRIPTION.source=LOCAL_FUNASR
+TRANSCRIPTION.fallbackToDoubao=false
+TRANSCRIPTION.endpoint=http://127.0.0.1:8765
+```
+
+Doubao `DOUBAO_ASR` 配置仍保留在 Workspace 中，当前非 Secret 配置为 `API_KEY`、`https://openspeech.bytedance.com`、`RECORDING_FILE_2_0`、`volc.seedasr.auc`；本地策略不会因为该配置存在而调用 Doubao。
+
 ### LOCAL_TEST
 
 测试环境使用 `.env.local-test`，必须连接独立的测试数据库、Redis 和 MinIO：
@@ -51,13 +61,30 @@ SYSTEM_MANAGED_PROVIDERS=true
 ```text
 TRANSCRIPTION_PRIMARY=DOUBAO_RECORDING_FILE_2_0
 DOUBAO_ASR_BASE_URL=https://openspeech.bytedance.com
-DOUBAO_ASR_RESOURCE_ID=<由豆包控制台确认的 Recording File 2.0 Resource ID>
+DOUBAO_ASR_RESOURCE_ID=volc.seedasr.auc
 DOUBAO_API_KEY=<通过部署平台 Secret 注入>
 ```
 
 也可以使用兼容旧配置的 `DOUBAO_APP_ID` + `DOUBAO_ACCESS_TOKEN`，但新部署优先使用 API Key。两种认证方式不要混填后自行猜测优先级。
 
 真实 Secret 必须来自 Render / Server Environment Secret 或部署平台的 Secret Manager。不得写入 Git、镜像源码、seed、前端 bundle 或公开文档。
+
+## Current Phase Decision
+
+当前阶段正式收口为：
+
+- Development / LOCAL_REAL：Local FunASR primary；
+- Production：Doubao Recording File 2.0 primary；
+- Local FunASR role：`DEV_FALLBACK`；生产环境不允许静默 fallback。
+
+以下任务状态为 `DEFERRED_TO_PRODUCTION_READINESS`，不是失败或取消：
+
+- Render Media Relay 部署；
+- 公网 signed media URL 验证；
+- Doubao Recording File 2.0 real smoke；
+- Production Worker → Transcript end-to-end 验证。
+
+正式上线时必须依次完成：配置 Production Secrets、部署或启用 Media Relay、验证公网 signed audio URL、执行 Doubao real smoke、执行 Worker → Transcript end-to-end，并确认 `provider=DOUBAO_ASR` 后再开放正式云端转写。
 
 ## 2. 系统 Provider 的读取优先级
 
@@ -95,9 +122,11 @@ LOCAL_REAL 当前使用：
 ```text
 STORAGE_DRIVER=S3_COMPATIBLE
 S3_ENDPOINT=http://127.0.0.1:9000
+TRANSCRIPTION.source=LOCAL_FUNASR
+TRANSCRIPTION.fallbackToDoubao=false
 ```
 
-这只适合本机开发。Flash client 支持小音频二进制上传，当前代码在公网 URL 检查失败且音频不超过 20 MiB 时可以退回二进制；超过上限会得到 `ASR_AUDIO_NOT_PUBLICLY_REACHABLE`。
+这只适合本机开发。LOCAL_REAL 使用 Local FunASR 的本地二进制音频路径，不要求公网 URL，也不会调用 Doubao 或产生 Doubao 费用。本阶段不提前部署公网 Relay。
 
 ### PRODUCTION 的推荐状态
 
@@ -164,8 +193,8 @@ MEDIA_RELAY_SIGNING_SECRET=<Secret>
 2. 语音识别产品已开通；
 3. 目标 Resource ID 已开通并绑定到当前应用 / 凭证；
 4. Resource ID 与当前 API 类型一致：
-   - Workspace 当前历史路径是 Flash：`volc.bigasr.auc_turbo` 仅能在控制台确认后继续使用；
-   - Production system-managed 路径固定为 Recording File 2.0，必须使用控制台确认的对应 Resource ID；
+   - LOCAL_REAL 当前使用 Local FunASR；Workspace 中保留的 Doubao 配置为 Recording File 2.0、`volc.seedasr.auc`；
+   - Production system-managed 路径固定为 Recording File 2.0，Resource ID 为 `volc.seedasr.auc`；
 5. 当前凭证类型与代码一致：API Key 使用 API Key；旧版认证才使用 App ID + Access Token；
 6. `statusCode=45000030` 对应的服务授权、resource entitlement 和账号绑定已检查；
 7. 没有把“Key 存在”误认为“服务已授权”。

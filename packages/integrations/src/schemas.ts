@@ -20,6 +20,7 @@ const optionalUrl = z.preprocess(
 export const DOUBAO_DEFAULT_BASE_URL = "https://openspeech.bytedance.com";
 export const DOUBAO_DEFAULT_RESOURCE_ID = "volc.bigasr.auc_turbo";
 export const DOUBAO_AUTH_MODES = ["API_KEY", "LEGACY_APP_TOKEN"] as const;
+export const DOUBAO_PROTOCOLS = ["FLASH", "RECORDING_FILE_2_0"] as const;
 export const TRANSCRIPTION_SOURCES = ["LOCAL_FUNASR", "DOUBAO"] as const;
 export const TRANSCRIPTION_QUALITY_MODES = ["FAST", "BALANCED", "QUALITY"] as const;
 export const TRANSCRIPTION_MODEL_SELECTION_MODES = ["AUTO", "MANUAL"] as const;
@@ -46,6 +47,7 @@ export const doubaoAsrConfigSchema = z
     appId: optionalText(500),
     accessToken: optionalText(10_000),
     resourceId: optionalText(500),
+    protocol: z.enum(DOUBAO_PROTOCOLS).optional(),
     boostingTableId: optionalText(500),
     boostingTableName: optionalText(500),
   })
@@ -135,7 +137,7 @@ export const providerConfigFields: Record<
 > = {
   REDFOX: { publicFields: ["baseUrl"], secretFields: ["apiKey"], primarySecret: "apiKey" },
   DOUBAO_ASR: {
-    publicFields: ["authMode", "baseUrl", "appId", "resourceId", "boostingTableId", "boostingTableName"],
+    publicFields: ["authMode", "baseUrl", "appId", "resourceId", "protocol", "boostingTableId", "boostingTableName"],
     secretFields: ["apiKey", "accessToken"],
     primarySecret: "apiKey",
   },
