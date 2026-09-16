@@ -144,9 +144,9 @@ test("RedFox saved video automatically becomes a real Doubao transcript", async 
   await page.getByRole("button", { name: "抖音视频" }).click();
   await page.getByLabel("抖音分享链接或分享文案").fill(douyinUrl);
   await page.getByRole("button", { name: "提交收录" }).click();
-  await page.getByRole("link", { name: "查看素材" }).click();
+  await page.getByRole("link", { name: "查看资料" }).click();
 
-  await expect(page.getByRole("heading", { name: "转写文本" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "文字稿" })).toBeVisible({ timeout: 30_000 });
   await page.getByRole("tab", { name: "处理", exact: true }).click();
   await expect(page.getByRole("heading", { name: "处理进度" })).toBeVisible();
   await expect(page.getByText("豆包真实转写已完成。", { exact: true })).toBeVisible({ timeout: 30_000 });

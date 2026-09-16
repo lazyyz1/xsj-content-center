@@ -183,7 +183,7 @@ describe("published workspace default method in Studio", () => {
 
   it("shows employee-facing project assistant actions without engineering language", async () => {
     const component = await readFile(new URL("../components/projects/studio-default-method.tsx", import.meta.url), "utf8");
-    for (const label of ["从当前项目继续", "添加引用", "保存为文本", "保存为选题", "创建候选稿", "需要确认", "来源", "当前 AI 服务暂时不可用，请稍后再试。"]) expect(component).toContain(label);
+    for (const label of ["继续当前创作", "添加引用", "保存为文本", "保存为选题", "创建候选稿", "需要确认", "来源", "当前 AI 服务暂时不可用，请稍后再试。"]) expect(component).toContain(label);
     for (const forbidden of ["默认方法 V", "稿件 V", "MethodVersion", "Provider", "Schema", "模型选择", "21 条 guideline"]) expect(component).not.toContain(forbidden);
   });
 
@@ -191,7 +191,7 @@ describe("published workspace default method in Studio", () => {
     const canvas = await readFile(new URL("../components/projects/content-canvas.tsx", import.meta.url), "utf8");
     const assistant = await readFile(new URL("../components/projects/studio-default-method.tsx", import.meta.url), "utf8");
     for (const label of ["添加到画布", "参考素材", "我方依据", "创作目标", "方法", "当前稿件", "AI 建议", "适配画布", "小地图"]) expect(canvas).toContain(label);
-    for (const label of ["基于当前内容", "生成另一种表达", "当前正在基于", "项目资料", "画布内容", "添加引用"]) expect(assistant).toContain(label);
+    for (const label of ["基于当前内容", "生成另一种表达", "当前正在基于", "当前创作资料", "画布内容", "添加引用"]) expect(assistant).toContain(label);
     expect(canvas).toContain("edges={relationEdges}");
     expect(canvas).toContain("nodesConnectable={false}");
     expect(canvas).toContain("zoomOnDoubleClick={false}");

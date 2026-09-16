@@ -109,14 +109,14 @@ test("OWNER configures RedFox and ingests a Douyin video into private MinIO stor
   await page.getByLabel("抖音分享链接或分享文案").fill(`3.21 复制打开抖音，看看作品\n${douyinUrl}`);
   await page.getByRole("button", { name: "提交收录" }).click();
   await expect(page.getByRole("dialog").getByText("处理中", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "查看素材" }).click();
+  await page.getByRole("link", { name: "查看资料" }).click();
   await expect(page.getByText("已完成", { exact: true }).first()).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole("heading", { name: "RedFox E2E 真实链路" })).toBeVisible();
   await page.getByRole("tab", { name: "处理", exact: true }).click();
   await page.getByText("高级处理信息", { exact: true }).click();
   await expect(page.getByText(/PROCESS_MEDIA · SUCCEEDED · REAL/)).toBeVisible();
   await expect(page.getByText("语音转写服务暂时不可用，请联系管理员。", { exact: true }).first()).toBeVisible();
-  await expect(page.getByRole("heading", { name: "转写文本" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "文字稿" })).toBeVisible();
   const video = page.locator("video");
   await expect(video).toBeVisible();
   const signedUrl = await video.getAttribute("src");
@@ -143,7 +143,7 @@ test("OWNER configures RedFox and ingests a Douyin video into private MinIO stor
   await page.getByRole("button", { name: "提交收录" }).click();
   await expect(page.getByRole("dialog").getByRole("alert")).toContainText("素材库中已经存在");
   expect(parseCalls).toBe(1);
-  await page.getByRole("link", { name: "查看已有素材" }).click();
+  await page.getByRole("link", { name: "查看已有资料" }).click();
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByLabel("更多操作").click();
   await page.getByRole("button", { name: "删除" }).click();

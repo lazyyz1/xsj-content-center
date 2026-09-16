@@ -43,7 +43,7 @@ test("V1 UI happy path: 素材 → 创作 → 审核 → 排期 → 人工发布
   await page.getByLabel("正文").fill("很多老板把 AI 当作答案生成器，却没有先定义经营问题。AI 应该放大经营判断，而不是替代老板判断。");
   await page.getByLabel("备注（可选）").fill("V1 UI happy path");
   await page.getByRole("button", { name: "提交收录" }).click();
-  await page.getByRole("link", { name: "查看素材" }).click();
+  await page.getByRole("link", { name: "查看资料" }).click();
   await expect(page.getByRole("heading", { name: "老板用 AI 最容易犯的一个错" })).toBeVisible();
 
   await page.getByLabel("新标签").fill("企业经营");

@@ -14,7 +14,7 @@ export function RecommendationDetailActions({ itemId, canWrite, contentIdeaId, p
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.message || "操作未完成。");
       if (body.status === "CONFIRM_COLLECTION") {
-        if (window.confirm("该方向引用了尚未收录的外部内容。确认后会收录所需素材并启动处理，是否继续？")) return act("START_CREATION", true);
+        if (window.confirm("该方向引用了尚未收录的外部内容。确认后会收录所需资料并启动处理，是否继续？")) return act("START_CREATION", true);
         return;
       }
       if (body.projectId) router.push(`/dashboard?project=${body.projectId}`);

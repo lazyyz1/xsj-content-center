@@ -50,7 +50,7 @@ test.describe.serial("Phase 10B project assistant", () => {
     await page.waitForTimeout(500);
     const before = await page.locator(".react-flow__viewport").evaluate((element) => { const matrix = new DOMMatrix(getComputedStyle(element).transform); return { x: matrix.e, y: matrix.f, zoom: matrix.a }; });
     await page.getByRole("button", { name: "添加引用" }).last().click();
-    await page.getByPlaceholder("搜索画布内容或项目资料").fill("校长访谈");
+    await page.getByPlaceholder("搜索画布内容或当前创作资料").fill("校长访谈");
     await page.getByRole("button", { name: /校长访谈资料/ }).click();
     await page.getByLabel("和鑫小助说").fill("根据当前项目和资料给我几个选题");
     await page.getByLabel("和鑫小助说").press("Enter");

@@ -190,8 +190,8 @@ test("material detail real actions remain usable after one-screen layout", async
   await transcriptDisclosure.getByRole("button", { name: "复制全文" }).click();
   await expect(transcriptDisclosure.getByRole("status")).toContainText("全文已复制");
   await transcriptDisclosure.getByRole("button", { name: "编辑" }).click();
-  await transcriptDisclosure.getByLabel("编辑转写全文").fill("已通过功能回归验证的转写内容。");
-  await transcriptDisclosure.getByRole("button", { name: "保存转写" }).click();
+  await transcriptDisclosure.getByLabel("编辑文字稿").fill("已通过功能回归验证的转写内容。");
+  await transcriptDisclosure.getByRole("button", { name: "保存文字稿" }).click();
   await expect.poll(async () => (await db.transcript.findUnique({ where: { sourceItemId: richSource.id } }))?.fullText).toBe("已通过功能回归验证的转写内容。");
   await transcriptDisclosure.locator("summary").click();
   await expect(transcriptDisclosure.getByRole("button", { name: "编辑" })).toHaveCount(0);
@@ -204,9 +204,9 @@ test("material detail real actions remain usable after one-screen layout", async
   await settings.getByLabel("新标签").fill("功能回归标签");
   await settings.getByRole("button", { name: "添加标签" }).click();
   await expect(settings).toContainText("#功能回归标签");
-  await settings.getByText("素材集", { exact: true }).click();
-  await settings.getByLabel("选择素材集").selectOption({ label: "已有素材集" });
-  await settings.getByRole("button", { name: "加入素材集" }).click();
+  await settings.getByText("资料集", { exact: true }).click();
+  await settings.getByLabel("选择资料集").selectOption({ label: "已有素材集" });
+  await settings.getByRole("button", { name: "加入资料集" }).click();
   await expect(settings).toContainText("已有素材集");
   await expect(settings).toContainText("资料准备");
   await page.getByLabel("更多资料设置").click();
@@ -214,7 +214,7 @@ test("material detail real actions remain usable after one-screen layout", async
   await page.getByRole("button", { name: /去创作/ }).click();
   const creation = page.locator("#material-creation-actions");
   await expect(creation).toHaveAttribute("open", "");
-  await expect(creation.getByRole("link", { name: /加入当前工作/ })).toHaveAttribute("href", new RegExp(`project=${project.id}`));
+  await expect(creation.getByRole("link", { name: /加入当前创作/ })).toHaveAttribute("href", new RegExp(`project=${project.id}`));
 
   await page.goto(`/library/${unanalysedSource.id}`);
   let analysisRequest = false;
@@ -225,7 +225,7 @@ test("material detail real actions remain usable after one-screen layout", async
   });
   await page.getByTestId("material-recommended-action").click();
   await expect.poll(() => analysisRequest).toBe(true);
-  await expect(page.getByText(/正在看懂这条内容|等待/).first()).toBeVisible();
+  await expect(page.getByText(/正在整理内容理解|等待/).first()).toBeVisible();
 
   await page.goto(`/library/${sparseSource.id}`);
   await expect(page.getByRole("button", { name: "更新作品数据" }).first()).toBeVisible();

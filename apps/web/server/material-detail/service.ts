@@ -271,8 +271,8 @@ export async function getMaterialDetailView(input: { workspaceId: string; userId
   if (knowledge.candidates.some((candidate) => candidate.canConfirm)) actions.push(asAction("confirm", "确认可用信息", "有内部资料信息等待人工确认。", "confirm"));
   if (topicReady && !relatedTopics.length) actions.push(asAction("topics", "用这条找选题", "从真实内容出发找到我们的创作角度。", "creation"));
   if (analysisMethods.length || distillationMethods.length) actions.push(asAction("methods", "查看可复用方法", "从真实研究结果中挑选值得试用的写法。", "methods"));
-  if (currentProjects.length) actions.push(asAction("project", "去项目继续创作", "回到已经关联的项目继续工作。", "project"));
-  if (!currentProjects.length) actions.push(asAction("create", "加入当前项目", "把这条资料作为真实创作依据带进工作台。", "creation"));
+  if (currentProjects.length) actions.push(asAction("project", "继续当前创作", "回到已经关联的创作继续工作。", "project"));
+  if (!currentProjects.length) actions.push(asAction("create", "加入当前创作", "把这条资料作为真实创作依据带进工作台。", "creation"));
   if (transcriptText) actions.push(asAction("transcript", "核对文字稿", "回到原文确认表达和来源边界。", "transcript"));
   const recommendedAction = !transcriptText && source.sourceType === "VIDEO"
     ? asAction("transcript", "先生成文字稿", "有了文字稿后，才能继续看懂、提炼和判断。", "transcript")
@@ -281,7 +281,7 @@ export async function getMaterialDetailView(input: { workspaceId: string; userId
       : !analysis.current || analysis.current.stale
         ? asAction("research", "先看懂这条资料", "先用真实内容整理出摘要、观点和表达线索。", "research")
         : !currentProjects.length
-          ? asAction("create", "加入当前项目", "把这条资料作为真实创作依据带进工作台。", "creation")
+          ? asAction("create", "加入当前创作", "把这条资料作为真实创作依据带进工作台。", "creation")
           : topicReady && !relatedTopics.length
             ? asAction("topics", "用这条找选题", "从当前资料出发，生成可继续验证的选题方向。", "creation")
             : asAction("research", "继续查看参考信息", "回到已有结果，继续判断哪些内容值得使用。", "research");

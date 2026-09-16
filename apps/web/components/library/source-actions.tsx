@@ -23,7 +23,7 @@ export function SourceActions({
   mode = "ALL",
   relatedProjects = [],
   relatedIdeas = [],
-  sourceTitle = "未命名素材",
+  sourceTitle = "未命名资料",
   sourceReference,
   topicInspiration,
 }: {
@@ -78,21 +78,21 @@ export function SourceActions({
       </section>
 
       <details className="rounded-xl border p-4">
-        <summary className="cursor-pointer font-medium">素材集</summary>
-        <div className="mt-3 flex flex-wrap gap-2">{collections.length ? collections.map((collection) => <span key={collection.id} className="inline-flex items-center gap-2 rounded-full bg-[var(--surface-elevated)] px-3 py-1 text-sm">{collection.name}<button disabled={busy} aria-label={`移出素材集 ${collection.name}`} onClick={() => action(async () => { await call(`/api/source-items/${sourceId}/collections`, "DELETE", { collectionId: collection.id }); })}>×</button></span>) : <span className="text-sm text-[var(--text-secondary)]">尚未加入素材集</span>}</div>
+        <summary className="cursor-pointer font-medium">资料集</summary>
+        <div className="mt-3 flex flex-wrap gap-2">{collections.length ? collections.map((collection) => <span key={collection.id} className="inline-flex items-center gap-2 rounded-full bg-[var(--surface-elevated)] px-3 py-1 text-sm">{collection.name}<button disabled={busy} aria-label={`移出资料集 ${collection.name}`} onClick={() => action(async () => { await call(`/api/source-items/${sourceId}/collections`, "DELETE", { collectionId: collection.id }); })}>×</button></span>) : <span className="text-sm text-[var(--text-secondary)]">尚未加入资料集</span>}</div>
         <form className="mt-4 flex flex-col gap-2 sm:flex-row" action={(formData) => action(async () => {
           const collectionId = String(formData.get("collectionId") || "");
           await call(`/api/source-items/${sourceId}/collections`, "POST", { collectionId });
         })}>
-          <select name="collectionId" aria-label="选择素材集" required defaultValue="" className="h-10 min-w-0 flex-1 rounded-[var(--radius)] border bg-transparent px-3"><option value="" disabled>选择已有素材集</option>{availableCollections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select>
-          <Button variant="secondary" disabled={busy || availableCollections.length === 0}>加入素材集</Button>
+          <select name="collectionId" aria-label="选择资料集" required defaultValue="" className="h-10 min-w-0 flex-1 rounded-[var(--radius)] border bg-transparent px-3"><option value="" disabled>选择已有资料集</option>{availableCollections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select>
+          <Button variant="secondary" disabled={busy || availableCollections.length === 0}>加入资料集</Button>
         </form>
         <form className="mt-2 flex flex-col gap-2 sm:flex-row" action={(formData) => action(async () => {
           const name = String(formData.get("collectionName") || "");
           const collection = await call("/api/collections", "POST", { name });
           await call(`/api/source-items/${sourceId}/collections`, "POST", { collectionId: collection.id });
         })}>
-          <input name="collectionName" aria-label="新素材集" required className="h-10 min-w-0 flex-1 rounded-[var(--radius)] border bg-transparent px-3" placeholder="新建一级素材集" />
+          <input name="collectionName" aria-label="新资料集" required className="h-10 min-w-0 flex-1 rounded-[var(--radius)] border bg-transparent px-3" placeholder="新建一级资料集" />
           <Button disabled={busy}>新建并加入</Button>
         </form>
       </details>
@@ -101,18 +101,18 @@ export function SourceActions({
       {(mode === "ALL" || mode === "CREATION") && canManageProjects ? (
         <section className="rounded-xl border p-4">
           <h2 className="font-semibold">进入创作</h2>
-          <p className="mt-1 text-xs text-[var(--text-secondary)]">素材只建立引用关系，不会复制原始内容。</p>
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">资料只建立引用关系，不会复制原始内容。</p>
           {topicInspiration ? <div className="mt-4"><BenchmarkTopicGenerator sourceType="VIDEO" sourceId={sourceId} available={topicInspiration.available} buttonLabel="用这条找选题" unavailableMessage={topicInspiration.unavailableMessage} /></div> : null}
           {relatedIdeas.length ? <div className="mt-4 grid gap-2 text-sm"><p className="font-medium">已生成 {relatedIdeas.length} 个选题方向</p>{relatedIdeas.map((idea) => <LinkButton key={idea.id} href={`/discovery/ideas/${idea.id}`}>查看选题：《{idea.title}》</LinkButton>)}</div> : sourceReference ? <Button className="mt-4 w-full" variant="secondary" disabled={busy} onClick={() => action(async () => { await call("/api/discovery/ideas", "POST", { title: sourceTitle, description: sourceReference.description || undefined, reference: sourceReference, sourceItemId: sourceId }); })}>加入选题</Button> : null}
-          {relatedProjects.length ? <div className="mt-4 grid gap-2">{relatedProjects.map((project) => <LinkButton key={project.id} href={`/dashboard?project=${project.id}`}>加入当前工作 · {project.title}</LinkButton>)}</div> : <Button className="mt-4 w-full" disabled={busy} onClick={() => action(async () => { const result = await call(`/api/source-items/${sourceId}/material-analysis/project`, "POST"); router.push(`/dashboard?project=${result.projectId}`); })}>加入当前工作</Button>}
-          <details className="mt-4"><summary className="cursor-pointer text-sm text-[var(--text-secondary)]">加入其他已有项目</summary>
+          {relatedProjects.length ? <div className="mt-4 grid gap-2">{relatedProjects.map((project) => <LinkButton key={project.id} href={`/dashboard?project=${project.id}`}>加入当前创作 · {project.title}</LinkButton>)}</div> : <Button className="mt-4 w-full" disabled={busy} onClick={() => action(async () => { const result = await call(`/api/source-items/${sourceId}/material-analysis/project`, "POST"); router.push(`/dashboard?project=${result.projectId}`); })}>加入当前创作</Button>}
+          <details className="mt-4"><summary className="cursor-pointer text-sm text-[var(--text-secondary)]">加入其他已有创作</summary>
           <form className="mt-3 grid gap-2" action={(formData) => action(async () => {
             const projectId = String(formData.get("projectId") || "");
             await call(`/api/projects/${projectId}/sources`, "POST", { sourceItemId: sourceId, role: "REFERENCE" });
             router.push(`/dashboard?project=${projectId}`);
           })}>
             <select name="projectId" aria-label="选择创作" required defaultValue="" className="h-10 min-w-0 rounded-[var(--radius)] border bg-transparent px-3"><option value="" disabled>选择未关联的创作</option>{availableProjects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}</select>
-            <Button variant="secondary" disabled={busy || availableProjects.length === 0}>加入已有项目</Button>
+            <Button variant="secondary" disabled={busy || availableProjects.length === 0}>加入已有创作</Button>
           </form>
           </details>
         </section>
@@ -121,7 +121,7 @@ export function SourceActions({
       {mode === "ALL" || mode === "DANGER" ? <section className="flex flex-wrap gap-2">
         {status === "FAILED" && failedJobId ? <Button disabled={busy} onClick={() => action(async () => { await call(`/api/ingest-jobs/${failedJobId}/retry`, "POST"); })}>重试采集</Button> : null}
         {status !== "ARCHIVED" ? <Button variant="secondary" disabled={busy} onClick={() => action(async () => { await call(`/api/source-items/${sourceId}`, "PATCH"); })}>归档</Button> : null}
-        <Button variant="secondary" disabled={busy} className="text-[var(--danger)]" onClick={() => { if (window.confirm("确定永久删除这条素材、媒体文件、处理记录、标签和素材集关系吗？")) action(async () => { await call(`/api/source-items/${sourceId}`, "DELETE"); router.push("/library"); }); }}>删除</Button>
+        <Button variant="secondary" disabled={busy} className="text-[var(--danger)]" onClick={() => { if (window.confirm("确定永久删除这条资料、媒体文件、处理记录、标签和资料集关系吗？")) action(async () => { await call(`/api/source-items/${sourceId}`, "DELETE"); router.push("/library"); }); }}>删除</Button>
       </section> : null}
       {error ? <p role="alert" className="text-sm text-[var(--danger)]">{error}</p> : null}
     </div>

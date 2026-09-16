@@ -101,7 +101,7 @@ function EndedProjectCard({ item, canEdit, showStatus }: { item: ListedProject; 
 function ProjectSection({ title, items, canEdit, ended = false, showStatus = false }: { title: string; items: ListedProject[]; canEdit: boolean; ended?: boolean; showStatus?: boolean }) {
   if (!items.length) return null;
   return <section className={`project-library-section ${ended ? "is-ended" : ""}`} aria-labelledby={`project-section-${ended ? "done" : title}`}>
-    <header><h2 id={`project-section-${ended ? "done" : title}`}>{title}</h2><span>{items.length} 个项目</span></header>
+    <header><h2 id={`project-section-${ended ? "done" : title}`}>{title}</h2><span>{items.length} 个创作任务</span></header>
     <div className={ended ? "project-ended-grid" : "project-library-grid"}>
       {items.map((item) => ended ? <EndedProjectCard key={item.id} item={item} canEdit={canEdit} showStatus={showStatus} /> : <ProjectCard key={item.id} item={item} canEdit={canEdit} showStatus={showStatus} />)}
     </div>
@@ -109,18 +109,18 @@ function ProjectSection({ title, items, canEdit, ended = false, showStatus = fal
 }
 
 function ProjectEmpty({ view, hasProjects, search, canEdit, query }: { view: ProjectView; hasProjects: boolean; search: string; canEdit: boolean; query: ProjectListQuery }) {
-  const title = search ? "没有找到相关项目"
-    : !hasProjects ? "还没有项目，从一个想法开始吧"
-      : view === "ACTIVE" ? "暂时没有正在进行的项目"
-        : view === "UNSTARTED" ? "暂时没有未开始的项目"
-          : view === "DONE" ? "暂时没有已结束的项目"
-            : "当前没有可展示的项目";
-  const description = search ? "可以换一个关键词，或清除搜索后查看全部项目。" : "项目会按当前状态出现在这里。";
+  const title = search ? "没有找到相关创作"
+    : !hasProjects ? "还没有创作，从一个想法开始吧"
+      : view === "ACTIVE" ? "暂时没有正在进行的创作"
+        : view === "UNSTARTED" ? "暂时没有未开始的创作"
+          : view === "DONE" ? "暂时没有已结束的创作"
+            : "当前没有可展示的创作";
+  const description = search ? "可以换一个关键词，或清除搜索后查看全部创作。" : "创作会按当前状态出现在这里。";
   return <section className="project-library-empty">
     <span><FolderOpen size={24} /></span>
     <h2>{title}</h2>
     <p>{description}</p>
-    <div>{search ? <Button variant="secondary" asChild><Link href={queryHref(query, { search: "", page: "1" })}>清除搜索</Link></Button> : null}{canEdit && !hasProjects ? <Button asChild><Link href="/projects/new"><Plus size={16} />新建项目</Link></Button> : null}</div>
+    <div>{search ? <Button variant="secondary" asChild><Link href={queryHref(query, { search: "", page: "1" })}>清除搜索</Link></Button> : null}{canEdit && !hasProjects ? <Button asChild><Link href="/projects/new"><Plus size={16} />开始创作</Link></Button> : null}</div>
   </section>;
 }
 
@@ -141,8 +141,8 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
 
   return <div className="project-library-page">
     <header className="project-library-header">
-      <div><h1>项目</h1><p>管理你的创作项目，随时继续正在进行的内容</p></div>
-      {canEdit ? <Button asChild><Link href="/projects/new"><Plus size={17} />新建项目</Link></Button> : null}
+      <div><h1>全部创作</h1><p>管理你的创作任务，随时继续正在进行的内容</p></div>
+      {canEdit ? <Button asChild><Link href="/projects/new"><Plus size={17} />开始创作</Link></Button> : null}
     </header>
 
     <div className="project-library-commandbar">
@@ -150,7 +150,7 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
       <form method="get">
         <input type="hidden" name="status" value={view} />
         {query.review ? <input type="hidden" name="review" value={query.review} /> : null}
-        <label><Search size={16} /><input name="search" defaultValue={query.search} aria-label="搜索项目" placeholder="搜索项目" /></label>
+        <label><Search size={16} /><input name="search" defaultValue={query.search} aria-label="搜索创作" placeholder="搜索创作" /></label>
         <select name="sort" defaultValue={query.sort || "updated"} aria-label="项目排序">
           <option value="updated">最近编辑</option>
           <option value="created">最近创建</option>
@@ -160,7 +160,7 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
       </form>
     </div>
 
-    {query.review === "pending" ? <div className="project-library-notice"><span>当前仅显示有平台内容待人工审核的项目。</span><Link href="/projects">清除筛选</Link></div> : null}
+    {query.review === "pending" ? <div className="project-library-notice"><span>当前仅显示有平台内容待人工审核的创作任务。</span><Link href="/projects">清除筛选</Link></div> : null}
 
     <div className="project-library-content">
       {visibleItems.length ? view === "ALL" ? <>

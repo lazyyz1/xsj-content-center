@@ -54,7 +54,7 @@ test("manual and URL ingest → tags → collection → search with workspace is
   await page.getByLabel("备注（可选）").fill("E2E 手工烟雾验证");
   await page.getByRole("button", { name: "提交收录" }).click();
   await expect(page.getByRole("dialog").getByText("处理中", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "查看素材" }).click();
+  await page.getByRole("link", { name: "查看资料" }).click();
   await expect(page.getByText("已完成", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/这是一段由用户真实输入/)).toBeVisible();
   const manualSourceId = new URL(page.url()).pathname.split("/").pop();
@@ -92,7 +92,7 @@ test("manual and URL ingest → tags → collection → search with workspace is
   await page.getByLabel("网页链接").fill(`${fixtureOrigin}/article`);
   await page.getByRole("button", { name: "提交收录" }).click();
   await expect(page.getByRole("dialog").getByText("处理中", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "查看素材" }).click();
+  await page.getByRole("link", { name: "查看资料" }).click();
   await expect(page.getByRole("heading", { name: "E2E Fixture Article" })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/served by the local Playwright fixture/)).toBeVisible();
 });

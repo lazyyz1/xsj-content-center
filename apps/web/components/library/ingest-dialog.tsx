@@ -61,7 +61,7 @@ export function IngestDialog() {
               <div className="mt-6 rounded-xl border border-blue-200 bg-blue-50 p-5">
                 <p className="font-medium text-blue-900">处理中</p>
                 <p className="mt-1 text-sm text-blue-800">内容已提交，页面会自动更新处理状态。</p>
-                <Link className="mt-4 inline-block text-sm font-medium text-[var(--accent)] underline" href={`/library/${created.sourceItemId}`} onClick={close}>查看素材</Link>
+                <Link className="mt-4 inline-block text-sm font-medium text-[var(--accent)] underline" href={`/library/${created.sourceItemId}`} onClick={close}>查看资料</Link>
               </div>
             ) : (
               <>
@@ -79,7 +79,7 @@ export function IngestDialog() {
                   ) : (
                     <label className="grid gap-1.5 text-sm">抖音分享链接或分享文案<textarea name="shareText" required rows={5} maxLength={10000} placeholder={'3.21 复制打开抖音，看看这个作品…\nhttps://v.douyin.com/xxxx/'} className="rounded-[var(--radius)] border bg-transparent p-3 leading-6" /><span className="text-xs text-[var(--text-secondary)]">仅支持一个明确的抖音作品链接；需先在设置中配置 RedFox。</span></label>
                   )}
-                  {error ? <p role="alert" className="text-sm text-[var(--danger)]">{error}{existingSourceId ? <> <Link href={`/library/${existingSourceId}`} onClick={close} className="underline">查看已有素材</Link></> : null}</p> : null}
+                  {error ? <p role="alert" className="text-sm text-[var(--danger)]">{error}{existingSourceId ? <> <Link href={`/library/${existingSourceId}`} onClick={close} className="underline">查看已有资料</Link></> : null}</p> : null}
                   <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={close}>取消</Button><Button type="submit" disabled={busy}>{busy ? "提交中…" : "添加资料"}</Button></div>
                 </form>
               </>

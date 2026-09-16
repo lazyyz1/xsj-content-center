@@ -50,7 +50,7 @@ describe("video content production", () => {
   it("uses deterministic material naming fallbacks", () => {
     expect(sourceDisplayName({ title: null, suggestedTitle: "整理后的标题", summary: "摘要", platformLabel: "抖音", createdAt: new Date("2026-09-03") })).toBe("整理后的标题");
     expect(sourceDisplayName({ title: null, summary: "这是一段足够清楚的整理摘要", platformLabel: "抖音", createdAt: new Date("2026-09-03") })).toBe("这是一段足够清楚的整理摘要");
-    expect(sourceDisplayName({ title: null, summary: null, platformLabel: "抖音", createdAt: new Date("2026-09-03") })).toMatch(/^抖音素材 · /);
+    expect(sourceDisplayName({ title: null, summary: null, platformLabel: "抖音", createdAt: new Date("2026-09-03") })).toMatch(/^抖音资料 · /);
   });
 
   it("keeps the material workbench non-linear and moves secondary operations behind more", () => {
@@ -65,7 +65,7 @@ describe("video content production", () => {
     expect(workspace).toContain("overflow-y-auto");
     expect(workspace).toContain("material-secondary-grid");
     expect(analysis).toContain("查看原文依据");
-    expect(analysis).toContain("历史拆解");
+    expect(analysis).toContain("历史内容理解");
     expect(analysis).toContain("<details");
     expect(detailPage).toContain("material-transcript-disclosure");
     expect(detailPage).toContain("hasConfirmableInformation");

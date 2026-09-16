@@ -110,7 +110,7 @@ test("saved RedFox video is transcribed by the real local model without Doubao",
   await page.getByRole("button", { name: "抖音视频" }).click();
   await page.getByLabel("抖音分享链接或分享文案").fill(douyinUrl);
   await page.getByRole("button", { name: "提交收录" }).click();
-  await page.getByRole("link", { name: "查看素材" }).click();
+  await page.getByRole("link", { name: "查看资料" }).click();
 
   await expect(page.getByText("今天我们来聊一聊如何把零散素材整理成清晰可靠的内容项目", { exact: false }))
     .toBeVisible({ timeout: 120_000 });

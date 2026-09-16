@@ -49,5 +49,5 @@ export function sourceDisplayName(input: {
   if (explicit) return explicit;
   const summary = input.summary?.replace(/\s+/g, " ").trim();
   if (summary) return summary.length > 28 ? `${summary.slice(0, 28)}…` : summary;
-  return `${input.platformLabel}素材 · ${input.createdAt.toLocaleDateString("zh-CN")}`;
+  return `${input.platformLabel}资料 · ${input.createdAt.toLocaleDateString("zh-CN")}`;
 }

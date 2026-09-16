@@ -169,7 +169,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
     <div className="project-library-page library-page">
       <header className="project-library-header">
         <div><h1>资料</h1><p>把视频、文档、链接和案例整理成创作时可调用的资料</p></div>
-        <div className="library-header-actions"><Link href="/library/methods">已保存的方法</Link>{canManage ? <IngestDialog /> : null}</div>
+        <div className="library-header-actions"><Link href="/library/methods">创作方法</Link>{canManage ? <IngestDialog /> : null}</div>
       </header>
 
       <div className="project-library-commandbar library-commandbar">

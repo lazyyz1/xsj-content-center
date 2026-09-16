@@ -125,9 +125,10 @@ test("discovery search → idea/library/project/benchmark stays explicit and iso
   await expect(page.getByLabel("RedFox 配置").getByText("已配置", { exact: true })).toBeVisible();
 
   await page.goto("/discovery");
-  await expect(page.getByRole("heading", { name: "灵感研究" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "研究", exact: true })).toBeVisible();
   expect(await db.apiUsage.count({ where: { workspaceId } })).toBe(0);
   expect(calls["/story/api/dyData/searchArticle"]).toBeUndefined();
+  await page.locator("summary").filter({ hasText: "搜索范围" }).click();
   await page.getByRole("button", { name: "抖音", exact: true }).click();
 
   await page.getByLabel("搜索内容").fill("选题测试");
@@ -166,14 +167,14 @@ test("discovery search → idea/library/project/benchmark stays explicit and iso
   await page.getByLabel("搜索内容").fill("素材收录");
   await page.getByRole("button", { name: "搜索", exact: true }).click();
   const libraryCard = page.getByTestId("content-card-DOUYIN-library-e2e");
-  await libraryCard.getByRole("button", { name: "收录素材" }).click();
-  const collectNotice = page.getByRole("status").filter({ hasText: "素材已收录" });
-  await expect(collectNotice.getByRole("link", { name: "查看素材" })).toBeVisible();
+  await libraryCard.getByRole("button", { name: "收录资料" }).click();
+  const collectNotice = page.getByRole("status").filter({ hasText: "资料已收录" });
+  await expect(collectNotice.getByRole("link", { name: "查看资料" })).toBeVisible();
   await page.setViewportSize({ width: 375, height: 812 });
   expect(await collectNotice.evaluate((element) => { const rect = element.getBoundingClientRect(); return rect.left >= 0 && rect.right <= window.innerWidth; })).toBe(true);
   await page.setViewportSize({ width: 1280, height: 900 });
-  await expect(libraryCard.getByRole("link", { name: "查看素材" })).toBeVisible();
-  await libraryCard.getByRole("link", { name: "查看素材" }).click();
+  await expect(libraryCard.getByRole("link", { name: "查看资料" })).toBeVisible();
+  await libraryCard.getByRole("link", { name: "查看资料" }).click();
   await expect(page.getByText("已完成", { exact: true }).first()).toBeVisible({ timeout: 20_000 });
   const librarySource = await db.sourceItem.findFirstOrThrow({ where: { workspaceId, externalId: "library-e2e" }, include: { assets: true } });
   expect(librarySource.assets).toHaveLength(1);
@@ -201,7 +202,7 @@ test("discovery search → idea/library/project/benchmark stays explicit and iso
   await expect(page.getByRole("heading", { name: "对标账号作品" })).toBeVisible();
   expect(await db.sourceItem.count({ where: { workspaceId, externalId: { in: ["benchmark-work-e2e", "benchmark-uncollected-e2e"] } } })).toBe(0);
   const benchmarkWork = page.getByRole("heading", { name: "对标账号作品" }).locator("..");
-  await benchmarkWork.getByRole("button", { name: "收录素材" }).click();
+  await benchmarkWork.getByRole("button", { name: "收录资料" }).click();
   await expect.poll(() => db.sourceItem.count({ where: { workspaceId, externalId: "benchmark-work-e2e" } })).toBe(1);
   expect(await db.sourceItem.count({ where: { workspaceId, externalId: "benchmark-uncollected-e2e" } })).toBe(0);
 

@@ -108,14 +108,14 @@ test("material detail supports the persisted asynchronous analysis flow", async 
 
   await page.goto(`/library/${source.id}`);
   const card = page.getByTestId("material-analysis-card");
-  await expect(page.getByRole("heading", { name: "转写文本" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "文字稿" })).toBeVisible();
   await expect(page.getByText("内容团队常常收集很多视频，但如果不先整理主题和观点，真正创作时仍然要重新阅读。", { exact: true })).toBeVisible();
-  await expect(card).toContainText("内容拆解");
-  await expect(page.getByRole("button", { name: "拆解这条内容" })).toBeVisible();
-  await page.getByRole("button", { name: "拆解这条内容" }).click();
-  await expect(card).toContainText(/正在拆解|这条内容是怎么讲的/);
+  await expect(card).toContainText("内容理解");
+  await expect(page.getByRole("button", { name: "内容理解" })).toBeVisible();
+  await page.getByRole("button", { name: "内容理解" }).click();
+  await expect(card).toContainText(/正在整理内容理解|这条内容是怎么讲的/);
   await expect(card).toContainText("这条内容是怎么讲的", { timeout: 15_000 });
-  await expect(card).toContainText("可以借鉴的方法");
+  await expect(card).toContainText("可复用的创作方法");
   await expect(card).toContainText("仅根据这一条内容总结，建议先试用");
   await expect(card).toContainText("查看原文依据");
   await expect(card).toContainText("内容团队常常收集很多视频");
@@ -128,7 +128,7 @@ test("material detail supports the persisted asynchronous analysis flow", async 
 
   const callsBeforeProject = calls;
   await page.getByRole("tab", { name: "创作" }).click();
-  await page.getByRole("button", { name: "基于这条素材创作" }).click();
+  await page.getByRole("button", { name: "基于这条资料创作" }).click();
   await expect(page).toHaveURL(/\/projects\/.+\/studio$/);
   await expect(page.getByRole("heading", { name: "待拆解视频" })).toBeVisible();
   expect(calls).toBe(callsBeforeProject);
@@ -151,16 +151,16 @@ test("material detail supports the persisted asynchronous analysis flow", async 
   const failedAnalysis = await db.materialAnalysis.create({ data: { workspaceId: membership.workspaceId, sourceItemId: source.id, createdById: user.id, version: 2, status: "FAILED", tags: [], keywords: [], keyPoints: [], transcriptUpdatedAtAtAnalysis: transcript.updatedAt, errorCode: "FIXTURE_FAILURE", errorMessage: "模拟任务失败。" } });
   await db.ingestJob.create({ data: { workspaceId: membership.workspaceId, sourceItemId: source.id, requestedById: user.id, jobType: "ANALYZE_MATERIAL", provider: "LLM", providerMode: "REAL", status: "FAILED", errorCode: "FIXTURE_FAILURE", errorMessage: "模拟任务失败。", finishedAt: new Date(), metadata: { materialAnalysisId: failedAnalysis.id } } });
   await page.reload();
-  await expect(card).toContainText("这次没有拆解完成");
+  await expect(card).toContainText("这次没有处理成功");
   await expect(card).toContainText("这条内容是怎么讲的");
-  await page.getByRole("button", { name: "重新拆解" }).click();
+  await page.getByRole("button", { name: "重新理解" }).click();
   await expect(card).toContainText("新版", { timeout: 15_000 });
   await expect(db.materialAnalysis.count({ where: { sourceItemId: source.id, status: "COMPLETED" } })).resolves.toBe(2);
-  await expect(card).toContainText("历史拆解");
+  await expect(card).toContainText("历史内容理解");
 
   await db.workspaceMember.update({ where: { id: membership.id }, data: { role: "VIEWER" } });
   await page.reload();
-  await expect(page.getByRole("button", { name: "重新拆解" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "重新理解" })).toHaveCount(0);
   const forbidden = await page.request.post(`/api/source-items/${source.id}/material-analysis`);
   expect(forbidden.status()).toBe(403);
 });
@@ -170,7 +170,7 @@ test("unconfigured Kimi is explicit and never creates a fake analysis", async ({
   const workspaceId = user.workspaceMemberships[0]!.workspaceId;
   const source = await db.sourceItem.create({ data: { workspaceId, createdById: user.id, sourceType: "VIDEO", sourcePlatform: "DOUYIN", title: "未配置素材", status: "READY", transcript: { create: { workspaceId, provider: "LOCAL_FUNASR", providerMode: "REAL", fullText: "已有视频文字稿，但没有配置内容拆解服务。", segments: [] } } } });
   await page.goto(`/library/${source.id}`);
-  await expect(page.getByTestId("material-analysis-card")).toContainText("内容拆解服务暂时不可用");
-  await expect(page.getByRole("button", { name: "拆解这条内容" })).toHaveCount(0);
+  await expect(page.getByTestId("material-analysis-card")).toContainText("暂时没有可用的内容理解结果");
+  await expect(page.getByRole("button", { name: "内容理解" })).toHaveCount(0);
   await expect(db.materialAnalysis.count({ where: { sourceItemId: source.id } })).resolves.toBe(0);
 });

@@ -179,11 +179,11 @@ test("researches six benchmark samples and saves a traceable private method", as
   await methodCard.getByText("查看样本依据").click();
   await expect(methodCard.getByText("共同开头依据 1", { exact: true })).toBeVisible();
   await expect(methodCard.getByRole("link", { name: /代表内容 1/ }).first()).toBeVisible();
-  await methodCard.getByRole("button", { name: "保存到我的方法" }).click();
-  await methodCard.getByLabel("方法名称").fill("对标样本中的问题开头法");
-  await methodCard.getByRole("button", { name: "保存方法" }).click();
-  await expect(methodCard).toContainText("已保存到我的方法");
-  await page.getByRole("link", { name: "查看我的方法" }).click();
+  await methodCard.getByRole("button", { name: "保存为创作方法" }).click();
+  await methodCard.getByLabel("创作方法名称").fill("对标样本中的问题开头法");
+  await methodCard.getByRole("button", { name: "保存创作方法" }).click();
+  await expect(methodCard).toContainText("已保存为创作方法");
+  await page.getByRole("link", { name: "查看创作方法" }).click();
   await page.getByRole("link", { name: /对标样本中的问题开头法/ }).click();
   const detail = page.getByTestId("method-detail");
   await expect(detail).toContainText("已收藏");

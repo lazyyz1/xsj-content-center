@@ -38,14 +38,14 @@ test.beforeEach(async ({ page }) => {
   await page.context().addCookies(sessionCookies(response));
 });
 
-test("M12 task-first shell keeps six primary destinations and never overflows", async ({ page }, testInfo) => {
+test("M12 task-first shell keeps four primary destinations and never overflows", async ({ page }, testInfo) => {
   await page.goto("/dashboard");
-  await expect(page.getByRole("heading", { name: "从一个想法开始，把内容做得更清楚" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "今天想做什么内容？" })).toBeVisible();
   await expect(page.getByRole("button", { name: "打开鑫小助" })).toHaveCount(0);
-  await page.getByRole("button", { name: /搜索项目、资料、博主或方法/ }).click();
-  await expect(page.getByRole("dialog", { name: "全局搜索" })).toContainText("博主 · 即将支持");
+  await page.getByRole("button", { name: /搜索创作、资料、博主或创作方法/ }).click();
+  await expect(page.getByRole("dialog", { name: "全局搜索" })).toContainText("对标博主 · 即将支持");
   await page.getByRole("button", { name: "关闭", exact: true }).click();
-  for (const label of ["开始创作", "项目", "灵感研究", "资料", "方法", "发布"]) await expect(page.getByRole("link", { name: label, exact: true }).first()).toBeVisible();
+  for (const label of ["创作", "资料", "研究", "方法"]) await expect(page.getByRole("link", { name: label, exact: true }).first()).toBeVisible();
   for (const viewport of [{ width: 1920, height: 1080 }, { width: 1680, height: 1050 }, { width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 768, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
@@ -56,9 +56,9 @@ test("M12 task-first shell keeps six primary destinations and never overflows", 
 
 test("M12 core pages and Studio V2 preserve real routes and responsive panes", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  for (const [path, heading] of [["/projects", "项目"], ["/discovery", "灵感研究"], ["/library", "资料中心"], ["/projects/methods", "方法中心"], ["/calendar", "发布中心"]] as const) {
+  for (const [path, heading] of [["/projects", "全部创作"], ["/discovery", "研究"], ["/library", "资料"], ["/library/methods", "创作方法"], ["/calendar", "发布中心"]] as const) {
     await page.goto(path);
-    await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+    await expect(page.locator("main.app-main h1")).toHaveText(heading);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   }
   await page.goto(`/projects/${projectId}/studio`);

@@ -72,7 +72,7 @@ export function TrendWorkspace({ initialItems, configured, aiConfigured, mockMod
   }
 
   return <>
-    <Link href="/discovery" className="mb-5 inline-flex items-center gap-2 text-sm text-[var(--text-secondary)]"><ArrowLeft size={16} /> 返回内容发现</Link>
+    <Link href="/discovery" className="mb-5 inline-flex items-center gap-2 text-sm text-[var(--text-secondary)]"><ArrowLeft size={16} /> 返回研究</Link>
     <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><h1 className="text-3xl font-semibold tracking-tight">趋势机会</h1><p className="mt-2 text-sm text-[var(--text-secondary)]">看看最近哪些内容正在升温</p></div><Button disabled={!configured || !canWrite || busy !== "" || (type === "DARK_HORSE" && !keyword.trim())} onClick={() => void refresh()}>{busy === "refresh" ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />} {items.length ? "刷新" : "加载趋势"}</Button></header>
     {mockMode ? <p className="mt-4 rounded-xl border bg-[var(--surface-elevated)] p-3 text-sm">MOCK MODE：当前环境会明确返回模拟 AI 结果。</p> : null}
     <Card className="mt-6 p-5">
@@ -87,6 +87,6 @@ export function TrendWorkspace({ initialItems, configured, aiConfigured, mockMod
     {error ? <p role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-[var(--danger)]">{error}</p> : null}
     {busy === "load" ? <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{[1,2,3].map((value) => <div key={value} className="h-56 animate-pulse rounded-2xl border bg-[var(--surface)]" />)}</div> : items.length ? <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{items.map((item) => <TrendCard key={item.deterministicKey} item={item} actions={<><Button variant="secondary" asChild><Link href={`/discovery/trends/${encodeURIComponent(item.deterministicKey)}`}>查看依据</Link></Button>{canWrite && aiConfigured ? <Button variant="secondary" asChild><Link href={`/discovery/trends/${encodeURIComponent(item.deterministicKey)}?generate=1`}><Sparkles size={14} /> 生成选题</Link></Button> : <Button variant="secondary" disabled><Sparkles size={14} /> 生成选题</Button>}<Button disabled={!canWrite || busy !== ""} onClick={() => void addIdea(item)}>{busy === `idea:${item.deterministicKey}` ? <Loader2 size={14} className="animate-spin" /> : null} 加入选题</Button></>} />)}</div> : <Card className="mt-6 p-10 text-center"><h2 className="font-semibold">当前没有趋势记录</h2><p className="mt-2 text-sm text-[var(--text-secondary)]">{configured && canWrite ? "点击“加载趋势”后才会请求真实数据，不会在切换筛选时自动付费。" : "等待有权限的成员加载真实趋势数据。"}</p></Card>}
     {!aiConfigured ? <p className="mt-4 text-sm text-[var(--text-secondary)]">AI 创作服务尚未配置；趋势查看、相关内容和手工加入选题仍可使用。</p> : null}
-    <div className="mt-6 flex justify-end"><Link href="/discovery" className="inline-flex items-center gap-1 text-sm text-[var(--accent)]">返回内容发现 <ArrowRight size={14} /></Link></div>
+    <div className="mt-6 flex justify-end"><Link href="/discovery" className="inline-flex items-center gap-1 text-sm text-[var(--accent)]">返回研究 <ArrowRight size={14} /></Link></div>
   </>;
 }

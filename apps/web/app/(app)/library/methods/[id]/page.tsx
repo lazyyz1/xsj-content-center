@@ -10,5 +10,5 @@ export default async function MethodDetailPage({ params }: { params: Promise<{ i
   const { id } = await params;
   const method = await getMethod({ workspaceId: workspace.id, ownerUserId: session.user.id, methodId: id });
   if (!method) notFound();
-  return <><Link href="/library/methods" className="mb-5 inline-flex min-h-11 items-center gap-2 text-sm text-[var(--text-secondary)]"><ArrowLeft size={16} />返回方法中心</Link><MethodDetail initial={method} editable={role !== "VIEWER"} /></>;
+  return <><Link href="/library/methods" className="mb-5 inline-flex min-h-11 items-center gap-2 text-sm text-[var(--text-secondary)]"><ArrowLeft size={16} />返回创作方法</Link><MethodDetail initial={method} editable={role !== "VIEWER"} /></>;
 }

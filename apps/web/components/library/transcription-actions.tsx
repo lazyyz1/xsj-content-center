@@ -33,7 +33,7 @@ export function TranscriptionActions({
     try {
       const response = await fetch(`/api/source-items/${sourceId}/transcribe`, { method: "POST" });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.message || result.error || "无法创建转写任务");
+      if (!response.ok) throw new Error(result.message || result.error || "无法开始转写");
       router.refresh();
     } catch {
       setMessage(unavailableMessage);

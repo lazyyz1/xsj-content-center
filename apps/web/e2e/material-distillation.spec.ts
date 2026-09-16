@@ -93,13 +93,13 @@ test("distills one transcript, restores results, preserves history, and saves gr
 
   await page.goto(`/library/${source.id}`);
   const card = page.getByTestId("material-distillation-card");
-  await expect(card.getByRole("button", { name: "提炼这条视频" })).toBeVisible();
-  await card.getByRole("button", { name: "提炼这条视频" }).dblclick();
+  await expect(card.getByRole("button", { name: "开始提炼" })).toBeVisible();
+  await card.getByRole("button", { name: "开始提炼" }).dblclick();
   await card.getByRole("button", { name: "综合看看有什么值得学" }).click();
   await card.getByRole("button", { name: "确认并开始" }).dblclick();
   await expect(card).toContainText(/等待中|正在提炼/);
   await page.reload();
-  await expect(page.getByTestId("material-distillation-card")).toContainText("这条视频最值得学什么", { timeout: 20_000 });
+  await expect(page.getByTestId("material-distillation-card")).toContainText("这条资料最值得学什么", { timeout: 20_000 });
   await expect(db.ingestJob.count({ where: { sourceItemId: source.id, jobType: "DISTILL_MATERIAL" } })).resolves.toBe(1);
   await expect(db.aIRun.count({ where: { workspaceId, action: "DISTILL_MATERIAL" } })).resolves.toBe(1);
   await expect(db.aIRun.findFirstOrThrow({ where: { workspaceId, action: "DISTILL_MATERIAL" }, select: { promptVersion: true } })).resolves.toEqual({ promptVersion: 3 });
@@ -109,12 +109,12 @@ test("distills one transcript, restores results, preserves history, and saves gr
   await complete.getByText(/为什么这么总结/).first().click();
   await expect(complete.locator("blockquote").first()).toContainText("先明确判断标准，再给具体步骤。");
   await complete.getByRole("button", { name: "留下这个" }).click();
-  await complete.getByLabel("方法名称").fill("我想试试的判断方法");
+  await complete.getByLabel("创作方法名称").fill("我想试试的判断方法");
   await complete.getByLabel("怎么用").fill("先给判断标准\n再给具体步骤");
   await complete.getByLabel("适合什么时候用").fill("需要解释复杂问题时");
   await complete.getByLabel("什么时候不太适合").fill("不要把来源作者的客户经历当成自己的事实");
-  await complete.getByRole("button", { name: "保存方法" }).dblclick();
-  await expect(complete).toContainText("已保存到我的方法");
+  await complete.getByRole("button", { name: "保存创作方法" }).dblclick();
+  await expect(complete).toContainText("已保存为创作方法");
   await expect(db.methodAsset.count({ where: { workspaceId, ownerUserId: user.id } })).resolves.toBe(1);
 
   await page.goto("/library/methods");
@@ -124,7 +124,7 @@ test("distills one transcript, restores results, preserves history, and saves gr
   await expect(methodDetail).toContainText("仅自己可见");
   const blockedDelete = await page.request.delete(`/api/source-items/${source.id}`);
   expect(blockedDelete.status()).toBe(409);
-  await expect(blockedDelete.json()).resolves.toMatchObject({ error: "SOURCE_IN_USE", message: "这条素材已经被研究结果或方法引用，暂时不能永久删除。你可以先归档。" });
+  await expect(blockedDelete.json()).resolves.toMatchObject({ error: "SOURCE_IN_USE", message: "这条素材已经被研究结果、方法或画布引用，暂时不能永久删除。你可以先归档。" });
   const storedMethod = await db.methodVersion.findFirstOrThrow({ where: { sourceMaterialDistillationId: { not: null }, asset: { workspaceId, ownerUserId: user.id } } });
   expect(storedMethod).toMatchObject({ sourceItemId: null, sourceMaterialAnalysisId: null, sourceBenchmarkStudyId: null });
 
@@ -145,10 +145,10 @@ test("distills one transcript, restores results, preserves history, and saves gr
 
   await db.transcript.update({ where: { id: transcript.id }, data: { fullText: `${transcript.fullText}后来补充。` } });
   await page.reload();
-  await expect(page.getByTestId("material-distillation-card")).toContainText("视频文字稿已更新，之前的提炼仍然保留");
+  await expect(page.getByTestId("material-distillation-card")).toContainText("文字稿已更新，之前的提炼仍然保留");
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "素材工作栏" }).click();
-  const workspaceDialog = page.getByRole("dialog", { name: "素材工作栏" });
+  await page.getByRole("button", { name: "资料工作栏" }).click();
+  const workspaceDialog = page.getByRole("dialog", { name: "资料工作栏" });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   expect(await workspaceDialog.getByTestId("material-distillation-card").innerText()).not.toMatch(/DistillationJob|Extraction|KnowledgeUnit|MaterialAnalysis|Evidence|AIRun|ApiUsage|Queue|Worker|Provider|Workspace|Schema|enum|JSON|Skill|Extractor/i);
   await workspaceDialog.getByRole("button", { name: "关闭", exact: true }).click();
@@ -158,8 +158,8 @@ test("distills one transcript, restores results, preserves history, and saves gr
   await page.reload();
   await expect(page.getByTestId("material-distillation-card").getByRole("button", { name: "重新提炼" })).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "素材工作栏" }).click();
-  const viewerWorkspace = page.getByRole("dialog", { name: "素材工作栏" });
+  await page.getByRole("button", { name: "资料工作栏" }).click();
+  const viewerWorkspace = page.getByRole("dialog", { name: "资料工作栏" });
   await viewerWorkspace.getByRole("tab", { name: "处理" }).click();
   await expect(viewerWorkspace.getByText("高级处理信息", { exact: true })).toHaveCount(0);
   expect((await page.request.post(`/api/source-items/${source.id}/distillation`, { data: { mode: "COMPREHENSIVE" } })).status()).toBe(403);

@@ -26,6 +26,16 @@ test("desktop shell uses available width without page overflow", async ({ page }
   await page.getByRole("button", { name: "创建 Workspace" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
 
+  const mainNav = page.getByRole("navigation", { name: "主导航" }).first();
+  for (const [label, href] of [["创作", "/dashboard"], ["资料", "/library"], ["研究", "/discovery"], ["方法", "/library/methods"]] as const) {
+    await expect(mainNav.getByRole("link", { name: label, exact: true })).toHaveAttribute("href", href);
+  }
+  await expect(mainNav.getByRole("link", { name: "项目", exact: true })).toHaveCount(0);
+  await mainNav.getByRole("link", { name: "资料", exact: true }).click();
+  await expect(page).toHaveURL(/\/library$/);
+  await expect(page.getByRole("heading", { name: "资料", exact: true })).toBeVisible();
+  await page.goto("/dashboard");
+
   const user = await db.user.findUniqueOrThrow({ where: { email }, include: { workspaceMemberships: true } });
   const workspaceId = user.workspaceMemberships[0]!.workspaceId;
   const sources = await Promise.all(Array.from({ length: 4 }, (_, index) => db.sourceItem.create({

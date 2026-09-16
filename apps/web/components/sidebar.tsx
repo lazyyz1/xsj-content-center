@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpenCheck, ChevronDown, Files, FolderKanban, Home, Lightbulb, Menu, PanelLeftClose, PanelLeftOpen, Pin, Settings, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { BookOpenCheck, ChevronDown, Files, Lightbulb, Menu, PanelLeftClose, PanelLeftOpen, PenLine, Pin, Settings, ShieldCheck, Sparkles, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -8,8 +8,7 @@ import { LogoutButton } from "./logout-button";
 import { GlobalSearch } from "./global-search";
 
 const links = [
-  { label: "开始创作", href: "/dashboard", icon: Home },
-  { label: "项目", href: "/projects", icon: FolderKanban },
+  { label: "创作", href: "/dashboard", icon: PenLine },
   { label: "研究", href: "/discovery", icon: Lightbulb },
   { label: "资料", href: "/library", icon: Files },
   { label: "方法", href: "/library/methods", icon: BookOpenCheck },
@@ -17,7 +16,6 @@ const links = [
 
 function isActive(pathname: string, href: string) {
   if (href === "/dashboard") return pathname === href;
-  if (href === "/projects") return pathname === href || (pathname.startsWith("/projects/") && !pathname.startsWith("/projects/methods"));
   if (href === "/library") return pathname.startsWith(href) && !pathname.startsWith("/library/methods");
   return pathname.startsWith(href);
 }
@@ -102,7 +100,7 @@ export function Sidebar({ workspaceName, userName, isSystemAdmin = false, recent
       <div className="flex h-full flex-col p-4">
         <Brand />
         <div className="mt-7"><Navigation pathname={pathname} /></div>
-        {recentProjects.length ? <section className="sidebar-recent"><header><span>最近工作</span><Link href="/projects">更多</Link></header>{recentProjects.map((project) => <Link key={project.id} href={`/dashboard?project=${project.id}`} title={project.title}><span>{project.title.slice(0, 1)}</span><div><strong>{project.title}</strong><small>{new Date(project.updatedAt).toLocaleDateString("zh-CN")}</small></div></Link>)}</section> : null}
+        {recentProjects.length ? <section className="sidebar-recent"><header><span>最近创作</span><Link href="/projects">更多</Link></header>{recentProjects.map((project) => <Link key={project.id} href={`/dashboard?project=${project.id}`} title={project.title}><span>{project.title.slice(0, 1)}</span><div><strong>{project.title}</strong><small>{new Date(project.updatedAt).toLocaleDateString("zh-CN")}</small></div></Link>)}</section> : null}
         <div className="sidebar-account mt-auto rounded-2xl border border-white/75 bg-white/55 p-2 shadow-[var(--shadow-xs)]">
           <details className="group">
             <summary className="flex min-h-12 list-none items-center gap-3 rounded-xl px-2 hover:bg-white/75">

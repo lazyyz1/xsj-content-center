@@ -115,14 +115,14 @@ test("saves, edits, versions, and privately manages an M1 method", async ({ page
 
   await page.goto(`/library/${source.id}`);
   const card = page.getByTestId("material-analysis-card");
-  await expect(card).toContainText("可以借鉴的方法");
-  await expect(card.getByRole("button", { name: "保存到我的方法" })).toBeVisible();
-  await card.getByRole("button", { name: "保存到我的方法" }).click();
-  await expect(card.getByRole("button", { name: "保存方法", exact: true })).toBeVisible();
-  await card.getByRole("button", { name: "保存方法", exact: true }).click();
-  await expect(card).toContainText("已保存到我的方法");
+  await expect(card).toContainText("可复用的创作方法");
+  await expect(card.getByRole("button", { name: "保存为创作方法" })).toBeVisible();
+  await card.getByRole("button", { name: "保存为创作方法" }).click();
+  await expect(card.getByRole("button", { name: "保存创作方法", exact: true })).toBeVisible();
+  await card.getByRole("button", { name: "保存创作方法", exact: true }).click();
+  await expect(card).toContainText("已保存为创作方法");
 
-  await page.getByRole("link", { name: "查看我的方法", exact: true }).click();
+  await page.getByRole("link", { name: "查看创作方法", exact: true }).click();
   await expect(page).toHaveURL(/\/library\/methods$/);
   await expect(page.getByRole("link", { name: /先说问题，再进入方案/ })).toBeVisible();
   await page.getByRole("link", { name: /先说问题，再进入方案/ }).click();
@@ -131,10 +131,10 @@ test("saves, edits, versions, and privately manages an M1 method", async ({ page
   await expect(detail).toContainText("方法来源视频");
   await expect(detail).toContainText("查看");
   await detail.getByRole("button", { name: "编辑方法" }).click();
-  await detail.getByLabel("方法名称").fill("先说问题，再给方案");
+  await detail.getByLabel("创作方法名称").fill("先说问题，再给方案");
   await detail.getByLabel("怎么用").fill("先说清问题\n再给出自己的处理方式");
-  await detail.getByRole("button", { name: "保存方法", exact: true }).click();
-  await expect(detail).toContainText("方法已保存，新版本已经保留");
+  await detail.getByRole("button", { name: "保存创作方法", exact: true }).click();
+  await expect(detail).toContainText("创作方法已保存，新版本已经保留");
   await expect(detail).toContainText("先说问题，再给方案");
   await expect(detail).toContainText("第 2 次修改");
 
@@ -145,7 +145,7 @@ test("saves, edits, versions, and privately manages an M1 method", async ({ page
   await expect(page.getByTestId("method-detail")).toContainText("来源文字稿后来更新过");
   await expect(page.getByTestId("method-detail")).toContainText("查看当前来源");
   await page.getByTestId("method-detail").getByRole("button", { name: "常用", exact: true }).click();
-  await expect(page.getByTestId("method-detail")).toContainText("方法状态已更新");
+  await expect(page.getByTestId("method-detail")).toContainText("创作方法状态已更新");
   expect(await page.getByTestId("method-detail").innerText()).not.toMatch(/MethodAsset|MethodVersion|PRIVATE|STALE|workspaceId|Transcript ID|Database|optimistic/);
 
   const methodId = (await db.methodAsset.findFirstOrThrow({ where: { workspaceId, ownerUserId: user.id } })).id;
@@ -187,7 +187,7 @@ test("uses explicit method versions in Studio and records each real generation a
 
   await page.goto(`/projects/${project.id}/studio`);
   const selector = page.getByTestId("studio-method-selector");
-  await expect(selector).toContainText("这次不额外选择私人方法，也会自动使用公司默认方法");
+  await expect(selector).toContainText("这次不额外选择私人创作方法，也会自动使用公司默认方法");
   await page.getByRole("button", { name: "生成我的口播稿" }).click();
   await expect(page.getByLabel("口播稿正文")).toHaveValue(/我从来没有做过加盟业务/);
   const zeroMethodRun = await db.aIRun.findFirstOrThrow({ where: { projectId: project.id, action: "GENERATE_MOTHER_CONTENT", status: "SUCCEEDED" }, orderBy: { createdAt: "desc" } });
@@ -196,9 +196,9 @@ test("uses explicit method versions in Studio and records each real generation a
 
   await db.projectMethodSelection.create({ data: { projectId: project.id, methodAssetId: asset.id, methodVersionId: oldVersion.id, selectedByUserId: user.id } });
   await page.reload();
-  await expect(selector).toContainText("这个方法后来修改过");
-  await selector.getByRole("button", { name: "选择我的方法" }).click();
-  const drawer = page.getByRole("dialog", { name: "选择我的方法" });
+  await expect(selector).toContainText("这个创作方法后来修改过");
+  await selector.getByRole("button", { name: "选择创作方法" }).click();
+  const drawer = page.getByRole("dialog", { name: "选择创作方法" });
   const latest = drawer.locator("article").filter({ hasText: "先说问题（最新版）" });
   await expect(latest.getByRole("button", { name: "选择", exact: true })).toBeDisabled();
   await expect(latest.getByRole("button", { name: "已选择", exact: true })).toHaveCount(0);
@@ -221,7 +221,7 @@ test("uses explicit method versions in Studio and records each real generation a
   await page.goto(`/library/methods/${asset.id}`);
   await page.getByTestId("method-detail").getByRole("button", { name: "已停用", exact: true }).click();
   await page.goto(`/projects/${project.id}/studio`);
-  await expect(page.getByTestId("studio-method-selector")).toContainText("这个方法已经停用");
+  await expect(page.getByTestId("studio-method-selector")).toContainText("这个创作方法已经停用");
   const runCount = await db.aIRun.count({ where: { projectId: project.id, action: "GENERATE_MOTHER_CONTENT" } });
   await page.getByRole("button", { name: "重新生成我的口播稿" }).click();
   await expect(page.getByLabel("口播稿标题")).toHaveValue("方法生成稿 4");
@@ -243,12 +243,12 @@ test("completes one continuous first-phase journey from transcript to an editabl
   await db.creativeBrief.create({ data: { workspaceId, projectId: project.id, createdById: user.id, topic: "把复杂问题讲清楚", angle: "", audience: "", coreMessage: "", background: "", keyPoints: [], structure: [], tone: "", risks: [] } });
 
   await page.goto(`/library/${source.id}`);
-  await expect(page.getByRole("heading", { name: "转写文本" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "文字稿" })).toBeVisible();
   await expect(page.getByText(sourceFact, { exact: false })).toBeVisible();
   const analysisCard = page.getByTestId("material-analysis-card");
-  await expect(analysisCard).toContainText("尚未拆解");
-  await analysisCard.getByRole("button", { name: "拆解这条内容" }).dblclick();
-  await expect(analysisCard).toContainText(/等待|处理中|正在拆解/);
+  await expect(analysisCard).toContainText("尚未理解");
+  await analysisCard.getByRole("button", { name: "内容理解" }).dblclick();
+  await expect(analysisCard).toContainText(/等待|处理中|正在整理内容理解/);
   await page.reload();
   await expect(page.getByTestId("material-analysis-card")).toContainText("这条内容是怎么讲的", { timeout: 20_000 });
   await expect(db.ingestJob.count({ where: { sourceItemId: source.id, jobType: "ANALYZE_MATERIAL" } })).resolves.toBe(1);
@@ -256,18 +256,18 @@ test("completes one continuous first-phase journey from transcript to an editabl
   const completedCard = page.getByTestId("material-analysis-card");
   await completedCard.getByText(/查看原文依据/).first().click();
   await expect(completedCard.getByText(sourceFact, { exact: false }).first()).toBeVisible();
-  await completedCard.getByRole("button", { name: "保存到我的方法" }).click();
-  await completedCard.getByRole("button", { name: "保存方法", exact: true }).dblclick();
-  await expect(completedCard).toContainText("已保存到我的方法");
+  await completedCard.getByRole("button", { name: "保存为创作方法" }).click();
+  await completedCard.getByRole("button", { name: "保存创作方法", exact: true }).dblclick();
+  await expect(completedCard).toContainText("已保存为创作方法");
   await expect(db.methodAsset.count({ where: { workspaceId, ownerUserId: user.id } })).resolves.toBe(1);
 
-  await completedCard.getByRole("link", { name: "查看我的方法" }).click();
+  await completedCard.getByRole("link", { name: "查看创作方法" }).click();
   await page.getByRole("link", { name: /先说问题，再进入方案/ }).click();
   let detail = page.getByTestId("method-detail");
   await detail.getByRole("button", { name: "编辑方法" }).click();
-  await detail.getByLabel("方法名称").fill("连续旅程方法");
-  await detail.getByRole("button", { name: "保存方法", exact: true }).click();
-  await expect(detail).toContainText("方法已保存，新版本已经保留");
+  await detail.getByLabel("创作方法名称").fill("连续旅程方法");
+  await detail.getByRole("button", { name: "保存创作方法", exact: true }).click();
+  await expect(detail).toContainText("创作方法已保存，新版本已经保留");
   await detail.getByRole("button", { name: "试用中", exact: true }).click();
   await page.reload();
   detail = page.getByTestId("method-detail");
@@ -288,8 +288,8 @@ test("completes one continuous first-phase journey from transcript to an editabl
   await page.getByRole("button", { name: "创作上下文" }).click();
   const contextDrawer = page.getByRole("dialog", { name: "创作上下文" });
   const selector = contextDrawer.getByTestId("studio-method-selector");
-  await selector.getByRole("button", { name: "选择我的方法" }).click();
-  const drawer = page.getByRole("dialog", { name: "选择我的方法" });
+  await selector.getByRole("button", { name: "选择创作方法" }).click();
+  const drawer = page.getByRole("dialog", { name: "选择创作方法" });
   await expect(drawer).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   const methodOption = drawer.locator("article").filter({ hasText: "连续旅程方法" });
@@ -364,8 +364,8 @@ test("shows personal method status and real 30-day usage without inferring a hab
   ] });
 
   await page.goto("/projects");
-  await page.getByRole("link", { name: "查看方法" }).click();
-  await expect(page.getByRole("heading", { name: "方法", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "查看创作方法" }).click();
+  await expect(page.getByRole("heading", { name: "创作方法", exact: true })).toBeVisible();
   await expect(page.getByText(/不会因为一次收藏或一次生成/)).toBeVisible();
   await expect(page.getByTestId("creator-methods-summary")).toContainText("4 次口播稿生成记录");
   await expect(page.getByTestId("core-methods")).toContainText("我确认的常用方法");
@@ -390,14 +390,14 @@ test("shows personal method status and real 30-day usage without inferring a hab
   await otherContext.addCookies(sessionCookies(otherRegistration));
   const otherPage = await otherContext.newPage();
   await otherPage.goto("/projects/methods");
-  await expect(otherPage.getByText("还没有创作方法")).toBeVisible();
+  await expect(otherPage.getByText("还没有自己的创作方法")).toBeVisible();
   expect(await otherPage.locator("main.app-main").innerText()).not.toContain("我确认的常用方法");
   await otherContext.close();
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByTestId("core-methods").getByRole("link", { name: "查看/调整方法" }).click();
   await page.getByTestId("method-detail").getByRole("button", { name: "试用中", exact: true }).click();
-  await expect(page.getByTestId("method-detail")).toContainText("方法状态已更新");
+  await expect(page.getByTestId("method-detail")).toContainText("创作方法状态已更新");
   await page.goto("/projects/methods");
   await expect(page.getByTestId("core-methods")).not.toContainText("我确认的常用方法");
   await expect(page.getByTestId("trial-methods")).toContainText("我确认的常用方法");
