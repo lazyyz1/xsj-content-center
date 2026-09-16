@@ -4,6 +4,8 @@ import { Button } from "@content-center/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+const unavailableMessage = "语音转写服务暂时不可用，请联系管理员。";
+
 export function TranscriptionActions({
   sourceId,
   canTranscribe,
@@ -33,8 +35,8 @@ export function TranscriptionActions({
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.message || result.error || "无法创建转写任务");
       router.refresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "无法创建转写任务");
+    } catch {
+      setMessage(unavailableMessage);
     } finally {
       setBusy(false);
     }
@@ -57,7 +59,7 @@ export function TranscriptionActions({
           {alreadyBusy ? "转写中…" : hasTranscript || retry ? "重新转写" : "开始转写"}
         </Button>
       ) : null}
-      {canTranscribe && !configured && !alreadyBusy ? <span className="text-sm text-[var(--text-secondary)]">语音转写服务暂时不可用，请联系管理员。</span> : null}
+      {canTranscribe && !configured && !alreadyBusy ? <span className="text-sm text-[var(--text-secondary)]">{unavailableMessage}</span> : null}
       {fullText ? <Button variant="secondary" disabled={busy} onClick={copy}>复制全文</Button> : null}
       {message ? <span role="status" className="text-sm text-[var(--text-secondary)]">{message}</span> : null}
     </div>

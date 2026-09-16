@@ -56,6 +56,7 @@ describe("video content production", () => {
   it("keeps the material workbench non-linear and moves secondary operations behind more", () => {
     const workspace = readFileSync(new URL("../components/library/material-workspace.tsx", import.meta.url), "utf8");
     const analysis = readFileSync(new URL("../components/library/material-analysis-card.tsx", import.meta.url), "utf8");
+    const detailPage = readFileSync(new URL("../app/(app)/library/[id]/page.tsx", import.meta.url), "utf8");
     expect(workspace).toContain("当前已有成果");
     expect(workspace).toContain("现在最值得做");
     expect(workspace).toContain("不会强制按顺序研究");
@@ -66,5 +67,9 @@ describe("video content production", () => {
     expect(analysis).toContain("查看原文依据");
     expect(analysis).toContain("历史拆解");
     expect(analysis).toContain("<details");
+    expect(detailPage).toContain("material-transcript-disclosure");
+    expect(detailPage).toContain("hasConfirmableInformation");
+    expect(detailPage).toContain("recommendedAction");
+    expect(detailPage).toContain("内容已准备好");
   });
 });

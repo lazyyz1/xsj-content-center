@@ -6,8 +6,8 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { TranscriptionActions } from "./transcription-actions";
 
-export function TranscriptPanel({ sourceId, status, method, quality, processingTime, fullText, canEdit, canTranscribe, configured, busy, failed = false, preview = false, message }: {
-  sourceId: string; status: string; method: string; quality: string; processingTime: string; fullText?: string; canEdit: boolean; canTranscribe: boolean; configured: boolean; busy: boolean; failed?: boolean; preview?: boolean; message?: string;
+export function TranscriptPanel({ sourceId, status, method, quality, processingTime, updatedAt, fullText, canEdit, canTranscribe, configured, busy, failed = false, preview = false, message, compact = false }: {
+  sourceId: string; status: string; method: string; quality: string; processingTime: string; updatedAt?: string; fullText?: string; canEdit: boolean; canTranscribe: boolean; configured: boolean; busy: boolean; failed?: boolean; preview?: boolean; message?: string; compact?: boolean;
 }) {
   const router = useRouter();
   const [reading, setReading] = useState(false);
@@ -33,7 +33,7 @@ export function TranscriptPanel({ sourceId, status, method, quality, processingT
           : !configured ? <div className="transcript-empty-state"><h3>当前暂时无法生成文字稿</h3><p>转写服务尚未准备好。原始素材仍可查看，服务恢复后可以从这里继续。</p></div>
             : <div className="transcript-empty-state"><h3>还没有文字稿</h3><p>生成文字稿后，可以继续看懂内容、提炼值得学的东西或找选题。</p></div>;
   return <Card id="transcript-panel" className="source-transcript-card p-5" data-testid="transcript-panel">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">转文字稿</h2><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--text-secondary)]"><span>方式：{method}</span><span>质量：{quality}</span><span>耗时：{processingTime}</span></div></div><Badge>{preview ? `状态预览 · ${status}` : status}</Badge></div>
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">转文字稿</h2><div className={`mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--text-secondary)] ${compact ? "transcript-meta-compact" : ""}`}><span>状态：{preview ? `状态预览 · ${status}` : status}</span><span>方式：{method}</span><span>质量：{quality}</span><span>耗时：{processingTime}</span>{updatedAt ? <span>更新：{updatedAt}</span> : null}</div></div>{compact ? null : <Badge>{preview ? `状态预览 · ${status}` : status}</Badge>}</div>
     {message && fullText ? <p className="mt-4 text-sm text-[var(--text-secondary)]">{message}</p> : null}
     <div data-testid="transcript-scroll-region" className="source-transcript-scroll mt-4 overflow-y-auto rounded-xl border bg-[var(--surface-elevated)]">{body}</div>
     <div className="source-transcript-actions mt-4 flex flex-wrap gap-2">

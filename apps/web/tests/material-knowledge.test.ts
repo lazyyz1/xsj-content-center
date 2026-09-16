@@ -44,7 +44,7 @@ describe("Phase 10D-1 material knowledge", () => {
     output = { candidates: [{ content: "去年服务了12所学校", category: "NUMBER", excerpt: "去年我们一共服务了12所学校。", segmentIndex: 0, confidence: 0.96 }, { content: "内容要先解决真实问题", category: "VIEWPOINT", excerpt: "我的判断是内容要先解决真实问题。", segmentIndex: 1, confidence: 0.9 }] };
     const first = await extractMaterialKnowledge({ workspaceId, userId: ownerId, sourceItemId: ownSourceId }, { controlService }); const second = await extractMaterialKnowledge({ workspaceId, userId: ownerId, sourceItemId: ownSourceId }, { controlService });
     expect(first).toMatchObject({ created: 2, ownership: "OWN" }); expect(second.created).toBe(0);
-    const state = await getMaterialKnowledge({ workspaceId, userId: ownerId, sourceItemId: ownSourceId }); expect(state.status).toBe("REVIEW"); expect(state.candidates).toEqual(expect.arrayContaining([expect.objectContaining({ category: "数字", ownership: "OWN", status: "PENDING", locator: expect.objectContaining({ kind: "TRANSCRIPT_SEGMENT", segmentIndex: 0, startMs: 1_112_000 }) })]));
+    const state = await getMaterialKnowledge({ workspaceId, userId: ownerId, sourceItemId: ownSourceId }); expect(state.status).toBe("REVIEW"); expect(state.candidates).toEqual(expect.arrayContaining([expect.objectContaining({ category: "数字", ownership: "OWN", status: "PENDING", canConfirm: true, canReject: true, locator: expect.objectContaining({ kind: "TRANSCRIPT_SEGMENT", segmentIndex: 0, startMs: 1_112_000 }) })]));
   });
 
   it("keeps unclassified manual text UNKNOWN and never treats model ownership as authority", async () => {
@@ -86,13 +86,13 @@ describe("Phase 10D-1 material knowledge", () => {
     output = { candidates: [{ content: "该博主表示服务了20所学校", category: "CASE", ownership: "OWN", excerpt: "这个博主说他们服务了20所学校。", segmentIndex: 0, confidence: 0.92 }] };
     const extracted = await extractMaterialKnowledge({ workspaceId, userId: ownerId, sourceItemId: externalSourceId }, { controlService }); expect(extracted).toMatchObject({ created: 1, ownership: "EXTERNAL" });
     const candidate = await db.evidenceItem.findFirstOrThrow({ where: { sourceItemId: externalSourceId } }); expect(candidate).toMatchObject({ ownership: "EXTERNAL", status: "CONFIRMED" });
-    expect(await getMaterialKnowledge({ workspaceId, userId: ownerId, sourceItemId: externalSourceId })).toMatchObject({ status: "COMPLETE", candidates: [expect.objectContaining({ ownershipLabel: "外部来源", statusLabel: "外部参考" })] });
+    expect(await getMaterialKnowledge({ workspaceId, userId: ownerId, sourceItemId: externalSourceId })).toMatchObject({ status: "COMPLETE", candidates: [expect.objectContaining({ ownershipLabel: "外部来源", statusLabel: "外部参考", canConfirm: false, canReject: false })] });
     const built = await new ProjectContextBuilder().build({ workspaceId, userId: ownerId, projectId, action: "PROJECT_ASSISTANT" }); expect(built.ownFacts.map(({ sourceId }) => sourceId)).not.toContain(candidate.id); expect(JSON.stringify(built.context)).toContain(candidate.id);
   });
 
   it("keeps the migration and employee-facing orchestration contract", async () => {
     const [migration, ingest, transcription, card] = await Promise.all([readFile(new URL("../../../packages/db/prisma/migrations/20260913200000_material_knowledge_candidates/migration.sql", import.meta.url), "utf8"), readFile(new URL("../../worker/src/ingest.ts", import.meta.url), "utf8"), readFile(new URL("../../worker/src/transcription.ts", import.meta.url), "utf8"), readFile(new URL("../components/library/material-knowledge-card.tsx", import.meta.url), "utf8")]);
     expect(migration).toContain('CREATE TYPE "EvidenceOwnership"'); expect(migration).toContain('CREATE TYPE "EvidenceStatus"'); expect(migration).not.toMatch(/DROP TABLE|DROP COLUMN/u);
-    expect(ingest).toContain("requestMaterialAnalysisJob"); expect(transcription).toContain("requestMaterialAnalysisJob"); expect(card).toContain("整理结果"); expect(card).not.toMatch(/INGEST|TRANSCRIBE|ANALYZE|DISTILL/u);
+    expect(ingest).toContain("requestMaterialAnalysisJob"); expect(transcription).toContain("requestMaterialAnalysisJob"); expect(card).toContain("整理结果"); expect(card).toContain("编辑待确认内容"); expect(card).toContain('decide(candidate.id, "CONFIRM", edits[candidate.id])'); expect(card).not.toMatch(/INGEST|TRANSCRIBE|ANALYZE|DISTILL/u);
   });
 });

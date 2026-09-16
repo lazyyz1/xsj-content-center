@@ -14,7 +14,7 @@ async function request(url: string, method: string, body?: unknown) {
   return result;
 }
 
-export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt: latestInitial, job: jobInitial, history, canEdit, llmStatus, hasTranscript, embedded = false, showCreateAction = true }: {
+export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt: latestInitial, job: jobInitial, history, canEdit, llmStatus, hasTranscript, embedded = false, showCreateAction = true, compact = false }: {
   sourceId: string;
   current: MaterialAnalysisDTO | null;
   latestAttempt: MaterialAnalysisDTO | null;
@@ -25,6 +25,7 @@ export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt
   hasTranscript: boolean;
   embedded?: boolean;
   showCreateAction?: boolean;
+  compact?: boolean;
 }) {
   const router = useRouter();
   const analysisStarting = useRef(false);
@@ -72,18 +73,18 @@ export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt
   const statusLabel = processing ? (job?.status === "QUEUED" ? "等待" : "处理中") : failed ? "需要重试" : currentResult ? "已完成" : "尚未拆解";
   const actionLabel = failed || currentResult ? "重新拆解" : "拆解这条内容";
 
-  return <Container className={embedded ? "material-analysis-panel" : "p-5"} data-testid="material-analysis-card">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">看懂这条</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">先弄清这条到底在讲什么、面向谁，以及表达是怎样展开的。</p></div><Badge>{statusLabel}</Badge></div>
+  return <Container className={`${embedded ? "material-analysis-panel" : "p-5"}${compact ? " material-analysis-compact" : ""}`} data-testid="material-analysis-card">
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">{compact ? "AI 已帮你看完这条内容" : "看懂这条"}</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">{compact ? "从主题、关键观点和可用信息里提炼重点。" : "先弄清这条到底在讲什么、面向谁，以及表达是怎样展开的。"}</p></div><Badge>{statusLabel}</Badge></div>
     {!hasTranscript && !currentResult ? <div className="material-feature-state"><p>完成文字稿后，可以继续判断这条内容在讲什么、面向谁，以及表达怎样展开。</p><Button variant="secondary" disabled>完成文字稿后可用</Button></div> : null}
-    {hasTranscript && !configured && !currentResult ? <div className="mt-4 rounded-xl border border-dashed p-4 text-sm text-[var(--text-secondary)]">内容理解暂时不可用，请联系管理员。</div> : null}
+    {hasTranscript && !configured && !currentResult ? <div className="material-feature-state">暂时没有可用的内容理解结果。</div> : null}
     {processing ? <div className="material-feature-state is-processing"><p className="font-medium">正在看懂这条内容</p><p>可以继续阅读文字稿，完成后结果会显示在这里。已有历史结果仍然保留。</p><div className="material-state-skeleton"><i /><i /><i /></div></div> : null}
     {failed ? <div className="material-feature-state is-failed"><p className="font-medium">这次没有处理成功，可以重新尝试。</p><p>已有的历史结果不会受到影响。</p></div> : null}
     {currentResult?.stale ? <div className="mt-4 rounded-xl border border-[var(--warning)] p-4 text-sm"><p className="font-medium text-[var(--warning)]">视频文字稿已更新，当前拆解基于旧版本。</p><p className="mt-1 text-[var(--text-secondary)]">旧拆解仍可查看，重新拆解后才会采用最新文字稿。</p></div> : null}
-    {currentResult?.status === "COMPLETED" && currentResult.understanding ? <UnderstandingView value={currentResult.understanding} analysisId={currentResult.id} canSave={canEdit} /> : null}
+    {currentResult?.status === "COMPLETED" && currentResult.understanding ? compact ? <><CompactUnderstandingView value={currentResult.understanding} />{isCurrent(currentResult.understanding) && currentResult.understanding.methods.items.length ? <MethodRecoveryView analysisId={currentResult.id} value={currentResult.understanding} canSave={canEdit} /> : null}</> : <UnderstandingView value={currentResult.understanding} analysisId={currentResult.id} canSave={canEdit} /> : null}
     {history.filter((item) => item.status === "COMPLETED" && item.id !== currentResult?.id).length ? <details className="mt-5 rounded-xl border p-4"><summary className="cursor-pointer text-sm font-medium">历史拆解</summary><div className="mt-3 grid gap-3">{history.filter((item) => item.status === "COMPLETED" && item.id !== currentResult?.id).map((item) => <details key={item.id} className="rounded-lg bg-[var(--surface-elevated)] p-3 text-sm"><summary className="cursor-pointer font-medium">第 {item.version} 版 · {item.summary || "暂无摘要"}</summary>{item.understanding ? <div className="mt-3"><UnderstandingView value={item.understanding} /></div> : <p className="mt-2 text-[var(--text-secondary)]">暂无可展开的完整结果。</p>}</details>)}</div></details> : null}
     {confirming ? <div className="mt-4 rounded-xl border border-[var(--warning)] p-4 text-sm"><p>会生成一份新的拆解，旧版本仍会保留。</p><div className="mt-3 flex gap-2"><Button disabled={busy} onClick={analyze}>确认重新拆解</Button><Button variant="secondary" onClick={() => setConfirming(false)}>取消</Button></div></div> : null}
     {error ? <p role="alert" className="mt-4 text-sm text-[var(--danger)]">{error}</p> : null}{notice ? <p role="status" className="mt-4 text-sm text-[var(--success)]">{notice}</p> : null}
-    {canEdit ? <div className="mt-5 flex flex-wrap gap-2">{hasTranscript && configured && !processing ? <Button variant="secondary" disabled={busy || confirming} onClick={analyze}>{busy ? "提交中…" : actionLabel}</Button> : null}{showCreateAction && currentResult?.status === "COMPLETED" ? <Button disabled={busy} onClick={createContent}>基于这条素材创作</Button> : null}</div> : null}
+    {canEdit ? <div className="mt-5 flex flex-wrap gap-2">{hasTranscript && configured && !processing ? <Button data-testid="material-analysis-action" variant="secondary" disabled={busy || confirming} onClick={analyze}>{busy ? "提交中…" : actionLabel}</Button> : null}{showCreateAction && currentResult?.status === "COMPLETED" ? <Button disabled={busy} onClick={createContent}>基于这条素材创作</Button> : null}</div> : null}
   </Container>;
 }
 
@@ -91,8 +92,25 @@ function isCurrent(value: MaterialAnalysisOutput): value is CurrentMaterialAnaly
   return "expression" in value && "methods" in value;
 }
 
+function MethodRecoveryView({ analysisId, value, canSave }: { analysisId: string; value: CurrentMaterialAnalysisOutput; canSave: boolean }) {
+  return <details id="material-methods" className="material-methods-recovery"><summary>可复用方法 <small>{value.methods.items.length} 条</small></summary><div>{value.methods.items.map((item, index) => <MethodCard key={`${item.title}-${index}`} value={item} analysisId={analysisId} methodIndex={index} canSave={canSave} />)}</div></details>;
+}
+
 type Evidence = { quote: string; startMs?: number; endMs?: number };
 type MaterialAnalysisRequestDTO = Omit<MaterialAnalysisDTO, "status"> & { jobId: string; status: "QUEUED" };
+
+function CompactUnderstandingView({ value }: { value: MaterialAnalysisOutput }) {
+  if (!isCurrent(value)) return <div className="material-compact-understanding" data-testid="material-analysis-compact"><section className="material-summary-result"><h3>一句话总结</h3><p>{value.whatItSays.summary}</p></section><section className="material-key-points"><h3>关键观点</h3><ul>{value.whatItSays.keyPoints.slice(0, 6).map((point) => <li key={point}>{point}</li>)}</ul></section>{value.reusable.length ? <section className="material-reusable-preview"><h3>值得参考的表达</h3>{value.reusable.slice(0, 3).map((item) => <article key={item.content}><strong>{item.content}</strong><p>{item.whyUseful}</p></article>)}</section> : null}</div>;
+  const expressionSections = [
+    { title: "主要说给谁听", value: value.expression.audience.summary, evidence: value.expression.audience.evidence },
+    { title: "开头怎么抓住人", value: value.expression.opening.summary, evidence: value.expression.opening.evidence },
+    { title: "内容怎么往下推进", value: value.expression.progression.summary, evidence: value.expression.progression.evidence, steps: value.expression.progression.steps },
+    { title: "用什么方式让人相信", value: value.expression.support.summary, evidence: value.expression.support.evidence },
+    { title: "情绪和表达节奏", value: value.expression.emotionalOrRhetoricalShift.summary, evidence: value.expression.emotionalOrRhetoricalShift.evidence },
+    { title: "怎么收尾", value: value.expression.ending.summary, evidence: value.expression.ending.evidence },
+  ];
+  return <div className="material-compact-understanding" data-testid="material-analysis-compact"><section className="material-summary-result"><h3>一句话总结</h3><p>{value.whatItSays.summary}</p><EvidenceDetails items={value.whatItSays.evidence} /></section><section className="material-key-points"><h3>关键观点</h3><ul>{value.whatItSays.keyPoints.slice(0, 6).map((point) => <li key={point}>{point}</li>)}</ul></section>{value.reusable.length ? <section className="material-reusable-preview"><h3>值得参考的表达</h3>{value.reusable.slice(0, 3).map((item) => <article key={item.content}><strong>{item.content}</strong><p>{item.whyUseful}</p></article>)}</section> : null}<section className="material-expression-preview"><header><h3>表达与结构拆解 <small>6 项</small></h3></header><div>{expressionSections.slice(0, 2).map((item) => <AnalysisSection key={item.title} {...item} />)}</div>{expressionSections.length > 2 ? <details><summary>展开全部</summary><div>{expressionSections.slice(2).map((item) => <AnalysisSection key={item.title} {...item} />)}</div></details> : null}</section>{(value.doNotCopy.length || value.uncertain.length) ? <details className="material-cautions-preview"><summary>需要留意的地方</summary><div><CautionList title="不建议照搬" items={value.doNotCopy} /><CautionList title="还需要确认" items={value.uncertain} /></div></details> : null}</div>;
+}
 
 function UnderstandingView({ value, analysisId, canSave = false }: { value: MaterialAnalysisOutput; analysisId?: string; canSave?: boolean }) {
   if (!isCurrent(value)) return <LegacyUnderstandingView value={value} />;
