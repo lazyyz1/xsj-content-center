@@ -2,7 +2,7 @@
 
 - 审计日期：2026-09-16
 - 稳定基线：`feat/production-readiness-v1b` / `09fe9c211145e04ec7d6430805e326c98364d048`
-- 阶段：P3 Phase A，仅审计，不删除
+- 阶段：P3 Phase B Batch 2，清理首批孤儿 CSS + 审计第二批 UI；不删除第二批组件或数据库对象
 - 证据优先级：生产 import / route > API / service 调用链 > 测试 > 数据库现实
 
 本账本只记录历史模块的真实状态和后续处理建议。`LEGACY_UNUSED` 只适用于当前层级没有生产入口的模块；如果它背后的 API、Service、数据库模型或真实数据仍被其他路径使用，必须单独保留后端能力，不能因为 UI 废弃而级联删除。
@@ -25,7 +25,7 @@
   └─ Material Detail → Transcript → MaterialAnalysis → MaterialKnowledge → MaterialDistillation → 进入创作
 ```
 
-本轮通过静态生产引用扫描确认，以下 10 个组件文件没有被当前生产代码 import：
+P3 Phase A 通过静态生产引用扫描确认，以下 10 个组件文件没有被当前生产代码 import：
 
 - `assistant-dock.tsx`
 - `dashboard-assistant.tsx`
@@ -38,7 +38,7 @@
 - `deep-content-workspace.tsx`
 - `ai-creation-panel.tsx`
 
-其中前五个是纯 UI 残留，满足进入小规模删除候选的静态条件。后三个虽然 UI 没有当前入口，但分别连接 Unified Analysis、Deep Content 和 Evidence 相关后端能力，不能直接删除其 API、Service、Model 或数据。
+其中第一批五个纯 UI 残留已在 P3 Phase B Batch 1 删除。其余历史 UI 虽然没有当前入口，但分别连接 Unified Analysis、Deep Content、Evidence、Project transition 或 ingest retry 能力，不能直接级联删除其 API、Service、Model 或数据。
 
 真实数据库检查未完成：本机 `.env.local-real` 指向的 `127.0.0.1:55432/content_center` 当前不可达，Docker Compose 开发服务也未运行。因此所有数据库行数均不臆测为 0；相关项统一记录为 `UNKNOWN`。旧诊断文档中的历史快照只能作为历史证据，不能代替本次数据库复核。
 
@@ -46,11 +46,11 @@
 
 | 模块 | UI | API | Service | DB | Real Data | 当前入口 | 替代能力 | 状态 | 建议 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| AssistantDock | 文件存在；无生产 import；仅被自身 CSS 命中 | 无专属 API | 无 | N/A | N/A | 无 | 当前 Studio `StudioDefaultMethod`、Discovery 自有助手、全局搜索 | `LEGACY_UNUSED` | 进入第一批纯 UI 删除候选；不删除 AssistantThread 或统一助手服务 |
-| DashboardAssistant | 文件存在；无生产 import；只有 `.dashboard-help-*` CSS | 无 | 无 | N/A | N/A | 无 | `WorkbenchStart` 和项目态 `StudioShell` | `LEGACY_UNUSED` | 进入第一批纯 UI 删除候选 |
-| AssistantShell | 只被 AssistantDock / DashboardAssistant 两个未使用组件引用 | 无 | 无 | N/A | N/A | 无 | 当前助手由 `StudioDefaultMethod` 自有 UI 渲染 | `LEGACY_UNUSED` | 与两个旧助手组件一起评估删除；本轮不删除 |
-| CreationLaunchpad | 文件存在；无生产 import；旧 Dashboard 入口 | 仅客户端路由跳转，无业务 API | 无 | N/A | N/A | 无 | `WorkbenchStart` | `LEGACY_UNUSED` | 进入第一批纯 UI 删除候选；相关旧 CSS 暂不删除 |
-| LibrarySubnav | 文件存在；无生产 import | 无 | 无 | N/A | N/A | 无 | Library / Methods 页面自己的标题区与链接 | `LEGACY_UNUSED` | 进入第一批纯 UI 删除候选 |
+| AssistantDock | 已在 Batch 1 删除；删除前无生产 import；仅被自身 CSS 命中 | 无专属 API | 无 | N/A | N/A | 无 | 当前 Studio `StudioDefaultMethod`、Discovery 自有助手、全局搜索 | `LEGACY_UNUSED` | 已删除；不删除 AssistantThread 或统一助手服务 |
+| DashboardAssistant | 已在 Batch 1 删除；删除前无生产 import；只有 `.dashboard-help-*` CSS | 无 | 无 | N/A | N/A | 无 | `WorkbenchStart` 和项目态 `StudioShell` | `LEGACY_UNUSED` | 已删除 |
+| AssistantShell | 已在 Batch 1 删除；删除前只被 AssistantDock / DashboardAssistant 使用 | 无 | 无 | N/A | N/A | 无 | 当前助手由 `StudioDefaultMethod` 自有 UI 渲染 | `LEGACY_UNUSED` | 已删除；不影响当前 Studio Assistant |
+| CreationLaunchpad | 已在 Batch 1 删除；删除前无生产 import；旧 Dashboard 入口 | 仅客户端路由跳转，无业务 API | 无 | N/A | N/A | 无 | `WorkbenchStart` | `LEGACY_UNUSED` | 已删除；专属 CSS 在本轮 Batch 2 清理 |
+| LibrarySubnav | 已在 Batch 1 删除；删除前无生产 import | 无 | 无 | N/A | N/A | 无 | Library / Methods 页面自己的标题区与链接 | `LEGACY_UNUSED` | 已删除 |
 | RetryIngestButton | 文件存在；无生产 import | 调用 `/api/ingest-jobs/[id]/retry` | 重试 endpoint 与 Worker 仍有效 | `IngestJob` | UNKNOWN | 无 | 资料详情 `SourceActions` 的“重试采集” | `LEGACY_UNUSED`（UI 层） | 只可删除组件文件；保留 retry API、Worker 和失败重试能力 |
 | ProjectStatusPanel | 文件存在；无生产 import | 调用 `/api/projects/[id]/transition` 和项目删除 API | `project-service.transitionProjectStatus` 仍被项目页使用 | `ContentProject` | UNKNOWN | 无 | 当前项目页状态分组和 `ProjectCardMenu` | `LEGACY_UNUSED`（UI 层） | 不列入第一批；先确认旧项目详情外部依赖，再删 UI |
 | ProjectArchiveButton | 文件存在；无生产 import | 调用项目 transition API | 同一 transition service 仍有效 | `ContentProject` | UNKNOWN | 无 | `ProjectCardMenu` | `LEGACY_UNUSED`（UI 层） | 不删除共享归档能力；后续可删除纯 UI 文件 |
@@ -129,17 +129,17 @@ EvidenceBoard 是 UI 层残留；EvidenceItem、ownership、FactGate 和来源�
 
 这三条 redirect 仍被历史 E2E、旧文档和外部书签引用，归类为 `ACTIVE_COMPATIBILITY`，本轮不删除。
 
-## 4. Safe Delete Candidates
+## 4. Safe Delete Candidates / Batch 1 Result
 
-以下是第一批最多 5 个纯 UI 候选，仅代表“可以进入 Phase B 决策”，本轮没有删除：
+以上五个候选已在 P3 Phase B Batch 1 执行删除；本轮 Batch 2 不再处理它们：
 
 | 候选 | 证据 | 替代 | 结论 |
 | --- | --- | --- | --- |
-| `apps/web/components/assistant-dock.tsx` | 无生产 import、无 route、无 API、无 DB、无测试依赖；仅保留旧 CSS | Studio / Discovery 当前助手 | `SAFE_DELETE_CANDIDATE` |
-| `apps/web/components/dashboard-assistant.tsx` | 无生产 import、无 route、无 API、无 DB、无测试依赖 | `WorkbenchStart` 与项目态 Studio | `SAFE_DELETE_CANDIDATE` |
-| `apps/web/components/assistant-shell.tsx` | 只被上述两个旧助手组件使用；无独立 route/API/DB | 当前 Studio / Discovery 自有助手 UI | `SAFE_DELETE_CANDIDATE`，应与旧助手一起处理 |
-| `apps/web/components/creation-launchpad.tsx` | 无生产 import、无 route、无业务 API、无 DB、无测试依赖 | `WorkbenchStart` | `SAFE_DELETE_CANDIDATE` |
-| `apps/web/components/library/library-subnav.tsx` | 无生产 import、无 route、无 API、无 DB、无测试依赖 | Library / Methods 页面 header links | `SAFE_DELETE_CANDIDATE` |
+| `apps/web/components/assistant-dock.tsx` | 删除前满足无生产 import、无 route、无 API、无 DB、无测试依赖 | Studio / Discovery 当前助手 | `DELETED_BATCH_1` |
+| `apps/web/components/dashboard-assistant.tsx` | 删除前满足无生产 import、无 route、无 API、无 DB、无测试依赖 | `WorkbenchStart` 与项目态 Studio | `DELETED_BATCH_1` |
+| `apps/web/components/assistant-shell.tsx` | 删除前确认只被上述两个旧助手组件使用 | 当前 Studio / Discovery 自有助手 UI | `DELETED_BATCH_1` |
+| `apps/web/components/creation-launchpad.tsx` | 删除前满足无生产 import、无 route、无业务 API、无 DB、无测试依赖 | `WorkbenchStart` | `DELETED_BATCH_1` |
+| `apps/web/components/library/library-subnav.tsx` | 删除前满足无生产 import、无 route、无 API、无 DB、无测试依赖 | Library / Methods 页面 header links | `DELETED_BATCH_1` |
 
 严格条件说明：
 
@@ -203,15 +203,15 @@ EvidenceBoard 是 UI 层残留；EvidenceItem、ownership、FactGate 和来源�
 
 ## 9. Legacy CSS Inventory
 
-本轮只盘点，不删除 `apps/web/app/globals.css`。
+P3 Phase B Batch 2 已删除确认无生产引用的第一批孤儿 CSS；未删除任何 Active 页面样式。
 
 | CSS 组 | 生产引用判断 | 状态 | 处理建议 |
 | --- | --- | --- | --- |
-| `.assistant-dock-*` | 只有旧 AssistantDock 文件和全局历史 selector；无生产 import | `LEGACY_UNUSED` | 与 AssistantDock Phase B 一起删除；本轮保留 |
-| `.dashboard-help-*` | 只有 DashboardAssistant 文件和全局 CSS；无生产 import | `LEGACY_UNUSED` | 与 DashboardAssistant 一起删除；本轮保留 |
-| `.dashboard-v2`、`.creation-launchpad`、`.creation-composer` | `CreationLaunchpad` 无生产 import；当前使用 `.workbench-start` | `LEGACY_UNUSED` | 先保留以避免 CSS 大清理；Phase B 再删 |
+| `.assistant-dock-*` | 删除前仅存在于 `globals.css`；对应组件已在 Batch 1 删除 | `REMOVED_BATCH_2` | 已删除孤儿规则 |
+| `.dashboard-help-*` | 删除前仅存在于 `globals.css`；DashboardAssistant 已在 Batch 1 删除 | `REMOVED_BATCH_2` | 已删除孤儿规则 |
+| `.dashboard-v2`、`.creation-launchpad`、`.creation-composer` | 删除前无 TS/TSX、测试或动态 class 引用；当前使用 `.workbench-start` | `REMOVED_BATCH_2` | 已删除旧 Dashboard / Launchpad 规则 |
 | `.studio-v2`、`.assistant-is-closed` | 旧三栏 Studio 规则；当前 Studio 使用 `.dashboard-workbench` / `.content-workbench` | `LEGACY_UNUSED` / 需逐段复核 | 不做全文件重构；按 selector 使用情况逐段处理 |
-| `.assistant-shell-*`、`.workspace-assistant` | 主要服务旧 AssistantShell / 旧工作区助手；当前 Studio assistant 使用自有结构 | `LEGACY_UNUSED`（`assistant-shell` 相关） | 先处理组件依赖，再清 CSS |
+| `.assistant-shell-*`、`.workspace-assistant` | 删除前无 TS/TSX、测试或动态 class 引用；当前 Studio assistant 使用自有结构 | `REMOVED_BATCH_2` | 已删除孤儿规则 |
 | `.dashboard-workbench`、`.content-workbench`、`.workbench-assistant` | `dashboard/page.tsx`、StudioShell、ContentCanvas 当前真实使用 | `ACTIVE` | 不删除 |
 | `.research-workbench-shell`、`.research-assistant` | DiscoveryWorkspace 当前真实使用 | `ACTIVE` | 不删除 |
 | `.material-*`、`.source-*`、`.transcript-*`、`.distillation-*` | `/library/[id]` 资料详情当前真实使用 | `ACTIVE` | 由 P1 capability baseline 保护 |
@@ -270,36 +270,72 @@ EvidenceBoard 是 UI 层残留；EvidenceItem、ownership、FactGate 和来源�
 
 未跟踪历史诊断文档曾记录一次旧数据库快照：`AssistantThread=4`、`PromptTemplate=18`、`UnifiedCreativeAnalysis=0`、`DeepContentPackage=0`、`EvidenceItem=0`。该快照没有当前数据库复核效力，只用于说明为什么本轮不能把“代码无入口”直接等同于“真实数据为 0”。
 
+## P3 Batch 1 Cleanup Result
+
+- 已删除 5 个纯 UI 历史组件：AssistantDock、DashboardAssistant、AssistantShell、CreationLaunchpad、LibrarySubnav。
+- Batch 1 删除 commit：`ee0fd595c1f3cd5487efa36ca0fc2d2dfcf246d3`。
+- Phase A Ledger commit：`ecc0e4b735b5b3be87d5b9b5c90383abe158d9ff`。
+- 本轮 Batch 2 清理了上述组件留下的孤儿 CSS；没有删除 Active CSS。
+- CSS diff：删除 235 行旧规则，并保留 3 个包含 Active 工作台规则的精确 selector 调整。
+- CSS 删除前确认 TS / TSX、测试、动态 class、页面 HTML 和组合 selector 中没有生产引用。
+- `globals.css` 保留 `.dashboard-workbench`、`.content-workbench`、`.workbench-assistant`、Research、Material Detail 等 Active 规则。
+- typecheck、lint、直接 Web build、test 和 diff check 结果已记录在本账本对应审计报告中；唯一 test 失败仍为历史 Canvas stale assertion。
+
+## P3 Batch 2 Review
+
+本轮不删除第二批组件，状态如下：
+
+| 候选 | 当前结论 | 证据 | 后续 |
+| --- | --- | --- | --- |
+| RetryIngestButton | `SAFE_UI_DELETE_CANDIDATE` | 无 production import；retry API 仍被资料详情 `SourceActions` 使用 | 后续只评估 UI 文件删除，保留 retry API / Worker |
+| ProjectStatusPanel | `SAFE_UI_DELETE_CANDIDATE` | 无 production import；当前项目页使用状态分组，transition API 仍由项目菜单使用 | 后续确认旧项目详情外部依赖后再删 UI |
+| ProjectArchiveButton | `SAFE_UI_DELETE_CANDIDATE` | 无 production import；`ProjectCardMenu` 已承担归档和删除 | 当前没有独立恢复 UI；保留 transition API 和归档数据 |
+| EvidenceBoard | `SAFE_UI_DELETE_CANDIDATE` | 无 production import；Evidence API、EvidenceItem、ownership、FactGate、CreativeBasis 仍有效 | 只能删除 UI 层，禁止删除 Evidence 核心 |
+| AICreationPanel | `LEGACY_UI_WITH_REUSABLE_BACKEND` | 无 production import，但 UnifiedCreativeAnalysis API / Service / AIRun / PromptTemplate / 测试和旧 E2E 仍存在 | 不删除；评估未来外部 GPT / Skill 工作流复用 |
+
+第二批组件均保持未修改。数据库真实数据因 `LOCAL_REAL` 不可达，相关判断继续为 `UNKNOWN`。
+
 ## 12. Recommended First Cleanup Batch
 
-建议第一批最多处理以下 3–5 个纯 UI 模块：
+Batch 1 已完成。后续 Batch 2 仍需单独产品决策，不能自动执行：
 
-1. AssistantDock
-2. DashboardAssistant
-3. AssistantShell
-4. CreationLaunchpad
-5. LibrarySubnav
+- RetryIngestButton
+- ProjectStatusPanel
+- ProjectArchiveButton
+- EvidenceBoard
+- AICreationPanel
 
-执行前仍需产品决策确认。删除时只删除已证明无生产依赖的 UI 和专属 CSS；不得顺手删除 AssistantThread、Unified Analysis、Deep Content、Evidence、FactGate、Method、Local ASR、Publishing 或任何 migration / 历史数据。
-
-本轮没有执行删除。
+删除时不得顺手删除 Assistant API、AssistantThread、Unified Analysis、Deep Content、Evidence、FactGate、Method、Local ASR、Publishing 或任何 migration / 历史数据。
 
 ## 13. Modified Files
 
-本轮唯一新增文件：
+本轮修改文件：
 
 ```text
-docs/audit/legacy-dependency-ledger-v1.md
+D:\Documents\ChatGPT\内容生产中心\apps\web\app\globals.css
+D:\Documents\ChatGPT\内容生产中心\docs\audit\legacy-dependency-ledger-v1.md
 ```
 
-未修改产品代码、Prisma Schema、migration、现有产品文档、Canvas、Skill、Doubao / ASR 或 Publishing。
+本轮删除文件：
+
+```text
+D:\Documents\ChatGPT\内容生产中心\apps\web\components\assistant-dock.tsx
+D:\Documents\ChatGPT\内容生产中心\apps\web\components\assistant-shell.tsx
+D:\Documents\ChatGPT\内容生产中心\apps\web\components\creation-launchpad.tsx
+D:\Documents\ChatGPT\内容生产中心\apps\web\components\dashboard-assistant.tsx
+D:\Documents\ChatGPT\内容生产中心\apps\web\components\library\library-subnav.tsx
+```
+
+未修改产品 API、Service、Prisma Schema、migration、Canvas、Skill、Doubao / ASR、Evidence、Unified Analysis、Deep Content 或 Publishing。
 
 ## 14. Git / Data Safety
 
-- 未 commit
-- 未 push
+- Phase A Ledger commit：`ecc0e4b735b5b3be87d5b9b5c90383abe158d9ff`
+- Batch 1 deletion commit：`ee0fd595c1f3cd5487efa36ca0fc2d2dfcf246d3`
+- 本轮 CSS / Ledger commit 尚未创建
+- 本轮尚未 push
 - 未 stash
 - 未 reset
-- 未删除组件、API、Model、migration 或历史数据
+- 未删除数据库、migration 或历史 output / 诊断文件
 - 未写入 real DB
 - 真实数据库只做了连接可达性检查；读库统计因环境不可达而保留为 UNKNOWN
