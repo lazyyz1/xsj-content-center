@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { assertFlashAudioLimits, FFmpegMediaProcessor } from "./ffmpeg-media-processor";
@@ -35,6 +35,11 @@ describe("FFmpegMediaProcessor", () => {
   it("reports FFmpeg failures explicitly", async () => {
     await expect(new FFmpegMediaProcessor().extractAudio("missing-video-file.mp4"))
       .rejects.toMatchObject({ code: "ASR_AUDIO_EXTRACTION_FAILED" });
+  });
+
+  it("probes an existing audio file duration", async () => {
+    const durationMs = await new FFmpegMediaProcessor().probeDuration(resolve(process.cwd(), "../../services/local-asr/benchmark/audio/normal_zh.wav"));
+    expect(durationMs).toBeGreaterThan(6_000);
   });
 
   it("reports missing binaries explicitly", async () => {

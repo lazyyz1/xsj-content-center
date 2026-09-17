@@ -44,11 +44,11 @@ describe("material analysis contract", () => {
     expect(output.methods).toEqual({ evidenceStatus: "INSUFFICIENT", reason: "依据不够。", items: [] });
   });
 
-  it("does not show an expression judgment when its cited text is not in the transcript", () => {
+  it("does not show an expression judgment when its cited text is not in the source content", () => {
     const invalidSection = { summary: "没有依据的判断。", evidence: [{ quote: "不存在于文字稿" }] };
     const input = materialAnalysisGenerationSchema.parse(generated({ expression: { ...generated().expression, audience: invalidSection } }));
     const output = normalizeMaterialAnalysisOutput(input, "真实文字稿。", []);
-    expect(output.expression.audience).toEqual({ summary: "视频文字稿中没有足够依据支持这一判断。", evidence: [] });
+    expect(output.expression.audience).toEqual({ summary: "资料正文中没有足够依据支持这一判断。", evidence: [] });
   });
 
   it("keeps prompt-injection text inside the source-data block", () => {

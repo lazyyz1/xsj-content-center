@@ -2,12 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { GenericUrlSourceProvider, ManualTextSourceProvider, MockVideoSourceProvider } from "./source-providers";
 
 describe("ingest source providers", () => {
-  it("turns manual text into a MANUAL transcript", async () => {
+  it("keeps manual text as readable source content without fabricating a transcript", async () => {
     const result = await new ManualTextSourceProvider().ingest({ value: "真实输入正文", title: "标题" });
     expect(result).toMatchObject({
       providerMode: "REAL",
-      data: { rawText: "真实输入正文", transcript: { fullText: "真实输入正文" } },
+      data: { rawText: "真实输入正文" },
     });
+    expect(result.data.transcript).toBeUndefined();
   });
 
   it("extracts normalized plain text and metadata from a public HTML page", async () => {

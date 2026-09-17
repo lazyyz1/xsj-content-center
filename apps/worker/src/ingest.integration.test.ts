@@ -91,20 +91,28 @@ describe("CONTENT_INGEST integration", () => {
     else process.env.INTEGRATION_ENCRYPTION_KEY = originalEncryptionKey;
   });
 
-  async function createAndRun(type: "TEXT" | "URL", value: string) {
-    const source = await db.sourceItem.create({ data: { workspaceId, createdById: userId, sourceType: type, sourcePlatform: "GENERIC", sourceUrl: type === "URL" ? value : null, rawText: type === "TEXT" ? value : null, status: "PENDING" } });
-    const jobRecord = await db.ingestJob.create({ data: { workspaceId, sourceItemId: source.id, requestedById: userId, jobType: type === "TEXT" ? "EXTRACT_TEXT" : "FETCH_URL", provider: type === "TEXT" ? "MANUAL" : "GENERIC_URL", providerMode: "REAL", maxAttempts: 3 } });
+  async function createAndRun(type: "TEXT" | "DOCUMENT" | "URL", value: string) {
+    const source = await db.sourceItem.create({ data: { workspaceId, createdById: userId, sourceType: type, sourcePlatform: "GENERIC", sourceUrl: type === "URL" ? value : null, rawText: type === "TEXT" || type === "DOCUMENT" ? value : null, status: "PENDING" } });
+    const jobRecord = await db.ingestJob.create({ data: { workspaceId, sourceItemId: source.id, requestedById: userId, jobType: type === "URL" ? "FETCH_URL" : "EXTRACT_TEXT", provider: type === "URL" ? "GENERIC_URL" : "MANUAL", providerMode: "REAL", maxAttempts: 3 } });
     const queue = createContentIngestQueue();
     const queueJob = await queue.add(CONTENT_INGEST, { jobId: jobRecord.id, workspaceId, sourceItemId: source.id, requestedById: userId }, { attempts: 3, removeOnComplete: true, removeOnFail: true });
     return { source, jobRecord, queue, queueJob };
   }
 
-  it("processes manual text into READY and a MANUAL transcript", async () => {
+  it("processes manual text into READY readable source content", async () => {
     const run = await createAndRun("TEXT", "Manual integration text stored without pretending to be ASR.");
     await expect(run.queueJob.waitUntilFinished(events, 10_000)).resolves.toMatchObject({ status: "ok" });
     await run.queue.close();
     await expect(db.sourceItem.findUnique({ where: { id: run.source.id } })).resolves.toMatchObject({ status: "READY" });
-    await expect(db.transcript.findUnique({ where: { sourceItemId: run.source.id } })).resolves.toMatchObject({ provider: "MANUAL", providerMode: "REAL", fullText: "Manual integration text stored without pretending to be ASR." });
+    await expect(db.transcript.findUnique({ where: { sourceItemId: run.source.id } })).resolves.toBeNull();
+  });
+
+  it("processes document text without creating a Transcript", async () => {
+    const run = await createAndRun("DOCUMENT", "DOCX or PDF extracted text stays readable source content only.");
+    await expect(run.queueJob.waitUntilFinished(events, 10_000)).resolves.toMatchObject({ status: "ok" });
+    await run.queue.close();
+    await expect(db.sourceItem.findUnique({ where: { id: run.source.id } })).resolves.toMatchObject({ status: "READY", rawText: "DOCX or PDF extracted text stays readable source content only." });
+    await expect(db.transcript.findUnique({ where: { sourceItemId: run.source.id } })).resolves.toBeNull();
   });
 
   it("extracts a local fixture URL into READY plain text", async () => {
@@ -114,7 +122,7 @@ describe("CONTENT_INGEST integration", () => {
     const source = await db.sourceItem.findUniqueOrThrow({ where: { id: run.source.id } });
     expect(source).toMatchObject({ status: "READY", title: "Local Fixture", author: "Fixture Author" });
     expect(source.rawText).toContain("deterministic text");
-    await expect(db.transcript.findUnique({ where: { sourceItemId: run.source.id } })).resolves.toMatchObject({ provider: "GENERIC_URL", providerMode: "REAL", fullText: expect.stringContaining("deterministic text") });
+    await expect(db.transcript.findUnique({ where: { sourceItemId: run.source.id } })).resolves.toBeNull();
   });
 
   it("persists a permanent SSRF failure without retrying", async () => {

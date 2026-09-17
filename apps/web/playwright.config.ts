@@ -3,11 +3,19 @@ import { defineConfig, devices } from "@playwright/test";
 
 process.env.INTEGRATION_ENCRYPTION_KEY ||= randomBytes(32).toString("base64");
 process.env.ALLOW_PUBLIC_SIGNUP ??= "true";
+process.env.INTERNAL_SIGNUP_ENABLED ??= "true";
+process.env.INTERNAL_SIGNUP_INVITE_CODE ??= "test-invite";
 process.env.SYSTEM_MANAGED_PROVIDERS ??= "false";
+process.env.TRANSCRIPTION_PRIMARY ??= "LOCAL_FUNASR";
 
 if (process.env.ENVIRONMENT_ID !== "LOCAL_TEST") {
   throw new Error("PLAYWRIGHT_ENVIRONMENT_GUARD_FAILED: E2E must run with ENVIRONMENT_ID=LOCAL_TEST");
 }
+
+const baseURL = "http://localhost:3001";
+const serverCommand = process.env.PLAYWRIGHT_SERVER_MODE === "production"
+  ? "pnpm --filter @content-center/web start"
+  : "pnpm --filter @content-center/web dev";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -16,13 +24,13 @@ export default defineConfig({
   retries: 0,
   reporter: "list",
   use: {
-    baseURL: process.env.APP_URL ?? "http://localhost:3000",
+    baseURL,
     trace: "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "pnpm --filter @content-center/web dev",
-    url: process.env.APP_URL ?? "http://localhost:3000",
+    command: serverCommand,
+    url: baseURL,
     reuseExistingServer: false,
     timeout: 120_000,
   },
