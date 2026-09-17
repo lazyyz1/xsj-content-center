@@ -13,7 +13,7 @@ import { processRedFoxIngestJob } from "./redfox-ingest";
 import { requestMaterialAnalysisJob } from "./material-analysis-request";
 
 function providerFor(source: { sourceType: string; sourceUrl: string | null }): IngestSourceProvider {
-  if (source.sourceType === "TEXT") return new ManualTextSourceProvider();
+  if (source.sourceType === "TEXT" || source.sourceType === "DOCUMENT") return new ManualTextSourceProvider();
   if (source.sourceType === "URL") {
     return new GenericUrlSourceProvider({ allowedTestOrigin: process.env.INGEST_TEST_FIXTURE_ORIGIN });
   }
@@ -97,7 +97,7 @@ export async function processContentIngestJob(job: Job<ContentIngestPayload>) {
   }
 
   try {
-    const value = record.sourceItem.sourceType === "TEXT" ? record.sourceItem.rawText : record.sourceItem.sourceUrl;
+    const value = record.sourceItem.sourceType === "TEXT" || record.sourceItem.sourceType === "DOCUMENT" ? record.sourceItem.rawText : record.sourceItem.sourceUrl;
     if (!value) throw new IngestProviderError("MISSING_INPUT", "采集输入不存在。", false);
     const result = await provider.ingest({
       value,
@@ -157,8 +157,6 @@ export async function processContentIngestJob(job: Job<ContentIngestPayload>) {
             segments: JSON.parse(JSON.stringify(transcript.segments)),
           },
         });
-      } else if (result.data.rawText.trim()) {
-        await tx.transcript.upsert({ where: { sourceItemId: record.sourceItemId }, create: { workspaceId: record.workspaceId, sourceItemId: record.sourceItemId, provider: provider.providerName, providerMode: result.providerMode, fullText: result.data.rawText, segments: [] }, update: { provider: provider.providerName, providerMode: result.providerMode, fullText: result.data.rawText, segments: [] } });
       }
       await tx.ingestJob.update({
         where: { id: record.id },

@@ -44,7 +44,7 @@ function visualVariant(item: Source) {
 }
 
 function processingState(item: Source) {
-  return getSourceProcessingState({ sourceStatus: item.status, hasTranscript: Boolean(item.transcript), assets: item.assets, jobs: item.ingestJobs });
+  return getSourceProcessingState({ sourceStatus: item.status, hasTranscript: Boolean(item.transcript || item.rawText?.trim()), assets: item.assets, jobs: item.ingestJobs });
 }
 
 function hasResearch(item: Source) {

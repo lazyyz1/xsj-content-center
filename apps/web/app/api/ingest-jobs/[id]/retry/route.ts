@@ -1,5 +1,6 @@
 import { db, findIngestJobForUser } from "@content-center/db";
 import { enqueueContentIngest } from "@content-center/worker/queue";
+import { requestSourceTranscription } from "@content-center/worker/transcription";
 import { NextResponse } from "next/server";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
 
@@ -16,6 +17,14 @@ export async function POST(_request: Request, route: { params: Promise<{ id: str
     select: { id: true },
   });
   if (!source) return apiError("SOURCE_NOT_RETRYABLE", 409);
+  if (job.jobType === "TRANSCRIBE") {
+    try {
+      const queued = await requestSourceTranscription({ workspaceId: job.workspaceId, sourceItemId: job.sourceItemId, requestedById: context.session.user.id });
+      return NextResponse.json({ jobId: queued.job.id, status: "QUEUED" }, { status: 202 });
+    } catch {
+      return apiError("TRANSCRIPTION_RETRY_FAILED", 503, "转写重试暂时无法开始，请稍后再试。");
+    }
+  }
   await db.$transaction([
     db.ingestJob.update({ where: { id: job.id }, data: { requestedById: context.session.user.id, status: "QUEUED", progress: 0, attempt: 0, errorCode: null, errorMessage: null, startedAt: null, finishedAt: null } }),
     db.sourceItem.update({ where: { id: job.sourceItemId }, data: { status: "PENDING" } }),

@@ -13,7 +13,7 @@ type SourceProcessingInput = {
   sourceStatus: "PENDING" | "PROCESSING" | "READY" | "FAILED" | "ARCHIVED";
   transcriptionStatus?: "UNCONFIGURED" | "CONFIGURED" | "DISABLED" | "MOCK" | "ERROR";
   hasTranscript: boolean;
-  assets: ReadonlyArray<{ assetType: "VIDEO" | "IMAGE" | "AUDIO"; status: "REMOTE" | "DOWNLOADING" | "STORED" | "FAILED" }>;
+  assets: ReadonlyArray<{ assetType: "VIDEO" | "IMAGE" | "AUDIO" | "DOCUMENT"; status: "REMOTE" | "DOWNLOADING" | "STORED" | "FAILED" }>;
   jobs: ReadonlyArray<{
     jobType: string;
     provider: string;
@@ -42,8 +42,8 @@ export function getSourceProcessingState(input: SourceProcessingInput) {
   const redfoxJob = input.jobs.find((job) => job.provider === "REDFOX" && job.jobType === "PROCESS_MEDIA");
   const transcriptionJob = input.jobs.find((job) => job.jobType === "TRANSCRIBE");
   const storedVideo = input.assets.some((asset) => asset.assetType === "VIDEO" && asset.status === "STORED");
-  const storedPrimaryMedia = input.assets.some((asset) => (asset.assetType === "VIDEO" || asset.assetType === "IMAGE") && asset.status === "STORED");
-  const failedPrimaryMedia = input.assets.some((asset) => (asset.assetType === "VIDEO" || asset.assetType === "IMAGE") && asset.status === "FAILED");
+  const storedPrimaryMedia = input.assets.some((asset) => (asset.assetType === "VIDEO" || asset.assetType === "IMAGE" || asset.assetType === "DOCUMENT") && asset.status === "STORED");
+  const failedPrimaryMedia = input.assets.some((asset) => (asset.assetType === "VIDEO" || asset.assetType === "IMAGE" || asset.assetType === "DOCUMENT") && asset.status === "FAILED");
   const storedAudio = input.assets.some((asset) => asset.assetType === "AUDIO" && asset.status === "STORED");
   const failedAudio = input.assets.some((asset) => asset.assetType === "AUDIO" && asset.status === "FAILED");
   const transcriptionConfigured = input.transcriptionStatus === "CONFIGURED";
@@ -107,6 +107,8 @@ export function getSourceProcessingState(input: SourceProcessingInput) {
       : transcription === "QUEUED" || transcription === "EXTRACTING_AUDIO" || transcription === "TRANSCRIBING"
         ? "已保存"
         : "已保存 · 待转写"
+    : storedPrimaryMedia || input.hasTranscript
+      ? "已保存"
     : input.sourceStatus === "FAILED"
       ? "失败"
       : "处理中";

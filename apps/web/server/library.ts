@@ -1,4 +1,5 @@
 import { db, type Prisma } from "@content-center/db";
+import { getStorageProvider } from "@content-center/providers";
 
 export type LibraryQuery = {
   search?: string;
@@ -53,6 +54,7 @@ export async function listLibrarySources(workspaceId: string, query: LibraryQuer
         author: true,
         thumbnailUrl: true,
         status: true,
+        rawText: true,
         createdAt: true,
         tags: { select: { tag: { select: { id: true, name: true } } }, take: 5 },
         ingestJobs: {
@@ -60,7 +62,7 @@ export async function listLibrarySources(workspaceId: string, query: LibraryQuer
           orderBy: { createdAt: "desc" },
           take: 1,
         },
-        assets: { select: { assetType: true, status: true } },
+        assets: { select: { id: true, assetType: true, status: true, storageKey: true, mimeType: true } },
         transcript: { select: { providerMode: true } },
         materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { suggestedTitle: true, summary: true } },
       },
@@ -70,5 +72,20 @@ export async function listLibrarySources(workspaceId: string, query: LibraryQuer
     }),
     db.sourceItem.count({ where }),
   ]);
-  return { items, total, page, pageSize, pages: Math.max(1, Math.ceil(total / pageSize)) };
+  let storage: ReturnType<typeof getStorageProvider> | null = null;
+  if (items.some((item) => !item.thumbnailUrl && item.assets.some((asset) => asset.assetType === "IMAGE" && asset.status === "STORED" && asset.storageKey))) {
+    try { storage = getStorageProvider(); } catch { storage = null; }
+  }
+  const resolvedItems = await Promise.all(items.map(async (item) => {
+    if (item.thumbnailUrl || !storage) return item;
+    const image = item.assets.find((asset) => asset.assetType === "IMAGE" && asset.status === "STORED" && asset.storageKey);
+    if (!image?.storageKey) return item;
+    try {
+      const signed = await storage.getSignedUrl(image.storageKey, 300, { assetScope: { workspaceId, sourceItemId: item.id, assetId: image.id } });
+      return { ...item, thumbnailUrl: signed.data.url };
+    } catch {
+      return item;
+    }
+  }));
+  return { items: resolvedItems, total, page, pageSize, pages: Math.max(1, Math.ceil(total / pageSize)) };
 }

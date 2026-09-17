@@ -1,6 +1,7 @@
 import "server-only";
 
 import { db, type MaterialAnalysis, type Prisma } from "@content-center/db";
+import { resolveSourceContent } from "@content-center/core";
 import { MaterialAnalysisRequestError, requestMaterialAnalysisJob } from "@content-center/worker/material-analysis-request";
 import { loadLLMRuntime, type LLMRuntime } from "../ai/llm-runtime";
 import { createProject } from "../project-service";
@@ -93,15 +94,20 @@ async function scopedSource(workspaceId: string, sourceItemId: string) {
   return source;
 }
 
+function sourceContentUpdatedAt(source: { sourceType: string; rawText: string | null; updatedAt: Date; transcript: { id: string; fullText: string; segments: unknown; updatedAt: Date } | null }) {
+  return resolveSourceContent({ sourceType: source.sourceType, rawText: source.rawText, sourceUpdatedAt: source.updatedAt, transcript: source.transcript })?.updatedAt ?? null;
+}
+
 export async function getMaterialAnalysis(input: { workspaceId: string; sourceItemId: string }) {
   const source = await scopedSource(input.workspaceId, input.sourceItemId);
   const analyses = await db.materialAnalysis.findMany({ where: { workspaceId: input.workspaceId, sourceItemId: source.id }, orderBy: { version: "desc" }, take: 20 });
   const jobs = await db.ingestJob.findMany({ where: { workspaceId: input.workspaceId, sourceItemId: source.id, jobType: "ANALYZE_MATERIAL" }, orderBy: { createdAt: "desc" }, take: 20 });
-  const latestAttempt = analyses[0] ? toMaterialAnalysisDTO(analyses[0], source.transcript?.updatedAt) : null;
+  const contentUpdatedAt = sourceContentUpdatedAt(source);
+  const latestAttempt = analyses[0] ? toMaterialAnalysisDTO(analyses[0], contentUpdatedAt) : null;
   const currentRow = analyses.find((row) => row.status === "COMPLETED");
   const latestJob = jobs[0];
   return {
-    current: currentRow ? toMaterialAnalysisDTO(currentRow, source.transcript?.updatedAt) : null,
+    current: currentRow ? toMaterialAnalysisDTO(currentRow, contentUpdatedAt) : null,
     latestAttempt,
     job: latestJob ? {
       id: latestJob.id,
@@ -113,7 +119,7 @@ export async function getMaterialAnalysis(input: { workspaceId: string; sourceIt
       errorMessage: latestJob.errorMessage,
       updatedAt: latestJob.updatedAt.toISOString(),
     } satisfies MaterialAnalysisJobDTO : null,
-    history: analyses.map((row) => toMaterialAnalysisDTO(row, source.transcript?.updatedAt)),
+    history: analyses.map((row) => toMaterialAnalysisDTO(row, contentUpdatedAt)),
   };
 }
 
@@ -129,7 +135,7 @@ export async function requestMaterialAnalysis(input: { workspaceId: string; sour
   if (runtime.mode === "MOCK") throw new MaterialAnalysisError("MOCK_NOT_ALLOWED", "智能整理不使用模拟结果，请先配置 AI 模型。");
   try {
     const requested = await requestMaterialAnalysisJob({ workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, requestedById: input.userId, existingProcessing: "THROW", reuseCompleted: false });
-    return { ...toMaterialAnalysisDTO(requested.analysis, built.source.transcript!.updatedAt), jobId: requested.job?.id, status: requested.created ? "QUEUED" as const : requested.analysis.status };
+    return { ...toMaterialAnalysisDTO(requested.analysis, built.sourceContent.updatedAt), jobId: requested.job?.id, status: requested.created ? "QUEUED" as const : requested.analysis.status };
   } catch (error) {
     if (error instanceof MaterialAnalysisRequestError) throw new MaterialAnalysisError(error.code === "ALREADY_PROCESSING" ? "ANALYSIS_ALREADY_PROCESSING" : error.code === "SOURCE_NOT_READY" ? "TRANSCRIPT_REQUIRED" : "QUEUE_UNAVAILABLE", error.message);
     throw error;
@@ -147,7 +153,7 @@ export async function updateMaterialAnalysis(input: { workspaceId: string; sourc
     await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "material_analysis.updated", resourceType: "material_analysis", resourceId: analysis.id, metadata: { sourceItemId: source.id, version: analysis.version } } });
     return row;
   });
-  return toMaterialAnalysisDTO(updated, source.transcript?.updatedAt);
+  return toMaterialAnalysisDTO(updated, sourceContentUpdatedAt(source));
 }
 
 async function initializeExistingProjectBrief(input: { workspaceId: string; projectId: string; sourceItemId: string; userId: string; draft: MaterialAnalysisBriefDraft }) {

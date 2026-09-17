@@ -20,9 +20,13 @@
     "@content-center/core": "workspace:*",
     "@mozilla/readability": "0.6.0",
     "jsdom": "30.0.1",
+    "mammoth": "1.12.3",
+    "pdf-parse": "2.4.5",
+    "sharp": "0.35.4",
     "zod": "4.5.4"
   },
   "devDependencies": {
-    "@types/jsdom": "30.0.0"
+    "@types/jsdom": "30.0.0",
+    "jszip": "3.10.1"
   }
 }

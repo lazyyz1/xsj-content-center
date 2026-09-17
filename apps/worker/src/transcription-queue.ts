@@ -8,7 +8,8 @@ export type TranscribeSourcePayload = {
   jobId: string;
   workspaceId: string;
   sourceItemId: string;
-  videoAssetId: string;
+  mediaAssetId?: string;
+  videoAssetId?: string;
   requestedById: string;
 };
 

@@ -52,10 +52,6 @@ export class ManualTextSourceProvider implements IngestSourceProvider {
     return realResult({
       metadata,
       rawText,
-      transcript: {
-        fullText: rawText,
-        segments: [{ startMs: 0, endMs: 0, text: rawText }],
-      },
     });
   }
 

@@ -84,8 +84,8 @@ function publicFailure(error: unknown) {
     return { code: error.code, message: error.message, retryable: error.retryable };
   }
   if (error instanceof MediaProcessorError) return { code: error.code, message: error.message, retryable: false };
-  if (error instanceof Error && error.message === "ASR_VIDEO_NOT_AVAILABLE") {
-    return { code: "ASR_VIDEO_NOT_AVAILABLE", message: "没有可转写的已保存视频。", retryable: false };
+  if (error instanceof Error && (error.message === "ASR_VIDEO_NOT_AVAILABLE" || error.message === "ASR_MEDIA_NOT_AVAILABLE")) {
+    return { code: "ASR_MEDIA_NOT_AVAILABLE", message: "没有可转写的已保存媒体。", retryable: false };
   }
   return { code: "INTERNAL_ERROR", message: "视频转写失败。", retryable: false };
 }
@@ -193,21 +193,23 @@ export async function requestSourceTranscription(input: {
   workspaceId: string;
   sourceItemId: string;
   requestedById: string;
+  mediaAssetId?: string;
   videoAssetId?: string;
 }) {
   const plan = await resolveWorkspaceTranscriptionPlan(input.workspaceId);
-  const videoAsset = await db.sourceAsset.findFirst({
+  const mediaAssetId = input.mediaAssetId ?? input.videoAssetId;
+  const mediaAsset = await db.sourceAsset.findFirst({
     where: {
-      id: input.videoAssetId,
+      id: mediaAssetId,
       workspaceId: input.workspaceId,
       sourceItemId: input.sourceItemId,
-      assetType: "VIDEO",
+      assetType: { in: ["VIDEO", "AUDIO"] },
       status: "STORED",
       storageKey: { not: null },
     },
     orderBy: { createdAt: "desc" },
   });
-  if (!videoAsset) throw new Error("ASR_VIDEO_NOT_AVAILABLE");
+  if (!mediaAsset) throw new Error("ASR_MEDIA_NOT_AVAILABLE");
   const active = await db.ingestJob.findFirst({
     where: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, jobType: "TRANSCRIBE", status: { in: ["QUEUED", "RUNNING"] } },
     orderBy: { createdAt: "desc" },
@@ -225,7 +227,7 @@ export async function requestSourceTranscription(input: {
       status: "QUEUED",
       progress: 0,
       maxAttempts: 3,
-      metadata: json({ progressStage: "QUEUED", videoAssetId: videoAsset.id, transcriptionPlan: plan }),
+      metadata: json({ progressStage: "QUEUED", mediaAssetId: mediaAsset.id, transcriptionPlan: plan }),
     },
   });
   await db.auditLog.create({
@@ -235,7 +237,7 @@ export async function requestSourceTranscription(input: {
       action: "transcription.queued",
       resourceType: "ingest_job",
       resourceId: job.id,
-      metadata: json({ sourceItemId: input.sourceItemId, videoAssetId: videoAsset.id, provider: plan.provider, qualityMode: plan.qualityMode }),
+        metadata: json({ sourceItemId: input.sourceItemId, mediaAssetId: mediaAsset.id, provider: plan.provider, qualityMode: plan.qualityMode }),
     },
   });
   try {
@@ -243,7 +245,7 @@ export async function requestSourceTranscription(input: {
       jobId: job.id,
       workspaceId: input.workspaceId,
       sourceItemId: input.sourceItemId,
-      videoAssetId: videoAsset.id,
+      mediaAssetId: mediaAsset.id,
       requestedById: input.requestedById,
     }, job.maxAttempts);
   } catch {
@@ -474,6 +476,8 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
     throw new UnrecoverableError("Transcription job is no longer runnable");
   }
 
+  const mediaAssetId = job.data.mediaAssetId ?? job.data.videoAssetId;
+  if (!mediaAssetId) throw new UnrecoverableError("Transcription media asset is missing");
   const attempt = job.attemptsMade + 1;
   const plan = planFromRecord(record) ?? (record.provider === "DOUBAO_ASR"
     ? { provider: "DOUBAO_ASR" as const, qualityMode: "BALANCED" as const, fallbackToDoubao: false }
@@ -490,7 +494,7 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
         finishedAt: null,
         errorCode: null,
         errorMessage: null,
-        metadata: json({ progressStage: "EXTRACTING_AUDIO", videoAssetId: job.data.videoAssetId, transcriptionPlan: plan }),
+        metadata: json({ progressStage: "EXTRACTING_AUDIO", mediaAssetId, transcriptionPlan: plan }),
       },
     }),
     db.auditLog.create({
@@ -507,21 +511,22 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
 
   let cleanup: (() => Promise<void>) | undefined;
   try {
-    const video = record.sourceItem.assets.find((asset) =>
-      asset.id === job.data.videoAssetId && asset.assetType === "VIDEO" && asset.status === "STORED" && asset.storageKey,
+    const media = record.sourceItem.assets.find((asset) =>
+      asset.id === mediaAssetId && (asset.assetType === "VIDEO" || asset.assetType === "AUDIO") && asset.status === "STORED" && asset.storageKey,
     );
-    if (!video?.storageKey) throw new Error("ASR_VIDEO_NOT_AVAILABLE");
+    if (!media?.storageKey) throw new Error("ASR_MEDIA_NOT_AVAILABLE");
 
     const storage = getStorageProvider();
     const processor = new FFmpegMediaProcessor();
-    await processor.checkAvailability();
-    let audio = record.sourceItem.assets
+    const mediaIsAudio = media.assetType === "AUDIO";
+    if (!mediaIsAudio || !durationFromMetadata(media.metadata)) await processor.checkAvailability();
+    let audio = mediaIsAudio ? media : record.sourceItem.assets
       .filter((asset) => asset.assetType === "AUDIO" && asset.status === "STORED" && asset.storageKey)
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
     let extractedPath: string | undefined;
     let durationMs = audio ? durationFromMetadata(audio.metadata) : undefined;
 
-    if (!audio?.storageKey) {
+    if (!audio?.storageKey && !mediaIsAudio) {
       const pendingAudio = await db.sourceAsset.create({
         data: {
           workspaceId: record.workspaceId,
@@ -530,7 +535,7 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
           sourceProvider: "FFMPEG",
           remoteUrl: null,
           status: "DOWNLOADING",
-          metadata: { derivedFromAssetId: video.id },
+          metadata: { derivedFromAssetId: media.id },
         },
       });
       await db.auditLog.create({
@@ -540,12 +545,12 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
           action: "source_asset.audio_extraction_started",
           resourceType: "source_asset",
           resourceId: pendingAudio.id,
-          metadata: { sourceItemId: record.sourceItemId, derivedFromAssetId: video.id },
+            metadata: { sourceItemId: record.sourceItemId, derivedFromAssetId: media.id },
         },
       });
       try {
-        const videoUrl = (await storage.getSignedUrl(video.storageKey, 15 * 60, {
-          assetScope: { workspaceId: record.workspaceId, sourceItemId: record.sourceItemId, assetId: video.id },
+        const videoUrl = (await storage.getSignedUrl(media.storageKey, 15 * 60, {
+          assetScope: { workspaceId: record.workspaceId, sourceItemId: record.sourceItemId, assetId: media.id },
         })).data.url;
         const extracted = await processor.extractAudio(videoUrl, { limits: plan.provider === "DOUBAO_ASR" && plan.protocol !== "RECORDING_FILE_2_0" ? "DOUBAO_FLASH" : "NONE" });
         cleanup = extracted.cleanup;
@@ -574,7 +579,7 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
             mimeType: "audio/mpeg",
             sizeBytes: BigInt(extracted.sizeBytes),
             storedAt: new Date(),
-            metadata: { derivedFromAssetId: video.id, durationMs: extracted.durationMs },
+            metadata: { derivedFromAssetId: media.id, durationMs: extracted.durationMs },
           },
         });
         await db.auditLog.create({
@@ -593,9 +598,15 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
       }
     }
 
-    if (!audio?.storageKey || durationMs === undefined || audio.sizeBytes === null) {
+    if (!audio?.storageKey || audio.sizeBytes === null) {
       throw new MediaProcessorError("ASR_AUDIO_EXTRACTION_FAILED", "已保存音频缺少必要元数据。");
     }
+    durationMs ??= durationFromMetadata(audio.metadata);
+    if (durationMs === undefined && mediaIsAudio) {
+      const probeUrl = (await storage.getSignedUrl(media.storageKey, 15 * 60, { assetScope: { workspaceId: record.workspaceId, sourceItemId: record.sourceItemId, assetId: media.id } })).data.url;
+      durationMs = await processor.probeDuration(probeUrl);
+    }
+    if (durationMs === undefined) throw new MediaProcessorError("ASR_AUDIO_EXTRACTION_FAILED", "已保存音频缺少时长信息。");
     const sizeBytes = Number(audio.sizeBytes);
     if (plan.provider === "DOUBAO_ASR" && plan.protocol !== "RECORDING_FILE_2_0") assertFlashAudioLimits({ sizeBytes, durationMs });
     const signedUrl = (await storage.getSignedUrl(audio.storageKey, ASR_AUDIO_SIGNED_URL_TTL_SECONDS, {
@@ -649,7 +660,7 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
           provider: result.provider,
           status: "SUCCEEDED",
           progress: 100,
-          metadata: json({ progressStage: "SUCCEEDED", videoAssetId: video.id, audioAssetId: audio.id, transcriptionPlan: plan, transcriptMetadata }),
+          metadata: json({ progressStage: "SUCCEEDED", mediaAssetId: media.id, audioAssetId: audio.id, transcriptionPlan: plan, transcriptMetadata }),
           finishedAt,
         },
       });

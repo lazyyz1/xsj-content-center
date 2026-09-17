@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
+import { resolveSourceContent } from "@content-center/core";
 import { db } from "@content-center/db";
 import { ProjectServiceError } from "../project-service";
 import { readMaterialAnalysisBriefMetadata } from "../material-analysis/brief-mapper";
@@ -43,12 +44,13 @@ export class UnifiedCreativeAnalysisContextBuilder {
     let sourceBudget = this.limits.totalSourceChars;
     const sources = project.sources.flatMap(({ role, sourceItem }) => {
       if (sourceBudget <= 0) { contextTruncated = true; return []; }
-      const raw = sourceItem.transcript?.fullText || sourceItem.rawText || "";
+      const readable = resolveSourceContent({ sourceType: sourceItem.sourceType, rawText: sourceItem.rawText, sourceUpdatedAt: sourceItem.updatedAt, transcript: sourceItem.transcript });
+      const raw = readable?.contentText || "";
       const selected = take(raw, Math.min(this.limits.perSourceChars, sourceBudget));
       sourceBudget -= selected.value.length;
       contextTruncated ||= selected.truncated || raw.length > selected.value.length;
       const analysis = sourceItem.materialAnalyses[0];
-      return [{ id: sourceItem.id, role, title: sourceItem.title, platform: sourceItem.sourcePlatform, text: selected.value, sourceUpdatedAt: sourceItem.updatedAt.toISOString(), transcriptUpdatedAt: sourceItem.transcript?.updatedAt.toISOString() ?? null, materialAnalysis: analysis ? { id: analysis.id, version: analysis.version, summary: analysis.summary, topic: analysis.topic, targetAudience: analysis.targetAudience, coreViewpoint: analysis.coreViewpoint, keyPoints: strings(analysis.keyPoints), coreQuestion: analysis.coreQuestion, updatedAt: analysis.updatedAt.toISOString() } : null }];
+      return [{ id: sourceItem.id, role, title: sourceItem.title, platform: sourceItem.sourcePlatform, text: selected.value, sourceUpdatedAt: sourceItem.updatedAt.toISOString(), transcriptUpdatedAt: readable?.contentSource === "TRANSCRIPT" ? readable.updatedAt.toISOString() : null, materialAnalysis: analysis ? { id: analysis.id, version: analysis.version, summary: analysis.summary, topic: analysis.topic, targetAudience: analysis.targetAudience, coreViewpoint: analysis.coreViewpoint, keyPoints: strings(analysis.keyPoints), coreQuestion: analysis.coreQuestion, updatedAt: analysis.updatedAt.toISOString() } : null }];
     });
     let evidenceBudget = this.limits.totalEvidenceChars;
     const evidence = project.evidenceItems.flatMap((item) => {

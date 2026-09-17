@@ -63,6 +63,13 @@ export class FFmpegMediaProcessor {
     await runProcess(this.ffprobePath, ["-version"], "FFMPEG_NOT_AVAILABLE");
   }
 
+  async probeDuration(input: string) {
+    const probe = await runProcess(this.ffprobePath, ["-v", "error", "-show_entries", "format=duration", "-of", "json", input], "ASR_AUDIO_EXTRACTION_FAILED");
+    const durationSeconds = Number((JSON.parse(probe) as { format?: { duration?: string } }).format?.duration);
+    if (!Number.isFinite(durationSeconds) || durationSeconds < 0) throw new MediaProcessorError("ASR_AUDIO_EXTRACTION_FAILED", "无法读取音频时长。");
+    return Math.round(durationSeconds * 1_000);
+  }
+
   async extractAudio(input: string, options: ExtractAudioOptions = {}) {
     const directory = await mkdtemp(join(tmpdir(), "content-center-asr-"));
     const outputPath = join(directory, "audio.mp3");

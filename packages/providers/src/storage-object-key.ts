@@ -2,6 +2,10 @@ const MIME_EXTENSIONS: Record<string, string> = {
   "audio/mpeg": "mp3",
   "audio/mp4": "m4a",
   "audio/wav": "wav",
+  "text/markdown": "md",
+  "text/plain": "txt",
+  "application/pdf": "pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
   "image/gif": "gif",
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -15,7 +19,7 @@ export type SourceAssetKeyInput = {
   workspaceId: string;
   sourceItemId: string;
   assetId: string;
-  assetType: "VIDEO" | "IMAGE" | "AUDIO";
+  assetType: "VIDEO" | "IMAGE" | "AUDIO" | "DOCUMENT";
   mimeType?: string;
 };
 
@@ -27,7 +31,7 @@ function safeId(value: string, field: string) {
 function extensionFor(input: SourceAssetKeyInput) {
   const normalized = input.mimeType?.split(";", 1)[0]?.trim().toLowerCase();
   if (normalized && MIME_EXTENSIONS[normalized]) return MIME_EXTENSIONS[normalized];
-  return input.assetType === "AUDIO" ? "mp3" : input.assetType === "IMAGE" ? "jpg" : "mp4";
+  return input.assetType === "AUDIO" ? "mp3" : input.assetType === "IMAGE" ? "jpg" : input.assetType === "DOCUMENT" ? "bin" : "mp4";
 }
 
 export class StorageObjectKeyBuilder {

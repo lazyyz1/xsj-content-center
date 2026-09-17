@@ -110,6 +110,7 @@ enum AssetType {
   VIDEO
   IMAGE
   AUDIO
+  DOCUMENT
 }
 
 enum AssetStatus {

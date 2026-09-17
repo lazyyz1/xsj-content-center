@@ -1,6 +1,7 @@
 import "server-only";
 
 import { db, type MaterialDistillation, type Prisma } from "@content-center/db";
+import { resolveSourceContent } from "@content-center/core";
 import { enqueueMaterialDistillation } from "@content-center/worker/queue";
 import { materialDistillationGenerationSchema, materialDistillationModeSchema, type MaterialDistillationMode, type MaterialDistillationOutput } from "@content-center/providers";
 import { loadLLMRuntime, type LLMRuntime } from "../ai/llm-runtime";
@@ -61,14 +62,19 @@ async function scopedSource(workspaceId: string, sourceItemId: string) {
   return source;
 }
 
+function sourceContentUpdatedAt(source: { sourceType: string; rawText: string | null; updatedAt: Date; transcript: { id: string; fullText: string; segments: unknown; updatedAt: Date } | null }) {
+  return resolveSourceContent({ sourceType: source.sourceType, rawText: source.rawText, sourceUpdatedAt: source.updatedAt, transcript: source.transcript })?.updatedAt ?? null;
+}
+
 export async function getMaterialDistillation(input: { workspaceId: string; sourceItemId: string }) {
   const source = await scopedSource(input.workspaceId, input.sourceItemId);
   const rows = await db.materialDistillation.findMany({ where: { workspaceId: input.workspaceId, sourceItemId: source.id }, orderBy: { version: "desc" }, take: 20 });
   const jobs = await db.ingestJob.findMany({ where: { workspaceId: input.workspaceId, sourceItemId: source.id, jobType: "DISTILL_MATERIAL" }, orderBy: { createdAt: "desc" }, take: 20 });
-  const latestAttempt = rows[0] ? toMaterialDistillationDTO(rows[0], source.transcript?.updatedAt) : null;
+  const contentUpdatedAt = sourceContentUpdatedAt(source);
+  const latestAttempt = rows[0] ? toMaterialDistillationDTO(rows[0], contentUpdatedAt) : null;
   const currentRow = rows.find((row) => row.status === "COMPLETED");
   const latestJob = jobs[0];
-  return { current: currentRow ? toMaterialDistillationDTO(currentRow, source.transcript?.updatedAt) : null, latestAttempt, job: latestJob ? { id: latestJob.id, status: latestJob.status, progress: latestJob.progress, attempt: latestJob.attempt, maxAttempts: latestJob.maxAttempts, errorCode: latestJob.errorCode, errorMessage: latestJob.errorMessage, updatedAt: latestJob.updatedAt.toISOString() } satisfies MaterialDistillationJobDTO : null, history: rows.map((row) => toMaterialDistillationDTO(row, source.transcript?.updatedAt)) };
+  return { current: currentRow ? toMaterialDistillationDTO(currentRow, contentUpdatedAt) : null, latestAttempt, job: latestJob ? { id: latestJob.id, status: latestJob.status, progress: latestJob.progress, attempt: latestJob.attempt, maxAttempts: latestJob.maxAttempts, errorCode: latestJob.errorCode, errorMessage: latestJob.errorMessage, updatedAt: latestJob.updatedAt.toISOString() } satisfies MaterialDistillationJobDTO : null, history: rows.map((row) => toMaterialDistillationDTO(row, contentUpdatedAt)) };
 }
 
 async function reserveDistillation(input: { workspaceId: string; sourceItemId: string; userId: string; mode: MaterialDistillationMode; transcriptUpdatedAt: Date }) {
@@ -94,14 +100,14 @@ export async function requestMaterialDistillation(input: { workspaceId: string; 
   const member = await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: input.workspaceId, userId: input.userId } }, select: { role: true } });
   if (!member || member.role === "VIEWER") throw new MaterialDistillationError("DISTILLATION_FORBIDDEN", "当前权限不能发起精华提炼。");
   const source = await scopedSource(input.workspaceId, input.sourceItemId);
-  if (source.sourceType !== "VIDEO") throw new MaterialDistillationError("VIDEO_REQUIRED", "当前只支持视频精华提炼。");
-  if (!source.transcript?.fullText.trim()) throw new MaterialDistillationError("TRANSCRIPT_REQUIRED", "请先完成视频文字稿，再进行精华提炼。");
+  const sourceContent = resolveSourceContent({ sourceType: source.sourceType, rawText: source.rawText, sourceUpdatedAt: source.updatedAt, transcript: source.transcript });
+  if (!sourceContent) throw new MaterialDistillationError("TRANSCRIPT_REQUIRED", "请先完成资料读取，再进行精华提炼。");
   const runtime = dependencies.runtime ?? await loadLLMRuntime(input.workspaceId);
   if (runtime.mode === "MOCK") throw new MaterialDistillationError("MOCK_NOT_ALLOWED", "精华提炼不使用模拟结果，请先配置 AI 模型。");
-  const reserved = await reserveDistillation({ workspaceId: input.workspaceId, sourceItemId: source.id, userId: input.userId, mode: input.mode, transcriptUpdatedAt: source.transcript.updatedAt });
+  const reserved = await reserveDistillation({ workspaceId: input.workspaceId, sourceItemId: source.id, userId: input.userId, mode: input.mode, transcriptUpdatedAt: sourceContent.updatedAt });
   try {
     await enqueueMaterialDistillation({ jobId: reserved.job.id, workspaceId: input.workspaceId, sourceItemId: source.id, requestedById: input.userId }, reserved.job.maxAttempts);
-    return { ...toMaterialDistillationDTO(reserved.distillation, source.transcript.updatedAt), jobId: reserved.job.id, status: "QUEUED" as const };
+    return { ...toMaterialDistillationDTO(reserved.distillation, sourceContent.updatedAt), jobId: reserved.job.id, status: "QUEUED" as const };
   } catch {
     await db.$transaction([
       db.materialDistillation.update({ where: { id: reserved.distillation.id }, data: { status: "FAILED", errorCode: "QUEUE_UNAVAILABLE", errorMessage: "精华提炼暂时无法开始。" } }),

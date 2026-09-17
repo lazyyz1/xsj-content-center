@@ -50,8 +50,8 @@ async function findScopedAsset(assetId: string, scope: { workspaceId: string; so
   });
 }
 
-function contentTypeFor(assetType: "VIDEO" | "IMAGE" | "AUDIO") {
-  return assetType === "VIDEO" ? "video/mp4" : assetType === "IMAGE" ? "image/jpeg" : "audio/mpeg";
+function contentTypeFor(assetType: "VIDEO" | "IMAGE" | "AUDIO" | "DOCUMENT") {
+  return assetType === "VIDEO" ? "video/mp4" : assetType === "IMAGE" ? "image/jpeg" : assetType === "AUDIO" ? "audio/mpeg" : "application/octet-stream";
 }
 
 async function streamUpload(request: Request, target: string) {

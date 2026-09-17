@@ -203,9 +203,9 @@ export async function getMaterialDetailView(input: { workspaceId: string; userId
     getMaterialDistillation({ workspaceId: input.workspaceId, sourceItemId: source.id }),
     integrations.getIntegrationStatus(input.workspaceId, "LLM"),
     getMaterialKnowledge({ workspaceId: input.workspaceId, userId: input.userId, sourceItemId: source.id }),
-    source.sourceType === "VIDEO" ? integrations.getIntegrationStatus(input.workspaceId, "TRANSCRIPTION") : Promise.resolve(null),
-    source.sourceType === "VIDEO" ? integrations.getIntegrationStatus(input.workspaceId, "DOUBAO_ASR") : Promise.resolve(null),
-    source.sourceType === "VIDEO" ? getLocalAsrDisplay(input.workspaceId) : Promise.resolve(null),
+    source.sourceType === "VIDEO" || source.sourceType === "AUDIO" ? integrations.getIntegrationStatus(input.workspaceId, "TRANSCRIPTION") : Promise.resolve(null),
+    source.sourceType === "VIDEO" || source.sourceType === "AUDIO" ? integrations.getIntegrationStatus(input.workspaceId, "DOUBAO_ASR") : Promise.resolve(null),
+    source.sourceType === "VIDEO" || source.sourceType === "AUDIO" ? getLocalAsrDisplay(input.workspaceId) : Promise.resolve(null),
   ]);
 
   const envelope = readSourceMetadataEnvelope(source.metadata);
@@ -264,7 +264,7 @@ export async function getMaterialDetailView(input: { workspaceId: string; userId
     db.methodSuggestion.findMany({ where: { workspaceId: input.workspaceId, ownerUserId: input.userId, status: "PENDING", sourceBenchmarkStudy: { samples: { some: { sourceItemId: source.id } } } }, orderBy: { createdAt: "desc" }, take: 8, select: { id: true, title: true, status: true, sampleCount: true } }),
   ]);
 
-  const topicReady = source.sourceType === "VIDEO" && Boolean(source.transcript && ((distillation.current?.output && !distillation.current.stale) || (analysis.current && !analysis.current.stale && (analysis.current.understanding || analysis.current.summary))));
+  const topicReady = Boolean(transcriptText && ((distillation.current?.output && !distillation.current.stale) || (analysis.current && !analysis.current.stale && (analysis.current.understanding || analysis.current.summary))));
   const relatedTopicDTO = relatedTopics.map((topic) => ({ id: topic.id, title: topic.title, status: topic.status, projectId: topic.projectId, updatedAt: topic.updatedAt.toISOString() }));
   const actions: MaterialDetailAction[] = [];
   if (refreshState === "PARTIAL") actions.push(asAction("metadata", "补全资料信息", "从原始来源补充作者、时间和互动数据。", "metadata"));
@@ -274,8 +274,9 @@ export async function getMaterialDetailView(input: { workspaceId: string; userId
   if (currentProjects.length) actions.push(asAction("project", "继续当前创作", "回到已经关联的创作继续工作。", "project"));
   if (!currentProjects.length) actions.push(asAction("create", "加入当前创作", "把这条资料作为真实创作依据带进工作台。", "creation"));
   if (transcriptText) actions.push(asAction("transcript", "核对文字稿", "回到原文确认表达和来源边界。", "transcript"));
-  const recommendedAction = !transcriptText && source.sourceType === "VIDEO"
-    ? asAction("transcript", "先生成文字稿", "有了文字稿后，才能继续看懂、提炼和判断。", "transcript")
+  const contentLabel = source.sourceType === "VIDEO" || source.sourceType === "AUDIO" ? "文字稿" : source.sourceType === "URL" ? "正文" : "原文";
+  const recommendedAction = !transcriptText
+    ? asAction("transcript", `先读取${contentLabel}`, `有了${contentLabel}后，才能继续看懂、提炼和判断。`, "transcript")
     : knowledge.candidates.some((candidate) => candidate.canConfirm)
       ? asAction("confirm", "确认可用信息", "有内部资料信息等待人工确认。", "confirm")
       : !analysis.current || analysis.current.stale
@@ -290,14 +291,17 @@ export async function getMaterialDetailView(input: { workspaceId: string; userId
 
   const transcriptionConfig = parseProviderConfig("TRANSCRIPTION", transcriptionIntegration?.publicConfig ?? {}) as { source: "LOCAL_FUNASR" | "DOUBAO"; qualityMode: "FAST" | "BALANCED" | "QUALITY" };
   const selectedQuality = localAsr?.qualityModes[transcriptionConfig.qualityMode];
-  const transcriptionConfigured = transcriptionConfig.source === "DOUBAO" ? doubao?.status === "CONFIGURED" : localAsr?.status === "NORMAL" && selectedQuality?.available === true && selectedQuality.installed;
+  const isMediaSource = source.sourceType === "VIDEO" || source.sourceType === "AUDIO";
+  const transcriptionConfigured = !isMediaSource || (transcriptionConfig.source === "DOUBAO" ? doubao?.status === "CONFIGURED" : localAsr?.status === "NORMAL" && selectedQuality?.available === true && selectedQuality.installed);
   const latestTranscription = source.ingestJobs.find((job) => job.jobType === "TRANSCRIBE");
+  const readingJob = source.ingestJobs.find((job) => job.jobType !== "TRANSCRIBE");
   const transcriptionBusy = latestTranscription?.status === "QUEUED" || latestTranscription?.status === "RUNNING";
-  const transcriptionState = source.transcript ? "COMPLETED" : transcriptionBusy ? "PROCESSING" : latestTranscription?.status === "FAILED" ? "FAILED" : transcriptionConfigured ? "NOT_STARTED" : "UNAVAILABLE";
+  const contentBusy = readingJob?.status === "QUEUED" || readingJob?.status === "RUNNING";
+  const transcriptionState = transcriptText ? "COMPLETED" : contentBusy || transcriptionBusy ? "PROCESSING" : latestTranscription?.status === "FAILED" || readingJob?.status === "FAILED" ? "FAILED" : transcriptionConfigured ? "NOT_STARTED" : "UNAVAILABLE";
   const transcriptMetadata = record(source.transcript?.metadata);
-  const transcriptMethod = source.transcript?.provider === "LOCAL_FUNASR" ? "本地转写" : source.transcript?.provider === "MANUAL" || source.transcript?.provider === "MANUAL_TEXT" ? "手动整理" : source.transcript ? "云端转写" : "—";
+  const transcriptMethod = source.transcript?.provider === "LOCAL_FUNASR" ? "本地转写" : source.transcript?.provider === "MANUAL" || source.transcript?.provider === "MANUAL_TEXT" ? "手动整理" : source.transcript ? "云端转写" : transcriptText ? "正文读取" : "—";
   const transcriptQuality = transcriptQualityLabels[transcriptMetadata.qualityMode as keyof typeof transcriptQualityLabels] ?? "暂未记录";
-  const processing = getSourceProcessingState({ sourceStatus: source.status, transcriptionStatus: transcriptionConfigured ? "CONFIGURED" : "UNCONFIGURED", hasTranscript: Boolean(source.transcript), assets: source.assets, jobs: source.ingestJobs });
+  const processing = getSourceProcessingState({ sourceStatus: source.status, transcriptionStatus: transcriptionConfigured ? "CONFIGURED" : "UNCONFIGURED", hasTranscript: Boolean(transcriptText), assets: source.assets, jobs: source.ingestJobs });
   const adminDetails = input.role === "OWNER" || input.role === "ADMIN" ? {
     jobs: source.ingestJobs.map((job) => ({ id: job.id, jobType: job.jobType, status: job.status, provider: job.provider, providerMode: job.providerMode, startedAt: job.startedAt?.toISOString() ?? null, finishedAt: job.finishedAt?.toISOString() ?? null, errorCode: job.errorCode, errorMessage: job.errorMessage })),
     assets: source.assets.map((asset) => ({ assetType: asset.assetType, status: asset.status, sizeBytes: asset.sizeBytes?.toString() ?? null })),
@@ -365,7 +369,7 @@ export async function getMaterialDetailView(input: { workspaceId: string; userId
         saved: methodVersions.map((method) => ({ id: method.asset.id, title: method.title, status: method.asset.status, version: method.version, source: methodKind(method, latestAnalysis?.id ?? null, distillation.current?.id ?? null) })),
       },
     },
-    transcript: { text: transcriptText, segments: transcriptSegments, wordCount: transcriptText ? transcriptText.replace(/\s/gu, "").length : 0, durationMs, quality: transcriptQuality, processingTime: processingTime(transcriptMetadata.processingMs), updatedAt: source.transcript?.updatedAt.toISOString() ?? null, editable: input.role !== "VIEWER", transcriptionState, method: transcriptMethod, configured: transcriptionConfigured, busy: transcriptionBusy, failed: latestTranscription?.status === "FAILED", message: transcriptText ? undefined : transcriptionBusy ? "转写处理中，完成后会自动显示。" : latestTranscription?.status === "FAILED" ? transcriptionUnavailableMessage : !transcriptionConfigured ? transcriptionUnavailableMessage : "视频已保存，尚未转写。" },
+    transcript: { text: transcriptText, segments: transcriptSegments, wordCount: transcriptText ? transcriptText.replace(/\s/gu, "").length : 0, durationMs, quality: transcriptQuality, processingTime: processingTime(transcriptMetadata.processingMs), updatedAt: source.transcript?.updatedAt.toISOString() ?? (transcriptText ? source.updatedAt.toISOString() : null), editable: input.role !== "VIEWER", transcriptionState, method: transcriptMethod, configured: transcriptionConfigured, busy: contentBusy || transcriptionBusy, failed: latestTranscription?.status === "FAILED" || readingJob?.status === "FAILED", message: transcriptText ? undefined : contentBusy ? "资料正在读取，完成后会自动显示。" : transcriptionBusy ? "正在生成文字稿，完成后会自动显示。" : latestTranscription?.status === "FAILED" || readingJob?.status === "FAILED" ? "这次读取没有完成，可以重试。" : !transcriptionConfigured ? transcriptionUnavailableMessage : `尚未生成${contentLabel}。` },
     processing: { currentLabel: processing.currentLabel, sourceStatus: source.status, ingestStatus: source.ingestJobs.find((job) => job.jobType !== "TRANSCRIBE")?.status ?? null, transcriptionStatus: latestTranscription?.status ?? null, ingestJobId: source.ingestJobs.find((job) => job.jobType !== "TRANSCRIBE")?.id ?? null, adminDetails },
     llmStatus: llm.status,
   };

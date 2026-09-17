@@ -14,7 +14,7 @@ async function request(url: string, method: string, body?: unknown) {
   return result;
 }
 
-export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt: latestInitial, job: jobInitial, history, canEdit, llmStatus, hasTranscript, embedded = false, showCreateAction = true, compact = false }: {
+export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt: latestInitial, job: jobInitial, history, canEdit, llmStatus, hasTranscript, contentLabel = "文字稿", embedded = false, showCreateAction = true, compact = false }: {
   sourceId: string;
   current: MaterialAnalysisDTO | null;
   latestAttempt: MaterialAnalysisDTO | null;
@@ -23,6 +23,7 @@ export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt
   canEdit: boolean;
   llmStatus: string;
   hasTranscript: boolean;
+  contentLabel?: string;
   embedded?: boolean;
   showCreateAction?: boolean;
   compact?: boolean;
@@ -75,11 +76,11 @@ export function MaterialAnalysisCard({ sourceId, current: initial, latestAttempt
 
   return <Container className={`${embedded ? "material-analysis-panel" : "p-5"}${compact ? " material-analysis-compact" : ""}`} data-testid="material-analysis-card">
     <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">{compact ? "AI 已帮你看完这条内容" : "内容理解"}</h2><p className="mt-1 text-sm text-[var(--text-secondary)]">{compact ? "从主题、关键观点和可用信息里提炼重点。" : "先弄清这条到底在讲什么、面向谁，以及表达是怎样展开的。"}</p></div><Badge>{statusLabel}</Badge></div>
-    {!hasTranscript && !currentResult ? <div className="material-feature-state"><p>完成文字稿后，可以继续判断这条内容在讲什么、面向谁，以及表达怎样展开。</p><Button variant="secondary" disabled>完成文字稿后可用</Button></div> : null}
+    {!hasTranscript && !currentResult ? <div className="material-feature-state"><p>完成{contentLabel}后，可以继续判断这条内容在讲什么、面向谁，以及表达怎样展开。</p><Button variant="secondary" disabled>完成{contentLabel}后可用</Button></div> : null}
     {hasTranscript && !configured && !currentResult ? <div className="material-feature-state">暂时没有可用的内容理解结果。</div> : null}
-    {processing ? <div className="material-feature-state is-processing"><p className="font-medium">正在整理内容理解</p><p>可以继续阅读文字稿，完成后结果会显示在这里。已有历史结果仍然保留。</p><div className="material-state-skeleton"><i /><i /><i /></div></div> : null}
+    {processing ? <div className="material-feature-state is-processing"><p className="font-medium">正在整理内容理解</p><p>可以继续阅读{contentLabel}，完成后结果会显示在这里。已有历史结果仍然保留。</p><div className="material-state-skeleton"><i /><i /><i /></div></div> : null}
     {failed ? <div className="material-feature-state is-failed"><p className="font-medium">这次没有处理成功，可以重新尝试。</p><p>已有的历史结果不会受到影响。</p></div> : null}
-    {currentResult?.stale ? <div className="mt-4 rounded-xl border border-[var(--warning)] p-4 text-sm"><p className="font-medium text-[var(--warning)]">视频文字稿已更新，当前内容理解基于旧版本。</p><p className="mt-1 text-[var(--text-secondary)]">旧结果仍可查看，重新理解后才会采用最新文字稿。</p></div> : null}
+    {currentResult?.stale ? <div className="mt-4 rounded-xl border border-[var(--warning)] p-4 text-sm"><p className="font-medium text-[var(--warning)]">{contentLabel}已更新，当前内容理解基于旧版本。</p><p className="mt-1 text-[var(--text-secondary)]">旧结果仍可查看，重新理解后才会采用最新内容。</p></div> : null}
     {currentResult?.status === "COMPLETED" && currentResult.understanding ? compact ? <><CompactUnderstandingView value={currentResult.understanding} />{isCurrent(currentResult.understanding) && currentResult.understanding.methods.items.length ? <MethodRecoveryView analysisId={currentResult.id} value={currentResult.understanding} canSave={canEdit} /> : null}</> : <UnderstandingView value={currentResult.understanding} analysisId={currentResult.id} canSave={canEdit} /> : null}
     {history.filter((item) => item.status === "COMPLETED" && item.id !== currentResult?.id).length ? <details className="mt-5 rounded-xl border p-4"><summary className="cursor-pointer text-sm font-medium">历史内容理解</summary><div className="mt-3 grid gap-3">{history.filter((item) => item.status === "COMPLETED" && item.id !== currentResult?.id).map((item) => <details key={item.id} className="rounded-lg bg-[var(--surface-elevated)] p-3 text-sm"><summary className="cursor-pointer font-medium">第 {item.version} 版 · {item.summary || "暂无摘要"}</summary>{item.understanding ? <div className="mt-3"><UnderstandingView value={item.understanding} /></div> : <p className="mt-2 text-[var(--text-secondary)]">暂无可展开的完整结果。</p>}</details>)}</div></details> : null}
     {confirming ? <div className="mt-4 rounded-xl border border-[var(--warning)] p-4 text-sm"><p>会生成一份新的内容理解结果，旧版本仍会保留。</p><div className="mt-3 flex gap-2"><Button disabled={busy} onClick={analyze}>确认重新理解</Button><Button variant="secondary" onClick={() => setConfirming(false)}>取消</Button></div></div> : null}
