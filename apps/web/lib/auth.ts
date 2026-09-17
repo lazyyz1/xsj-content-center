@@ -2,6 +2,22 @@ import { prismaAdapter } from "@better-auth/prisma-adapter";
 import { db } from "@content-center/db";
 import { betterAuth } from "better-auth";
 
+function trustedAuthOrigins(configuredUrl: string | undefined) {
+  if (!configuredUrl) return [];
+  try {
+    const configured = new URL(configuredUrl);
+    const origins = new Set([configured.origin]);
+    if (configured.hostname === "localhost" || configured.hostname === "127.0.0.1") {
+      const alternate = new URL(configured);
+      alternate.hostname = configured.hostname === "localhost" ? "127.0.0.1" : "localhost";
+      origins.add(alternate.origin);
+    }
+    return [...origins];
+  } catch {
+    return [configuredUrl];
+  }
+}
+
 export const auth = betterAuth({
   appName: "AI 内容生产中心",
   baseURL: process.env.APP_URL,
@@ -18,5 +34,5 @@ export const auth = betterAuth({
       },
     },
   },
-  trustedOrigins: process.env.APP_URL ? [process.env.APP_URL] : [],
+  trustedOrigins: trustedAuthOrigins(process.env.APP_URL),
 });
