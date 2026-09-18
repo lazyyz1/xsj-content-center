@@ -10,8 +10,24 @@ const resultClaim = /(稳定带来|稳定出|提升了|增长了|翻倍|已经�
 const promise = /(保证(?:招生|营收|利润|成交|咨询|播放|爆款|回本|结果)|保底(?:结果|效果|增长|转化)|至少不会(?:更差|比原来差|下降|亏)|不会比原来更差|一定能(?:成交|增长|提升|带来)|肯定能(?:成交|增长|提升|带来)|稳定带来(?:咨询|成交|增长)|固定提升(?:百分比|比例|\d))/u;
 const numericTokens = /(?:\d+(?:\.\d+)?\s*(?:%|％|年|个月|月|天|分钟|次|条|个|位|人|元|万|亿|分|组|家|所|倍|版)|[二三四五六七八九十百千万]+(?:年|个月|分钟|次|位|人|元|万|亿|分|组|家|所|倍|版)|百分之[零一二三四五六七八九十百\d.]+)/gu;
 const experienceTerms = /(教培|教育|校区运营|招生|销售|短视频|直播|产品|项目|客户|学员|学校|成交|转化|收入|成绩|团队)/gu;
+const humanizerProtectedTokenPatterns = [
+  /(?:19|20)\d{2}(?:年\d{1,2}月\d{1,2}日?|[-/]\d{1,2}[-/]\d{1,2})/gu,
+  /\d+(?:\.\d+)?\s*(?:%|％|元|万元|人民币|年|个月|月|日|次|人|家|件|万|亿|倍)/gu,
+  /[“"]([^”"]{1,200})[”"]/gu,
+  /(?:作者|姓名|人名|归因|引用|由|——|—)\s*([\p{Script=Han}]{2,4}|[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)/gu,
+  /\b[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*\b/gu,
+];
 
 function normalize(value: string) { return value.normalize("NFKC").toLocaleLowerCase("zh-CN").replace(/[\s，,。；;：:！？!?、“”‘’（）()《》【】\-—]/gu, ""); }
+function unique(values: string[]) { return [...new Set(values.map((value) => value.trim()).filter(Boolean))]; }
+export function extractHumanizerFactTokens(text: string) {
+  return unique(humanizerProtectedTokenPatterns.flatMap((pattern) => [...text.matchAll(pattern)].map((match) => match[1] || match[0])));
+}
+export function preserveHumanizerFacts(original: string, replacement: string | null, protectedTokens: string[] = [], needsConfirmation: string[] = []) {
+  const required = unique([...extractHumanizerFactTokens(original), ...protectedTokens]);
+  const missing = replacement ? required.filter((token) => !replacement.includes(token)) : required;
+  return { replacement: missing.length ? null : replacement, missing, needsConfirmation: [...needsConfirmation] };
+}
 function promiseText(value: string) {
   return value
     .replace(/(?:不|不能|不得|不要|避免)(?:做出|使用|写出|声称)?[^。！？\n]{0,12}(?:保证|保底|必然|一定|稳定带来)/gu, "")
@@ -97,8 +113,12 @@ export function sanitizeStudioQuickActionOutput(action: StudioQuickAction, value
   });
   const downgradedReplacement = value.replacement ? downgradeStudioFactText(value.replacement, ownFacts) : null;
   const replacementCheck = downgradedReplacement ? inspectPassage(downgradedReplacement, ownFacts) : null;
-  const replacement = replacementCheck?.blocked ? null : downgradedReplacement;
+  const preserved = action === "HUMANIZE_TEXT"
+    ? preserveHumanizerFacts(value.original, downgradedReplacement, ownFacts.flatMap(extractHumanizerFactTokens))
+    : { replacement: downgradedReplacement, missing: [], needsConfirmation: [] };
+  const replacement = replacementCheck?.blocked || preserved.missing.length ? null : preserved.replacement;
   if (replacementCheck?.blocked) removed.push({ text: "完整改写包含未确认事实", handling: `${replacementCheck.reasons.join("、")}，已阻止应用。` });
+  if (preserved.missing.length) removed.push({ text: "润色候选缺少原稿事实", handling: `候选稿缺少${preserved.missing.slice(0, 4).join("、")}，已阻止应用。` });
 
   if (action === "ADD_CASE" && !hasOwnEvidence) suggestions = [{ title: "补充一个真实案例", text: "这里需要补一个真实案例：\n起点：\n问题：\n动作：\n过程：\n结果：", factState: "HYPOTHETICAL" as const }];
   if (action === "STRENGTHEN_EVIDENCE" && !hasOwnEvidence) suggestions = [{ title: "补充真实证据", text: "这里最好补充一项真实资料：真实咨询记录、真实客户反馈、前后流程、产品界面或已确认数据。", factState: "CREATIVE_EXPRESSION" as const }];

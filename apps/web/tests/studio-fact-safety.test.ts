@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deterministicFactRisks, downgradeStudioFactText, inspectStudioFactText, sanitizeStudioQuickActionOutput } from "../server/studio/fact-safety";
+import { deterministicFactRisks, downgradeStudioFactText, inspectStudioFactText, preserveHumanizerFacts, sanitizeStudioQuickActionOutput } from "../server/studio/fact-safety";
 
 const output = (original: string, suggestions: Array<{ title: string; text: string }> = [], replacement: string | null = null) => ({ original, summary: "建议", suggestions, replacement, risks: [] });
 
@@ -66,6 +66,17 @@ describe("Studio fact-state and promise boundary", () => {
     expect(result.replacement).toBeNull();
     expect(result.factSafety).toMatchObject({ blockedReplacement: true });
     expect(result.risks[0]?.handling).toMatch(/已阻止应用/u);
+  });
+
+  it("preserves humanizer facts and confirmation metadata deterministically", () => {
+    const original = "姓名：林舟。2026年9月18日，星河计划完成率为 37.5%，预算为 299 元。引用：“先把一个问题讲清楚。”——林舟。";
+    const needsConfirmation = ["星河计划的最终客户归属仍需确认。"];
+    const candidate = "林舟把这段经历讲得更口语一些：2026年9月18日，星河计划的完成率还是 37.5%，预算仍是 299 元。引用保持为：“先把一个问题讲清楚。”——林舟。";
+    const preserved = preserveHumanizerFacts(original, candidate, ["林舟", "星河计划"], needsConfirmation);
+    expect(preserved.replacement).toBe(candidate);
+    expect(preserved.missing).toEqual([]);
+    expect(preserved.needsConfirmation).toEqual(needsConfirmation);
+    expect(preserveHumanizerFacts(original, candidate.replace("299 元", "399 元"), ["林舟", "星河计划"], needsConfirmation).replacement).toBeNull();
   });
 
   it("builds deterministic fact risks and ignores explicit hypotheses and generic scenes", () => {

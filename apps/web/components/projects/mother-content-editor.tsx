@@ -23,6 +23,16 @@ export const MotherContentEditor = forwardRef<MotherContentEditorHandle, { proje
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const [selection, setSelection] = useState<{ text: string; start: number; end: number } | null>(null);
 
+  useEffect(() => {
+    setTitle(initial.title);
+    setBody(initial.body);
+    setOutlineText(initial.outline.join("\n"));
+    version.current = initial.draftBranchVersion;
+    lastSaved.current = { title: initial.title, body: initial.body, outline: initial.outline };
+    setSelection(null);
+    onSelectionChange?.(null);
+  }, [initial.draftBranchVersion]);
+
   function reportSelection(element: HTMLTextAreaElement) {
     const start = element.selectionStart;
     const end = element.selectionEnd;

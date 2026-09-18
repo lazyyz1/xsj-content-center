@@ -1,6 +1,7 @@
 import { ArrowRight, BookOpenCheck, FilePenLine, Search, ShieldCheck, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { DefaultContentMethod } from "@/components/projects/default-content-method";
+import { WorkflowSkillImport } from "@/components/library/workflow-skill-import";
 import { methodStatusLabels } from "@/lib/content-labels";
 import { requireWorkspace } from "@/server/access";
 import { getDefaultContentMethod } from "@/server/default-content-method/service";
@@ -72,6 +73,7 @@ export default async function MethodsPage({ searchParams }: { searchParams: Prom
           <div className="method-browser-actions">
             <form method="get"><input type="hidden" name="view" value={view} /><label htmlFor="method-search"><Search size={17} /><input id="method-search" name="q" defaultValue={keyword} placeholder="搜索创作方法" /></label><button type="submit">搜索</button></form>
             {editable ? <Link href="/discovery"><FilePenLine size={17} />从研究中保存创作方法</Link> : null}
+            {editable ? <WorkflowSkillImport /> : null}
           </div>
         </header>
 

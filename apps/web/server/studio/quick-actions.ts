@@ -67,13 +67,15 @@ type QuickActionInput = { workspaceId: string; userId: string; projectId: string
 type QuickActionContext = Awaited<ReturnType<ProjectContextBuilder["build"]>> | ContextBuilderV2Result;
 
 function quickActionPlan(input: QuickActionInput, project: { title: string; motherContent: { body: string } | null; creativeBrief: { topic: string; coreMessage: string; audience: string } | null }, built: QuickActionContext) {
-  if (!built.defaultMethod) throw new StudioQuickActionError("QUICK_ACTION_NOT_READY", "公司默认创作方法尚未发布。");
+  if (!built.defaultMethod && input.studioAction !== "HUMANIZE_TEXT") throw new StudioQuickActionError("QUICK_ACTION_NOT_READY", "公司默认创作方法尚未发布。");
   const fallback = JSON.stringify({ projectTitle: project.title, topic: project.creativeBrief?.topic, coreMessage: project.creativeBrief?.coreMessage, audience: project.creativeBrief?.audience });
   const selection = target(input.studioAction, project.motherContent?.body ?? "", fallback, { text: input.selectedText, start: input.selectionStart, end: input.selectionEnd });
   const ownFactTexts = built.ownFacts.map(({ text }) => text);
   const hasActionEvidence = input.studioAction === "ADD_CASE" ? built.hasOwnCaseOrData : built.hasOwnEvidence;
   const prompt = `【本次任务】${input.studioAction}\n【用户明确要求】${input.instruction?.trim() || "无额外要求"}\n【当前处理文字】\n${selection.original}\n【统一创作上下文】\n${JSON.stringify(built.context)}\n\n${instructions[input.studioAction]}\nReturn exactly ${input.studioAction === "REWRITE_OPENING" ? openingOutputShape : fullOutputShape}. Do not return markdown or analysis.`;
-  const defaultAudit = { defaultMethodAssetId: built.defaultMethod.assetId, defaultMethodVersionId: built.defaultMethod.versionId, defaultMethodVersion: built.defaultMethod.version, defaultMethodSections: studioQuickActionSections[input.studioAction].join(",") };
+  const defaultAudit: Record<string, string | number | boolean> = built.defaultMethod
+    ? { defaultMethodAssetId: built.defaultMethod.assetId, defaultMethodVersionId: built.defaultMethod.versionId, defaultMethodVersion: built.defaultMethod.version, defaultMethodSections: studioQuickActionSections[input.studioAction].join(",") }
+    : {};
   const generate = async (provider: Parameters<Parameters<typeof executeStructuredAIRun>[0]["generate"]>[0]) => {
     if (input.studioAction === "REWRITE_OPENING") {
       const generated = await provider.generateStructured({ systemPrompt: `${quickSystemPrompt}\n${generationQualityContract}`, prompt }, rewriteOpeningProviderSchema);

@@ -1397,6 +1397,7 @@ model MethodVersion {
   sourceMaterialDistillationId String?
   workspaceDefaultKey      String?
   evidence               Json
+  workflowContract       Json?
   editedById             String
   createdAt              DateTime        @default(now())
   asset                  MethodAsset     @relation(fields: [assetId], references: [id], onDelete: Cascade)

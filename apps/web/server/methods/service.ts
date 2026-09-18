@@ -6,6 +6,7 @@ import { benchmarkAnalysisOutputSchema, type BenchmarkCommonMethod } from "@cont
 import { materialDistillationGenerationSchema, type MaterialDistillationHighlight } from "@content-center/providers";
 import { z } from "zod";
 import { isDefaultContentMethodPayload } from "../default-content-method/schemas";
+import { parseWorkflowSkill, workflowSkillPreview, type WorkflowSkillContract } from "../workflow-skill/contract";
 
 const requiredText = (maximum: number) => z.string().trim().min(1).max(maximum);
 
@@ -34,7 +35,7 @@ export const updateMethodSchema = methodContentSchema.extend({ expectedVersion: 
 export const methodStatusSchema = z.enum(["SAVED", "TRIAL", "CORE", "DISABLED"]);
 
 export class MethodError extends Error {
-  constructor(readonly code: "METHOD_INVALID" | "METHOD_NOT_FOUND" | "METHOD_VERSION_CONFLICT" | "METHOD_STATUS_INVALID", message: string) {
+  constructor(readonly code: "METHOD_INVALID" | "METHOD_NOT_FOUND" | "METHOD_VERSION_CONFLICT" | "METHOD_STATUS_INVALID" | "WORKFLOW_SKILL_INVALID", message: string) {
     super(message);
     this.name = "MethodError";
   }
@@ -50,6 +51,7 @@ export type MethodVersionDTO = {
   applicableScenarios: string[];
   boundaries: string[];
   evidence: MethodEvidenceDTO[];
+  workflowContract: WorkflowSkillContract | null;
   source: {
     sourceItemId: string | null;
     title: string;
@@ -152,6 +154,7 @@ function toVersionDTO(row: MethodVersionRow): MethodVersionDTO {
     applicableScenarios: strings(row.applicableScenarios),
     boundaries: strings(row.boundaries),
     evidence: evidence(row.evidence),
+    workflowContract: row.workflowContract && typeof row.workflowContract === "object" && !Array.isArray(row.workflowContract) ? row.workflowContract as unknown as WorkflowSkillContract : null,
     source: {
       sourceItemId: sourceDisplay?.id ?? null,
       title: distillation ? `单条视频精华提炼 · ${distillationSource?.title || "未命名视频"}` : study ? `${study.benchmarkAccount.name} · 本次 ${study.sampleCount} 条代表内容研究` : sourceItem?.title || "未命名素材",
@@ -209,6 +212,36 @@ export async function listMethods(input: { workspaceId: string; ownerUserId: str
     include: { versions: { orderBy: { version: "desc" }, take: 1, include: methodVersionInclude } },
   });
   return rows.filter((row) => !isDefaultMethodAsset(row)).map(toMethodDTO);
+}
+
+export function previewWorkflowSkill(markdown: string) {
+  return workflowSkillPreview(parseWorkflowSkill(markdown));
+}
+
+export async function importWorkflowSkill(input: { workspaceId: string; ownerUserId: string; markdown: string }) {
+  await assertMethodEditor({ workspaceId: input.workspaceId, userId: input.ownerUserId });
+  const contract = parseWorkflowSkill(input.markdown);
+  const asset = await db.$transaction(async (tx) => {
+    const created = await tx.methodAsset.create({ data: { workspaceId: input.workspaceId, ownerUserId: input.ownerUserId, status: "SAVED", statusUpdatedAt: new Date() } });
+    await tx.methodVersion.create({
+      data: {
+        assetId: created.id,
+        version: 1,
+        title: contract.name,
+        steps: json(contract.steps),
+        applicableScenarios: json(contract.scenarios),
+        boundaries: json(contract.prohibitions),
+        workflowContract: json(contract),
+        evidence: json([]),
+        editedById: input.ownerUserId,
+      },
+    });
+    await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.ownerUserId, action: "method.imported_from_workflow_skill", resourceType: "method_asset", resourceId: created.id, metadata: { contractVersion: contract.contractVersion, outputType: contract.outputType, sourceType: contract.sourceType } } });
+    return created;
+  });
+  const result = await getMethod({ workspaceId: input.workspaceId, ownerUserId: input.ownerUserId, methodId: asset.id });
+  if (!result) throw new MethodError("METHOD_NOT_FOUND", "方法不存在。");
+  return result;
 }
 
 export async function getMethod(input: { workspaceId: string; ownerUserId: string; methodId: string }) {
@@ -402,7 +435,7 @@ export async function updateMethodContent(input: {
       if (!asset || !current) throw new MethodError("METHOD_NOT_FOUND", "方法不存在。");
       if (isDefaultContentMethodPayload(current.steps)) throw new MethodError("METHOD_INVALID", "默认创作方法请使用公司方法管理入口。");
       if (current.version !== input.expectedVersion) throw new MethodError("METHOD_VERSION_CONFLICT", "这个方法刚刚有新的修改，请刷新后再保存。");
-      await tx.methodVersion.create({ data: { assetId: asset.id, version: current.version + 1, title: content.data.title, steps: json(content.data.steps), applicableScenarios: json(content.data.applicableScenarios), boundaries: json(content.data.boundaries), sourceItemId: current.sourceItemId, sourceMaterialAnalysisId: current.sourceMaterialAnalysisId, sourceTranscriptId: current.sourceTranscriptId, sourceTranscriptUpdatedAt: current.sourceTranscriptUpdatedAt, sourceBenchmarkStudyId: current.sourceBenchmarkStudyId, sourceMaterialDistillationId: current.sourceMaterialDistillationId, evidence: json(current.evidence ?? []), editedById: input.ownerUserId } });
+      await tx.methodVersion.create({ data: { assetId: asset.id, version: current.version + 1, title: content.data.title, steps: json(content.data.steps), applicableScenarios: json(content.data.applicableScenarios), boundaries: json(content.data.boundaries), sourceItemId: current.sourceItemId, sourceMaterialAnalysisId: current.sourceMaterialAnalysisId, sourceTranscriptId: current.sourceTranscriptId, sourceTranscriptUpdatedAt: current.sourceTranscriptUpdatedAt, sourceBenchmarkStudyId: current.sourceBenchmarkStudyId, sourceMaterialDistillationId: current.sourceMaterialDistillationId, workflowContract: current.workflowContract ?? undefined, evidence: json(current.evidence ?? []), editedById: input.ownerUserId } });
       await tx.methodAsset.update({ where: { id: asset.id }, data: { updatedAt: new Date() } });
       await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.ownerUserId, action: "method.version_created", resourceType: "method_asset", resourceId: asset.id, metadata: { version: current.version + 1 } } });
     }, { isolationLevel: "Serializable" });

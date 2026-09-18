@@ -1146,7 +1146,7 @@ function CanvasSurface({
             onToggleMaterials={toggleMaterials}
           />
           <CanvasContextBar brief={brief} sources={sources} facts={facts} methods={methods} draft={draft} onOpenContext={openContext} onOpenDraft={() => setFocused(true)} />
-          {canvasIsEmpty ? <div className="canvas-empty-state" data-testid="canvas-empty-state"><span><FileText size={19} /></span><strong>画布暂时没有内容</strong><p>从一段文字或项目资料开始，内容会留在这里，方便继续创作。</p><div><button type="button" onClick={() => openAddMenu({ x: 320, y: 180 })} disabled={!editable}>添加内容</button><button type="button" onClick={() => { onContextKindChange?.("sources"); toggleMaterials(); }}>查看项目资料</button></div></div> : null}
+          {canvasIsEmpty ? <div className="canvas-empty-state" data-testid="canvas-empty-state"><span><FileText size={19} /></span><strong>画布暂时没有内容</strong><p>从一段文字或项目资料开始，内容会留在这里，方便继续创作。</p><div><button type="button" onClick={() => setFocused(true)} disabled={!editable}>开始写第一版</button><button type="button" onClick={() => openAddMenu({ x: 320, y: 180 })} disabled={!editable}>添加内容</button><button type="button" onClick={() => { onContextKindChange?.("sources"); toggleMaterials(); }}>查看项目资料</button></div></div> : null}
           <ReactFlow
             nodes={nodes}
             edges={relationEdges}

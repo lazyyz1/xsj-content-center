@@ -78,6 +78,10 @@ export const motherContentProviderSchema = z.object({
   recommendedTitle: z.string().min(1).max(2_000),
   alternativeTitles: z.array(z.string().min(1).max(2_000)).length(2),
   openingHook: z.string().min(1).max(5_000),
+  alternativeOpenings: z.array(z.string().min(1).max(5_000)).max(3).default([]),
+  closingAction: z.string().max(5_000).nullable().default(null),
+  cta: z.string().max(5_000).nullable().default(null),
+  needsConfirmation: z.array(z.string().min(1).max(2_000)).max(20).default([]),
   outline: z.array(z.string()).max(200),
   body: z.string().min(1).max(1_000_000),
   evidenceIds: ids,
@@ -104,7 +108,7 @@ const outputShapes: Record<AIAction, string> = {
   EXTRACT_EVIDENCE: '{"items":[{"type":"FACT|VIEWPOINT|CASE|DATA|QUOTE|EXPERIENCE|QUESTION|OTHER","excerpt":string,"claim":string,"note":string,"sourceItemId":string|null}]}',
   GENERATE_ANGLES: '{"angles":[{"title":string,"angle":string,"coreMessage":string,"whyItWorks":string,"targetAudience":string,"recommendedStructure":string[],"risk":string,"evidenceIds":string[],"sourceItemIds":string[]}]}',
   GENERATE_BRIEF: '{"topic":string,"angle":string,"audience":string,"coreMessage":string,"keyPoints":string[],"structure":string[],"tone":string,"risks":string[],"evidenceIds":string[],"sourceItemIds":string[]}',
-  GENERATE_MOTHER_CONTENT: '{"recommendedAngle":string,"alternativeAngles":string[0..2],"recommendedTitle":string,"alternativeTitles":[string,string],"openingHook":string,"outline":string[],"body":string,"evidenceIds":string[],"sourceItemIds":string[]}',
+  GENERATE_MOTHER_CONTENT: '{"recommendedAngle":string,"alternativeAngles":string[0..2],"recommendedTitle":string,"alternativeTitles":[string,string],"openingHook":string,"alternativeOpenings":string[0..3],"closingAction":string|null,"cta":string|null,"needsConfirmation":string[],"outline":string[],"body":string,"evidenceIds":string[],"sourceItemIds":string[]}',
   REWRITE_SELECTION: '{"original":string,"aiVersion":string}', SHORTEN: '{"original":string,"aiVersion":string}', EXPAND: '{"original":string,"aiVersion":string}', ADD_PERSONAL_VIEW: '{"original":string,"aiVersion":string}', HUMANIZE: '{"original":string,"aiVersion":string}',
 };
 

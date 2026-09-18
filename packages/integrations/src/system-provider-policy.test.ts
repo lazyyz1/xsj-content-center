@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { getSystemProviderConfig, getSystemProviderPublicConfig, systemManagedProvidersEnabled } from "./system-provider-policy";
 
-const names = ["NODE_ENV", "SYSTEM_MANAGED_PROVIDERS", "AI_PROVIDER", "AI_MODEL_ID", "AI_BASE_URL", "KIMI_API_KEY", "KIMI_BASE_URL", "KIMI_MODEL_ID", "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL_ID", "REDFOX_API_KEY", "DOUBAO_API_KEY", "DOUBAO_APP_ID", "DOUBAO_ACCESS_TOKEN", "DOUBAO_ASR_RESOURCE_ID", "TRANSCRIPTION_PRIMARY"] as const;
+const names = ["NODE_ENV", "ENVIRONMENT_ID", "PLAYWRIGHT_SERVER_MODE", "SYSTEM_MANAGED_PROVIDERS", "AI_PROVIDER", "AI_MODEL_ID", "AI_BASE_URL", "KIMI_API_KEY", "KIMI_BASE_URL", "KIMI_MODEL_ID", "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL_ID", "REDFOX_API_KEY", "DOUBAO_API_KEY", "DOUBAO_APP_ID", "DOUBAO_ACCESS_TOKEN", "DOUBAO_ASR_RESOURCE_ID", "TRANSCRIPTION_PRIMARY"] as const;
 const original = Object.fromEntries(names.map((name) => [name, process.env[name]]));
 
 afterEach(() => {
@@ -47,5 +47,13 @@ describe("system-managed provider policy", () => {
     delete process.env.TRANSCRIPTION_PRIMARY;
     expect(systemManagedProvidersEnabled()).toBe(true);
     expect(getSystemProviderConfig("TRANSCRIPTION")).toMatchObject({ source: "DOUBAO", fallbackToDoubao: false });
+  });
+
+  it("keeps LOCAL_TEST production-like runs on workspace integrations", () => {
+    process.env.NODE_ENV = "production";
+    process.env.ENVIRONMENT_ID = "LOCAL_TEST";
+    process.env.PLAYWRIGHT_SERVER_MODE = "production";
+    process.env.SYSTEM_MANAGED_PROVIDERS = "false";
+    expect(systemManagedProvidersEnabled()).toBe(false);
   });
 });

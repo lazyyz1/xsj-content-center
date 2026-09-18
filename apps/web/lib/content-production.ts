@@ -6,6 +6,10 @@ export type ContentProductionPlan = {
   recommendedTitle: string;
   alternativeTitles: string[];
   openingHook: string;
+  alternativeOpenings?: string[];
+  closingAction?: string | null;
+  cta?: string | null;
+  needsConfirmation?: string[];
   estimatedDurationSeconds: number;
   estimatedCharacterCount: number;
   ownContribution: OwnContribution;

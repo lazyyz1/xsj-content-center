@@ -4,6 +4,7 @@ import { db, type Prisma } from "@content-center/db";
 import { listMethods } from "../methods/service";
 import { z } from "zod";
 import { isDefaultContentMethodPayload, parseDefaultContentMethodPayload } from "../default-content-method/schemas";
+import type { WorkflowSkillContract } from "../workflow-skill/contract";
 
 const methodVersionId = z.string().trim().min(1).max(200);
 export const methodSelectionSchema = z.object({
@@ -50,6 +51,7 @@ export type SelectedGenerationMethod = {
   steps: string[];
   applicableScenarios: string[];
   boundaries: string[];
+  workflowContract: WorkflowSkillContract | null;
 };
 
 function json(value: unknown): Prisma.InputJsonValue {
@@ -130,10 +132,10 @@ export async function getSelectedGenerationMethods(input: { workspaceId: string;
   const rows = await db.projectMethodSelection.findMany({
     where: { projectId: input.projectId, selectedByUserId: input.userId, project: { workspaceId: input.workspaceId }, methodAsset: { workspaceId: input.workspaceId, ownerUserId: input.userId, status: { not: "DISABLED" } } },
     orderBy: { createdAt: "asc" },
-    include: { methodVersion: { select: { version: true, title: true, steps: true, applicableScenarios: true, boundaries: true } } },
+    include: { methodVersion: { select: { version: true, title: true, steps: true, applicableScenarios: true, boundaries: true, workflowContract: true } } },
   });
   if (rows.length > 3) throw new ProjectMethodError("METHOD_SELECTION_INVALID", "本次选择的方法超过 3 个，请刷新后重新选择。");
-  return rows.filter(({ methodVersion }) => !isDefaultContentMethodPayload(methodVersion.steps)).map(({ methodAssetId, methodVersionId, methodVersion }) => ({ methodAssetId, methodVersionId, version: methodVersion.version, title: methodVersion.title, steps: strings(methodVersion.steps), applicableScenarios: strings(methodVersion.applicableScenarios), boundaries: strings(methodVersion.boundaries) }));
+  return rows.filter(({ methodVersion }) => !isDefaultContentMethodPayload(methodVersion.steps)).map(({ methodAssetId, methodVersionId, methodVersion }) => ({ methodAssetId, methodVersionId, version: methodVersion.version, title: methodVersion.title, steps: strings(methodVersion.steps), applicableScenarios: strings(methodVersion.applicableScenarios), boundaries: strings(methodVersion.boundaries), workflowContract: methodVersion.workflowContract && typeof methodVersion.workflowContract === "object" && !Array.isArray(methodVersion.workflowContract) ? methodVersion.workflowContract as unknown as WorkflowSkillContract : null }));
 }
 
 export async function recordSelectedMethodUsages(input: { workspaceId: string; userId: string; projectId: string; aiRunId: string; methodVersionIds: string[] }) {

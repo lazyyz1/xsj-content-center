@@ -4,6 +4,7 @@ import { getAIModel, getAIModels, isAIProvider } from "./model-catalog";
 const value = (name: string) => process.env[name]?.trim() || undefined;
 
 export function systemManagedProvidersEnabled() {
+  if (process.env.ENVIRONMENT_ID === "LOCAL_TEST" && process.env.PLAYWRIGHT_SERVER_MODE === "production") return process.env.SYSTEM_MANAGED_PROVIDERS === "true";
   if (process.env.NODE_ENV === "production") return true;
   return process.env.SYSTEM_MANAGED_PROVIDERS === "true";
 }

@@ -45,7 +45,7 @@ export class ProjectContextBuilder {
       useMethods ? getSelectedGenerationMethods({ workspaceId: input.workspaceId, userId: input.userId, projectId: project.id }) : [],
       useMethods ? getPublishedDefaultContentMethodForStudio({ workspaceId: input.workspaceId, sectionCodes: [...defaultSections] }) : null,
     ]);
-    const selectedMethodContext = selectedMethods.map(({ title, steps, applicableScenarios, boundaries }) => ({ title, steps, applicableScenarios, boundaries }));
+    const selectedMethodContext = selectedMethods.map(({ title, steps, applicableScenarios, boundaries, workflowContract }) => ({ title, steps, applicableScenarios, boundaries, ...(workflowContract ? { workflowContract } : {}) }));
     const defaultMethodContext = defaultMethod ? { title: defaultMethod.title, version: defaultMethod.version, sections: defaultMethod.sections.map(({ code, items }) => ({ code, guidelines: items.map(({ text }) => text) })) } : null;
     const creationAction = input.action === "GENERATE_MOTHER_CONTENT" || input.action === "PROJECT_ASSISTANT" || Boolean(input.studioAction);
     let contextTruncated = false;
