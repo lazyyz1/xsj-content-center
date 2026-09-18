@@ -14,8 +14,8 @@ if (process.env.ENVIRONMENT_ID !== "LOCAL_TEST") {
 
 const baseURL = "http://localhost:3001";
 const serverCommand = process.env.PLAYWRIGHT_SERVER_MODE === "production"
-  ? "pnpm --filter @content-center/web start"
-  : "pnpm --filter @content-center/web dev";
+  ? "pnpm --filter @content-center/web exec next start --port 3001"
+  : "pnpm --filter @content-center/web exec next dev --port 3001";
 
 export default defineConfig({
   testDir: "./e2e",

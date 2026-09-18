@@ -96,7 +96,7 @@ describe("AI control foundation", () => {
     const adapter = { resolve: vi.fn().mockResolvedValue([{ ...baseItem, objectType: "CANVAS_OBJECT", objectId: "node-1", whySelected: "用户当前选中对象" }]) };
     const built = await new ContextBuilderV2(legacyBuilder, store, adapter).build({ workspaceId: "workspace", userId: "user", projectId: "project-1", taskType: "TOPIC_CANDIDATES", action: "REWRITE_SELECTION", studioAction: "TOPIC_IDEAS", selectedObjects: [{ objectType: "CANVAS_OBJECT", objectId: "node-1" }] });
     expect(built?.manifest).toMatchObject({ schemaVersion: "ai-context-manifest-v1", currentDraft: { branchId: "draft-1", workingVersion: 7, currentRevisionId: "revision-4" }, selectedObjects: [{ objectId: "node-1" }], creatorProfile: { id: "profile-1" }, sourceRefs: ["source-1"], truncation: { any: true } });
-    expect(built?.manifest.methodVersions).toEqual([{ assetId: "default-a", versionId: "default-v3", version: 3 }, { assetId: "method-a", versionId: "method-v2", version: 2 }]);
+    expect(built?.manifest.methodVersions).toEqual([{ assetId: "method-a", versionId: "method-v2", version: 2 }]);
     expect(JSON.stringify(built?.context)).not.toContain("rawText");
     expect(built?.manifest.items.find(({ objectType }) => objectType === "DRAFT_WORKING_STATE")?.content.length).toBe(16_000);
   });

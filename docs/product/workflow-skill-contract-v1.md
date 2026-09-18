@@ -1,5 +1,9 @@
 # 鑫世界 Studio Workflow Skill Contract v1
 
+> **组合治理说明：** 本 Contract 描述“一项 Skill 自身的能力合同”，不再规定 Agent 全局只能有一个主 Skill，也不规定全局固定执行顺序。多个 Skill 的适用性、冲突、部分采用和顺序由 [Agent + Skill Resolver v1](./agent-skill-resolver-v1.md) 在当前任务中判断。
+>
+> `outputType`、`outputRequirements` 和 `steps` 是该 Skill 的建议与边界，不是所有 Agent 任务的全局输出 Schema 或固定 DAG。系统硬安全规则始终优先。
+
 状态：P5.1 设计稿。本文只定义 Contract、解析边界和架构映射，不包含 API、UI、Prisma、LLM runtime 或导入实现。
 
 ## 1. Product Definition
@@ -10,7 +14,7 @@ Workflow Skill 是一份由外部高能力 GPT 或人工整理的、可读且可
 
 产品链路是：
 
-外部 GPT 生成 Markdown 创作方法 → 人工导入与检查 → Studio 保存为创作方法并版本化 → 创作任务选择一个具体方法版本 → 内部执行模型读取方法指导 → 结合当前资料生成文案 → 记录版本使用和用户采用反馈。
+外部 GPT 生成 Markdown 创作方法 → 人工导入与检查 → Studio 保存为创作方法并版本化 → 当前任务加载一组可用 Skill → Agent Resolver 判断适用性、冲突和组合方式 → 内部 Agent 结合当前资料执行 → 记录实际采用的版本和用户反馈。
 
 核心分工：
 
@@ -237,6 +241,8 @@ Skill 不得声明或接收：
 ## 5. Output Contract
 
 ### 5.1 V1 推荐：一个 Skill 绑定一个主输出类型
+
+> 本节约束的是“单项 Skill 自己提供什么 outputContract”，不是通用 Agent 的全局输出格式。G1.1 允许一个任务加载多个 Skill；最终是否采用某个 Skill 的 outputHints / outputContract，由 Resolver 根据当前任务判断。
 
 V1 选择 A：一个 Skill 绑定一个主输出类型。
 

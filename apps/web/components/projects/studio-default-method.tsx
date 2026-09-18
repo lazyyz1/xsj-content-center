@@ -1,19 +1,21 @@
 "use client";
 
 import { Button } from "@content-center/ui";
-import { Check, ChevronDown, FilePlus2, FileText, Link2, LoaderCircle, Paperclip, RefreshCw, Save, Search, Send, Square, X } from "lucide-react";
+import { Check, ChevronDown, CircleAlert, CircleCheck, FilePlus2, FileText, Link2, LoaderCircle, Paperclip, RefreshCw, Save, Search, Send, Square, X } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { StudioActionRecommendation } from "@/server/ai/schemas";
-import type { AssistantMessageDTO, AssistantResultAction, AssistantStreamEvent, NodeAssistantStreamEvent } from "@/server/assistant/service";
+import type { AssistantExecutionStatus, AssistantMessageDTO, AssistantResultAction, AssistantStreamEvent, NodeAssistantStreamEvent } from "@/server/assistant/service";
 import type { CanvasObjectDTO } from "@/server/canvas/service";
 import type { ProjectMaterial } from "./project-materials-panel";
 import type { StudioSelectionAction } from "./mother-content-editor";
 import { AssistantResultRenderer } from "./assistant-result-renderer";
+import { StudioMethodSelector } from "./studio-method-selector";
+import type { ProjectMethodStateDTO } from "@/server/project-methods/service";
 
 type TextSelection = { text: string; start: number; end: number };
 type SelectedCanvasReference = { objectType: "CANVAS_OBJECT"; objectId: string; version: number; ownership: "EXTERNAL" | "PENDING"; whySelected: string; label: string };
 export type StudioAssistantHandle = { executeSelection: (action: StudioSelectionAction) => void };
-type Props = { projectId: string; recommendedActions: StudioActionRecommendation[]; editable: boolean; configured: boolean; selection?: TextSelection | null; selectedObject?: SelectedCanvasReference | null; projectMaterials: ProjectMaterial[]; canvasObjects: CanvasObjectDTO[]; onClose: () => void; onObjectCreated: (object: CanvasObjectDTO) => void };
+type Props = { projectId: string; recommendedActions: StudioActionRecommendation[]; editable: boolean; configured: boolean; selection?: TextSelection | null; selectedObject?: SelectedCanvasReference | null; projectMaterials: ProjectMaterial[]; canvasObjects: CanvasObjectDTO[]; methods: ProjectMethodStateDTO; onMethodsChange: (state: ProjectMethodStateDTO) => void; onClose: () => void; onObjectCreated: (object: CanvasObjectDTO) => void };
 
 const actionPrompts: Record<StudioSelectionAction, string> = {
   HUMANIZE_TEXT: "请把这段内容改得更自然、更像本人表达：",
@@ -31,13 +33,14 @@ async function jsonRequest(url: string, init?: RequestInit) {
   return result;
 }
 
-export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(function StudioDefaultMethod({ projectId, recommendedActions, editable, configured, selection, selectedObject, projectMaterials, canvasObjects, onClose, onObjectCreated }, ref) {
+export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(function StudioDefaultMethod({ projectId, recommendedActions, editable, configured, selection, selectedObject, projectMaterials, canvasObjects, methods, onMethodsChange, onClose, onObjectCreated }, ref) {
   const [messages, setMessages] = useState<AssistantMessageDTO[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [executionStatuses, setExecutionStatuses] = useState<AssistantExecutionStatus[]>([]);
   const [materialOpen, setMaterialOpen] = useState(false);
   const [materialSearch, setMaterialSearch] = useState("");
   const [materialIds, setMaterialIds] = useState<string[]>([]);
@@ -51,7 +54,7 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
     let active = true;
     const preserveCreatedResult = selectedObject?.objectId === createdObjectIdRef.current;
     setLoading(true);
-    if (!preserveCreatedResult) { setMessages([]); setError(""); }
+    if (!preserveCreatedResult) { setMessages([]); setError(""); setExecutionStatuses([]); }
     const url = selectedObject ? `/api/projects/${projectId}/canvas/objects/${selectedObject.objectId}/assistant` : `/api/projects/${projectId}/assistant`;
     void jsonRequest(url).then((thread: { messages?: AssistantMessageDTO[] }) => { if (!active) return; if (thread.messages?.length || !preserveCreatedResult) setMessages(thread.messages ?? []); if (preserveCreatedResult) createdObjectIdRef.current = null; }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : "对话记录加载失败。"); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; abortRef.current?.abort(); };
@@ -89,7 +92,8 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
           const line = frame.split("\n").find((part) => part.startsWith("data: "));
           if (!line) continue;
           const event = JSON.parse(line.slice(6)) as AssistantStreamEvent | NodeAssistantStreamEvent;
-          if (event.type === "start") setMessages((current) => [...current, event.userMessage, event.assistantMessage]);
+          if (event.type === "start") { setExecutionStatuses([]); setMessages((current) => [...current, event.userMessage, event.assistantMessage]); }
+          else if (event.type === "status") setExecutionStatuses((current) => [...current, event.status]);
           else if (event.type === "delta") setMessages((current) => current.map((message) => message.id === event.messageId ? { ...message, status: "STREAMING", content: message.content + event.delta } : message));
           else if (event.type === "done" || event.type === "stopped") { setMessages((current) => current.map((message) => message.id === event.message.id ? event.message : message)); if (event.type === "done" && "resultObject" in event) { createdObjectIdRef.current = event.resultObject.id; onObjectCreated(event.resultObject); } }
           else if (event.type === "error") { setMessages((current) => current.map((message) => message.id === event.messageId ? { ...message, status: "FAILED" } : message)); setError(event.message); }
@@ -115,6 +119,8 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
   const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } };
 
   return <div className="studio-project-assistant" data-testid="studio-project-assistant">
+    <StudioMethodSelector compact projectId={projectId} initial={methods} editable={editable} onChange={onMethodsChange} />
+    {executionStatuses.length ? <section className="studio-assistant-execution" data-testid="studio-resolver-status" aria-live="polite" aria-label="任务执行状态">{executionStatuses.map((status, index) => <div className={`studio-assistant-execution-item is-${status.tone || "neutral"}`} key={`${status.code}-${index}`}>{status.tone === "positive" ? <CircleCheck size={13} aria-hidden="true" /> : status.tone === "warning" ? <CircleAlert size={13} aria-hidden="true" /> : <span className="studio-assistant-execution-dot" aria-hidden="true" />}<span>{status.message}</span></div>)}</section> : null}
     <div className="studio-assistant-stream" ref={streamRef} aria-live="polite">
       {loading ? <div className="studio-assistant-loading"><LoaderCircle size={18} />正在载入项目对话…</div> : null}
       {!loading && !messages.length ? <section className="studio-assistant-empty"><strong>{selectedObject ? `基于“${selectedObject.label}”继续` : "继续当前创作"}</strong><p>{selectedObject ? "生成结果会成为右侧的新文本，不会覆盖当前内容。" : "我会自动参考创作目标、当前稿件、选中内容和你添加的资料。"}</p><div>{(selectedObject ? ["基于这个给我出 3 个选题", "提炼这个内容的核心观点", "生成另一种表达"] : ["帮我看看这次创作下一步该做什么", "根据当前资料出几个选题", "帮我检查当前稿件"]).map((prompt) => <button type="button" key={prompt} disabled={!configured || Boolean(selectedObject && !editable)} onClick={() => void send(prompt)}>{prompt}</button>)}</div></section> : null}

@@ -3,6 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { db } from "@content-center/db";
 import { ProjectContextBuilder } from "../project-context";
+import type { SkillResolution } from "../skill-resolver";
 import type { AIControlTask, ContextItem, ContextManifest, ContextOwnership, ConversationContextMessage, SelectedContextObject } from "./contracts";
 
 type BuildInput = {
@@ -144,13 +145,14 @@ export class ContextBuilderV2 {
 
     const selected = await this.selectedObjectAdapter.resolve({ workspaceId: input.workspaceId, projectId: input.projectId, selectedObjects: input.selectedObjects ?? [] });
     const draft = project.primaryDraftBranch ?? project.draftBranches[0] ?? null;
+    const effectiveDefaultMethod = legacy.selectedMethods.length ? null : legacy.defaultMethod;
     const selectedItems = boundedItems(selected, budgets.selected);
     const projectItem = item({ objectType: "PROJECT", objectId: project.id, version: project.updatedAt.toISOString(), ownership: "OWN_CONFIRMED", provenance: "project", whySelected: "当前项目目标", content: JSON.stringify({ title: project.title, description: project.description, goal: project.goal, audience: project.audience }) }, budgets.project);
     const draftItem = draft ? item({ objectType: "DRAFT_WORKING_STATE", objectId: draft.id, version: draft.version, ownership: "OWN_CONFIRMED", provenance: "draft_branch_working_state", whySelected: "当前主稿 working state", content: JSON.stringify({ title: draft.workingTitle, body: draft.workingBody, outline: draft.workingOutline }) }, budgets.draft) : null;
     const profile = record(record(legacy.context).creatorProfile);
     const profileItem = project.creatorProfile ? item({ objectType: "CREATOR_PROFILE", objectId: project.creatorProfile.id, version: project.creatorProfile.updatedAt.toISOString(), ownership: "PENDING", provenance: "creator_profile", whySelected: "项目绑定的人物画像", content: JSON.stringify(profile) }, budgets.profile) : null;
     const methodItems = boundedItems([
-      ...(legacy.defaultMethod ? [{ objectType: "DEFAULT_METHOD_VERSION", objectId: legacy.defaultMethod.versionId, version: legacy.defaultMethod.version, ownership: "METHOD_GUIDANCE" as ContextOwnership, provenance: "workspace_default_method", whySelected: "当前任务对应的默认创作方式", content: JSON.stringify(legacy.defaultMethod.sections) }] : []),
+      ...(effectiveDefaultMethod ? [{ objectType: "DEFAULT_METHOD_VERSION", objectId: effectiveDefaultMethod.versionId, version: effectiveDefaultMethod.version, ownership: "METHOD_GUIDANCE" as ContextOwnership, provenance: "workspace_default_method", whySelected: "当前任务对应的默认创作方式", content: JSON.stringify(effectiveDefaultMethod.sections) }] : []),
       ...legacy.selectedMethods.map((method) => ({ objectType: "METHOD_VERSION", objectId: method.methodVersionId, version: method.version, ownership: "METHOD_GUIDANCE" as ContextOwnership, provenance: "project_method_selection", whySelected: "项目已选择的创作方法", content: JSON.stringify({ title: method.title, steps: method.steps, applicableScenarios: method.applicableScenarios, boundaries: method.boundaries }) })),
     ], budgets.method);
     const factItems = boundedItems(legacy.ownFacts.map((fact) => ({ objectType: "CONFIRMED_INFORMATION", objectId: fact.sourceId ?? `${fact.source}:${fact.text.slice(0, 40)}`, version: null, ownership: "OWN_CONFIRMED" as ContextOwnership, provenance: fact.source, whySelected: "已确认我方信息", content: fact.text })), budgets.fact);
@@ -166,7 +168,7 @@ export class ContextBuilderV2 {
       currentDraft: draft ? { branchId: draft.id, workingVersion: draft.version, currentRevisionId: draft.currentRevisionId } : null,
       selectedObjects: selectedItems.map(({ objectType, objectId, version, ownership, whySelected, truncated }) => ({ objectType, objectId, version, ownership, whySelected, truncated })),
       methodVersions: [
-        ...(legacy.defaultMethod ? [{ assetId: legacy.defaultMethod.assetId, versionId: legacy.defaultMethod.versionId, version: legacy.defaultMethod.version }] : []),
+        ...(effectiveDefaultMethod ? [{ assetId: effectiveDefaultMethod.assetId, versionId: effectiveDefaultMethod.versionId, version: effectiveDefaultMethod.version }] : []),
         ...legacy.selectedMethods.map(({ methodAssetId, methodVersionId, version }) => ({ assetId: methodAssetId, versionId: methodVersionId, version })),
       ],
       creatorProfile: project.creatorProfile ? { id: project.creatorProfile.id, version: project.creatorProfile.updatedAt.toISOString() } : null,
@@ -187,7 +189,7 @@ export class ContextBuilderV2 {
       recentConversation: conversationItems.map(({ objectId, content }) => ({ messageId: objectId, content })),
       contextManifest: { manifestId, schemaVersion: manifest.schemaVersion },
     };
-    return { ...legacy, context, manifest, contextTruncated: manifest.truncation.any };
+    return { ...legacy, defaultMethod: effectiveDefaultMethod, skillResolution: legacy.skillResolution as SkillResolution | undefined, context, manifest, contextTruncated: manifest.truncation.any };
   }
 }
 

@@ -112,13 +112,13 @@ describe("AI creation engine", () => {
     expect(motherPrompt).toContain("Never invent the creator's customers");
     expect(motherPrompt).toContain("Never turn a reference author's business");
     expect(motherPrompt).toContain("Exact numbers, amounts, percentages");
-    expect(motherPrompt).toContain("External writing method");
-    expect(motherPrompt).toContain("叙事机制指纹");
-    expect(motherPrompt).toContain("The external writing method, for organization and expression only");
+    expect(motherPrompt).not.toContain("External writing method");
+    expect(motherPrompt).not.toContain("叙事机制指纹");
+    expect(motherPrompt).not.toContain("The external writing method, for organization and expression only");
     expect(motherSystemPrompt).toContain("NON-NEGOTIABLE FACT BOUNDARY");
     expect(motherSystemPrompt).toContain("很多人跟我聊");
     expect(motherPrompt).not.toMatch(/contract lifecycle|onboarding|growth|monetization/i);
-    await expect(db.aIRun.findUniqueOrThrow({ where: { id: motherRun.id } })).resolves.toMatchObject({ metadata: expect.objectContaining({ writingMethodSource: "ip-strategist", writingMethodVersion: "v2.2.0", writingMethodSections: expect.any(Array) }) });
+    await expect(db.aIRun.findUniqueOrThrow({ where: { id: motherRun.id } })).resolves.toMatchObject({ metadata: expect.objectContaining({ resolverDryRun: true, resolverMode: "DETERMINISTIC_DRY_RUN", resolver: expect.objectContaining({ dryRun: true, resolverMode: "DETERMINISTIC_DRY_RUN" }) }) });
     await expect(db.motherContent.findUnique({ where: { projectId } })).resolves.toBeNull();
     await applyAIResult({ workspaceId: workspaceAId, userId: userAId, projectId, runId: motherRun.id, expectedVersion: 0 });
     await saveMotherContent({ workspaceId: workspaceAId, userId: userAId, projectId, data: { title: "Human edited V1", body: "Human work must survive", outline: ["Edited"], expectedVersion: 1 } });

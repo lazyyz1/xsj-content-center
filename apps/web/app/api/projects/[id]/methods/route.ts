@@ -24,7 +24,7 @@ export async function PUT(request: Request, route: { params: Promise<{ id: strin
   if (!context) return apiError("UNAUTHORIZED", 401);
   if (context.role === "VIEWER") return apiError("FORBIDDEN", 403);
   const parsed = methodSelectionSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return apiError("INVALID_METHOD_SELECTION", 400, "最多选择 3 个方法。");
+  if (!parsed.success) return apiError("INVALID_METHOD_SELECTION", 400, "当前版本最多加载 3 个 Skill（兼容限制），请减少后重试。");
   const { id } = await route.params;
   try {
     return NextResponse.json(await setProjectMethodSelections({ workspaceId: context.workspace.id, userId: context.session.user.id, projectId: id, methodVersionIds: parsed.data.methodVersionIds }));

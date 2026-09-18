@@ -9,6 +9,7 @@ import { resolveOwnContribution } from "../../lib/content-production";
 import { getSelectedGenerationMethods } from "../project-methods/service";
 import { getPublishedDefaultContentMethodForStudio } from "../default-content-method/service";
 import { classifyCreatorContext, extractExplicitOwnFacts, uniqueConfirmedFacts, type ConfirmedOwnFact } from "./creation-context";
+import { defaultMethodMetadata, resolveSkillPoolDryRun, selectedMethodMetadata, type SkillResolution } from "./skill-resolver";
 
 export type ProjectContextAction = AIAction | "PROJECT_ASSISTANT" | "MATERIAL_KNOWLEDGE_EXTRACTION" | "METHOD_SUGGESTION_FROM_RESEARCH" | "CREATOR_PROFILE_SUGGESTION";
 
@@ -40,11 +41,21 @@ export class ProjectContextBuilder {
       needsBrief ? db.creativeBrief.findFirst({ where: { projectId: project.id, workspaceId: input.workspaceId } }) : null,
     ]);
     const useMethods = input.action === "GENERATE_MOTHER_CONTENT" || input.action === "PROJECT_ASSISTANT" || Boolean(input.studioAction);
+    const useDefaultFallback = input.action === "GENERATE_MOTHER_CONTENT" || Boolean(input.studioAction);
     const defaultSections = input.studioAction ? studioQuickActionSections[input.studioAction] : input.action === "GENERATE_MOTHER_CONTENT" ? ["BODY", "EVIDENCE", "ENDING", "BOUNDARY"] as const : input.action === "PROJECT_ASSISTANT" ? ["TOPIC", "BODY", "EVIDENCE", "BOUNDARY"] as const : [];
-    const [selectedMethods, defaultMethod] = await Promise.all([
+    const [selectedMethods, defaultMethodCandidate] = await Promise.all([
       useMethods ? getSelectedGenerationMethods({ workspaceId: input.workspaceId, userId: input.userId, projectId: project.id }) : [],
-      useMethods ? getPublishedDefaultContentMethodForStudio({ workspaceId: input.workspaceId, sectionCodes: [...defaultSections] }) : null,
+      useDefaultFallback ? getPublishedDefaultContentMethodForStudio({ workspaceId: input.workspaceId, sectionCodes: [...defaultSections] }) : null,
     ]);
+    const skillResolution: SkillResolution = resolveSkillPoolDryRun({
+      taskType: input.studioAction ?? input.action,
+      userTask: brief?.angle || brief?.coreMessage || input.action,
+      workspaceId: input.workspaceId,
+      contextSummary: JSON.stringify({ action: input.action, studioAction: input.studioAction ?? null, sourceCount: sourceRows.length, evidenceCount: evidenceRows.length, hasBrief: Boolean(brief) }),
+      selectedSkills: selectedMethods.map((method) => selectedMethodMetadata({ ...method, id: method.methodVersionId, workspaceId: input.workspaceId })),
+      defaultFallback: defaultMethodCandidate ? defaultMethodMetadata({ ...defaultMethodCandidate, id: defaultMethodCandidate.versionId, workspaceId: input.workspaceId }) : null,
+    });
+    const defaultMethod = selectedMethods.length ? null : defaultMethodCandidate;
     const selectedMethodContext = selectedMethods.map(({ title, steps, applicableScenarios, boundaries, workflowContract }) => ({ title, steps, applicableScenarios, boundaries, ...(workflowContract ? { workflowContract } : {}) }));
     const defaultMethodContext = defaultMethod ? { title: defaultMethod.title, version: defaultMethod.version, sections: defaultMethod.sections.map(({ code, items }) => ({ code, guidelines: items.map(({ text }) => text) })) } : null;
     const creationAction = input.action === "GENERATE_MOTHER_CONTENT" || input.action === "PROJECT_ASSISTANT" || Boolean(input.studioAction);
@@ -106,7 +117,7 @@ export class ProjectContextBuilder {
     const hasOwnEvidence = ownFacts.some(({ kind }) => ["FACT", "CASE", "DATA", "EXPERIENCE"].includes(kind));
     const hasOwnCaseOrData = ownFacts.some(({ kind }) => ["CASE", "DATA"].includes(kind));
     const snapshot = creationAction ? context : null;
-    return { context, snapshot, ownFacts, hasOwnEvidence, hasOwnCaseOrData, ownContribution, hasOwnBackground, contextTruncated, selectedMethods, defaultMethod, inputSummary: { action: input.action, ...(input.studioAction ? { studioAction: input.studioAction } : {}), sourceCount: sources.length, evidenceCount: evidence.length, materialAnalysisCount: sourceRows.filter(({ sourceItem }) => sourceItem.materialAnalyses.length > 0).length, materialDistillationCount: sourceRows.filter(({ sourceItem }) => sourceItem.materialDistillations.length > 0).length, hasUnifiedCreativeAnalysis: false, hasCreativeBrief: Boolean(brief), contextChars: JSON.stringify(context).length, hasCreatorProfile: Boolean(profileContext.profile), confirmedOwnFactCount: ownFacts.length, creatorUnderstandingCount: profileContext.currentUnderstanding.length, pendingCreatorInformationCount: profileContext.pendingInformation.length, hasCurrentDraft: currentDraft.hasBody, hasOwnEvidence, hasOwnCaseOrData, ownContribution, hasOwnBackground, contextTruncated, ...(defaultMethod ? { defaultMethodAssetId: defaultMethod.assetId, defaultMethodVersionId: defaultMethod.versionId, defaultMethodVersion: defaultMethod.version, defaultMethodSections: defaultMethod.sections.map(({ code }) => code) } : {}), ...(selectedMethods.length ? { selectedMethodCount: selectedMethods.length, selectedMethodVersionIds: selectedMethods.map(({ methodVersionId }) => methodVersionId) } : {}) } };
+    return { context, snapshot, ownFacts, hasOwnEvidence, hasOwnCaseOrData, ownContribution, hasOwnBackground, contextTruncated, selectedMethods, defaultMethod, skillResolution, inputSummary: { action: input.action, ...(input.studioAction ? { studioAction: input.studioAction } : {}), sourceCount: sources.length, evidenceCount: evidence.length, materialAnalysisCount: sourceRows.filter(({ sourceItem }) => sourceItem.materialAnalyses.length > 0).length, materialDistillationCount: sourceRows.filter(({ sourceItem }) => sourceItem.materialDistillations.length > 0).length, hasUnifiedCreativeAnalysis: false, hasCreativeBrief: Boolean(brief), contextChars: JSON.stringify(context).length, hasCreatorProfile: Boolean(profileContext.profile), confirmedOwnFactCount: ownFacts.length, creatorUnderstandingCount: profileContext.currentUnderstanding.length, pendingCreatorInformationCount: profileContext.pendingInformation.length, hasCurrentDraft: currentDraft.hasBody, hasOwnEvidence, hasOwnCaseOrData, ownContribution, hasOwnBackground, contextTruncated, resolver: skillResolution, ...(defaultMethod ? { defaultMethodAssetId: defaultMethod.assetId, defaultMethodVersionId: defaultMethod.versionId, defaultMethodVersion: defaultMethod.version, defaultMethodSections: defaultMethod.sections.map(({ code }) => code) } : {}), ...(selectedMethods.length ? { selectedMethodCount: selectedMethods.length, selectedMethodVersionIds: selectedMethods.map(({ methodVersionId }) => methodVersionId) } : {}) } };
   }
 }
 

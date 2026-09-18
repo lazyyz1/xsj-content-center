@@ -67,7 +67,7 @@ type QuickActionInput = { workspaceId: string; userId: string; projectId: string
 type QuickActionContext = Awaited<ReturnType<ProjectContextBuilder["build"]>> | ContextBuilderV2Result;
 
 function quickActionPlan(input: QuickActionInput, project: { title: string; motherContent: { body: string } | null; creativeBrief: { topic: string; coreMessage: string; audience: string } | null }, built: QuickActionContext) {
-  if (!built.defaultMethod && input.studioAction !== "HUMANIZE_TEXT") throw new StudioQuickActionError("QUICK_ACTION_NOT_READY", "公司默认创作方法尚未发布。");
+  if (!built.defaultMethod && !built.selectedMethods.length && input.studioAction !== "HUMANIZE_TEXT") throw new StudioQuickActionError("QUICK_ACTION_NOT_READY", "当前没有可用的创作方法，请先加载一个 Skill 或发布默认方法。");
   const fallback = JSON.stringify({ projectTitle: project.title, topic: project.creativeBrief?.topic, coreMessage: project.creativeBrief?.coreMessage, audience: project.creativeBrief?.audience });
   const selection = target(input.studioAction, project.motherContent?.body ?? "", fallback, { text: input.selectedText, start: input.selectionStart, end: input.selectionEnd });
   const ownFactTexts = built.ownFacts.map(({ text }) => text);
@@ -75,7 +75,7 @@ function quickActionPlan(input: QuickActionInput, project: { title: string; moth
   const prompt = `【本次任务】${input.studioAction}\n【用户明确要求】${input.instruction?.trim() || "无额外要求"}\n【当前处理文字】\n${selection.original}\n【统一创作上下文】\n${JSON.stringify(built.context)}\n\n${instructions[input.studioAction]}\nReturn exactly ${input.studioAction === "REWRITE_OPENING" ? openingOutputShape : fullOutputShape}. Do not return markdown or analysis.`;
   const defaultAudit: Record<string, string | number | boolean> = built.defaultMethod
     ? { defaultMethodAssetId: built.defaultMethod.assetId, defaultMethodVersionId: built.defaultMethod.versionId, defaultMethodVersion: built.defaultMethod.version, defaultMethodSections: studioQuickActionSections[input.studioAction].join(",") }
-    : {};
+    : { resolverDryRun: true };
   const generate = async (provider: Parameters<Parameters<typeof executeStructuredAIRun>[0]["generate"]>[0]) => {
     if (input.studioAction === "REWRITE_OPENING") {
       const generated = await provider.generateStructured({ systemPrompt: `${quickSystemPrompt}\n${generationQualityContract}`, prompt }, rewriteOpeningProviderSchema);
@@ -110,7 +110,7 @@ export async function runStudioQuickAction(input: QuickActionInput, dependencies
       promptVersion: 1,
       onContext: (context) => { controlledContext = context; },
       inputSummary: (context) => { const plan = quickActionPlan(input, project, context); return { ...context.inputSummary, selectedTextLength: plan.selection.original.length, hasInstruction: Boolean(input.instruction?.trim()) }; },
-      metadata: (context) => { const plan = quickActionPlan(input, project, context); return { kind: "STUDIO_QUICK_ACTION", studioAction: input.studioAction, selectionStart: plan.selection.start, selectionEnd: plan.selection.end, ownFactCount: context.ownFacts.length, hasOwnEvidence: context.hasOwnEvidence, hasOwnCaseOrData: context.hasOwnCaseOrData, contextVersion: "creation-context-v2", ...plan.defaultAudit }; },
+      metadata: (context) => { const plan = quickActionPlan(input, project, context); return { kind: "STUDIO_QUICK_ACTION", studioAction: input.studioAction, selectionStart: plan.selection.start, selectionEnd: plan.selection.end, ownFactCount: context.ownFacts.length, hasOwnEvidence: context.hasOwnEvidence, hasOwnCaseOrData: context.hasOwnCaseOrData, contextVersion: "creation-context-v2", resolver: context.skillResolution, resolverMode: context.skillResolution?.resolverMode ?? "DETERMINISTIC_DRY_RUN", ...plan.defaultAudit }; },
       auditMetadata: (context) => ({ studioAction: input.studioAction, ...quickActionPlan(input, project, context).defaultAudit }),
       onRunCreated: (aiRunId, context) => recordGenerationMethodUsages({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, aiRunId, selectedMethodVersionIds: context.selectedMethods.map(({ methodVersionId }) => methodVersionId), defaultMethodVersionId: context.defaultMethod?.versionId }).then(() => undefined),
       generate: (provider, context) => quickActionPlan(input, project, context).generate(provider),
@@ -130,7 +130,7 @@ export async function runStudioQuickAction(input: QuickActionInput, dependencies
     operation: `STUDIO_${input.studioAction}`,
     promptVersion: 1,
     inputSummary: { ...built.inputSummary, selectedTextLength: plan.selection.original.length, hasInstruction: Boolean(input.instruction?.trim()) },
-    metadata: { kind: "STUDIO_QUICK_ACTION", studioAction: input.studioAction, selectionStart: plan.selection.start, selectionEnd: plan.selection.end, ownFactCount: built.ownFacts.length, hasOwnEvidence: built.hasOwnEvidence, hasOwnCaseOrData: built.hasOwnCaseOrData, contextVersion: "creation-context-v1", ...plan.defaultAudit },
+    metadata: { kind: "STUDIO_QUICK_ACTION", studioAction: input.studioAction, selectionStart: plan.selection.start, selectionEnd: plan.selection.end, ownFactCount: built.ownFacts.length, hasOwnEvidence: built.hasOwnEvidence, hasOwnCaseOrData: built.hasOwnCaseOrData, contextVersion: "creation-context-v1", resolver: built.skillResolution, resolverMode: built.skillResolution.resolverMode, ...plan.defaultAudit },
     auditMetadata: { studioAction: input.studioAction, ...plan.defaultAudit },
     contextTruncated: built.contextTruncated,
     onRunCreated: (aiRunId) => recordGenerationMethodUsages({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, aiRunId, selectedMethodVersionIds: built.selectedMethods.map(({ methodVersionId }) => methodVersionId), defaultMethodVersionId: built.defaultMethod?.versionId }).then(() => undefined),

@@ -50,6 +50,11 @@ describe("Phase 10B project assistant", () => {
     const completed = await runProjectAssistant({ workspaceId, userId: ownerId, projectId, content: "根据当前资料出几个选题", selectedObject: { objectType: "CANVAS_OBJECT", objectId: canvasObjectId, version: 1, ownership: "PENDING", whySelected: "当前选中" }, sourceItemIds: [sourceId] }, (event) => events.push(event), { runtime });
     expect(completed).toMatchObject({ role: "ASSISTANT", status: "COMPLETED", resultType: "TOPIC", actions: ["TOPIC", "TEXT"], structuredResult: { type: "TOPIC", topics: expect.any(Array) } });
     expect(events.some(({ type }) => type === "delta")).toBe(true);
+    const statuses = events.filter((event): event is Extract<AssistantStreamEvent, { type: "status" }> => event.type === "status").map(({ status }) => status);
+    expect(statuses.map(({ code }) => code)).toEqual(expect.arrayContaining(["TASK_READING", "TASK_UNDERSTANDING", "SKILL_POOL_LOADED", "GENERATION_STARTED", "CHECK_STARTED", "COMPLETED"]));
+    expect(statuses.find(({ code }) => code === "SKILL_POOL_LOADED")?.message).toContain("当前没有加载 Skill");
+    expect(JSON.stringify(statuses)).not.toContain(sourceId);
+    expect(JSON.stringify(statuses)).not.toMatch(/MethodVersion|AIRun|Provider|Prompt|JSON/u);
     expect(completed.sources).toEqual(expect.arrayContaining([expect.objectContaining({ title: "校长访谈整理", type: "项目资料" }), expect.objectContaining({ title: "当前选中的观点", type: "当前选中内容" })]));
     const stored = await db.assistantMessage.findUniqueOrThrow({ where: { id: completed.id }, include: { aiRun: true } });
     expect(stored.aiRun).toMatchObject({ action: "PROJECT_ASSISTANT", provider: "KIMI", status: "SUCCEEDED", metadata: { aiControlVersion: "ai-control-v1", modelRoute: { routingMode: "SINGLE_ENGINE", workspaceEngine: "KIMI", crossProviderFallback: false }, contextManifest: { selectedObjects: expect.arrayContaining([expect.objectContaining({ objectId: canvasObjectId }), expect.objectContaining({ objectId: sourceId })]) } } });
@@ -119,8 +124,11 @@ describe("Phase 10B project assistant", () => {
   });
 
   it("keeps the client contract on the existing assistant rail without remounting Canvas", async () => {
-    const [assistant, canvas, service] = await Promise.all([readFile(new URL("../components/projects/studio-default-method.tsx", import.meta.url), "utf8"), readFile(new URL("../components/projects/content-canvas.tsx", import.meta.url), "utf8"), readFile(new URL("../server/assistant/service.ts", import.meta.url), "utf8")]);
+    const [assistant, skillPool, canvas, service] = await Promise.all([readFile(new URL("../components/projects/studio-default-method.tsx", import.meta.url), "utf8"), readFile(new URL("../components/projects/studio-method-selector.tsx", import.meta.url), "utf8"), readFile(new URL("../components/projects/content-canvas.tsx", import.meta.url), "utf8"), readFile(new URL("../server/assistant/service.ts", import.meta.url), "utf8")]);
     expect(assistant).toContain("AbortController");
+    expect(skillPool).toContain("studio-skill-pool");
+    expect(assistant).toContain("studio-resolver-status");
+    expect(assistant).toContain("event.type === \"status\"");
     expect(assistant).toContain('event.key === "Enter" && !event.shiftKey');
     expect(assistant).toContain("来源 {message.sources.length}");
     expect(assistant).toContain("保存为文本");

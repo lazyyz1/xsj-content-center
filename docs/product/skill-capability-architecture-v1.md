@@ -1,6 +1,19 @@
 # 鑫世界 Studio Skill 能力架构 v1
 
-状态：P5.2 设计稿。
+> **部分治理规则已被 G1.1 `Agent + Skill Resolver` 模型取代。**
+>
+> 本文仍保留 P5.2 的 Skill 类型、权限、安全边界和生命周期参考，但以下旧组合规则不再是当前规范：
+>
+> - “同一轮最多选择一个主创作 Skill”；
+> - “主 Skill / AUX / CHECK”是固定硬层级；
+> - 两个创作 Skill 必须先选择一个、不能由 Agent Resolver 组合；
+> - Skill 必须按本文固定顺序执行；
+> - 公司默认方法与用户方法作为两个完整方法层同时注入。
+>
+> 以上规则标记为：`SUPERSEDED BY SKILL RESOLVER MODEL`。
+> 当前组合、冲突判断、跳过、自动调用和流式状态以 [Agent + Skill Resolver v1](./agent-skill-resolver-v1.md) 为准。FactGate、Evidence、ownership、Workspace 权限和人工确认边界仍然有效，未被取代。
+
+状态：P5.2 历史设计稿；组合语义部分已被 G1.1 修订。
 
 本文建立在 Workflow Skill Contract v1 之上，只定义 Skill 类型、调用方式、执行顺序、权限、冲突规则、外部机制吸收方式和 V1 边界。
 
@@ -244,7 +257,9 @@ Skill 蒸馏器不是普通创作 Skill。它属于方法创建工具，默认�
 
 管理员页面可以显示更多方法管理信息，但仍不把 AST、内部 schema 或 provider 作为普通产品语言。
 
-### 3.3 V1 调用语义
+### 3.3 V1 调用语义（历史规则，SUPERSEDED BY SKILL RESOLVER MODEL）
+
+> 本节中的“选择一个主创作 Skill”和固定调用语义只保留为 P5.2 历史设计记录。G1.1 之后，用户可以加载一组 Skills，由 Resolver 判断使用、跳过、组合、顺序和是否需要确认。
 
 示例：
 
@@ -379,7 +394,9 @@ Skill 决定：
 
 如果用户想换输出类型，系统应推荐切换到支持该类型的创作 Skill，而不是强行改写当前 Skill。
 
-### 5.3 Skill 冲突政策
+### 5.3 Skill 冲突政策（历史规则，SUPERSEDED BY SKILL RESOLVER MODEL）
+
+> 本节原先要求两个创作 Skill 之间先选择一个主方法；该硬限制已撤销。系统硬规则仍然优先，其他冲突由 Resolver 按当前任务、用户要求和 Skill metadata 判断。
 
 #### Skill 与系统硬规则冲突
 
