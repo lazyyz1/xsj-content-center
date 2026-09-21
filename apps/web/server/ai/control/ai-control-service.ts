@@ -6,7 +6,7 @@ import { executeStructuredAIRun } from "../ai-run-service";
 import type { ProjectContextBuilder } from "../project-context";
 import { ActionPermissionPolicy } from "./action-permission";
 import { ContextBuilderV2, type ContextBuilderV2Result } from "./context-builder-v2";
-import { AIControlError, type AIControlAction, type AIControlTask, type ConversationContextMessage, type ModelRouteRequest, type SelectedContextObject, type WorkspaceRoleName } from "./contracts";
+import { AIControlError, type AIControlAction, type AIControlTask, type ContextItem, type ConversationContextMessage, type ModelRouteRequest, type SelectedContextObject, type WorkspaceRoleName } from "./contracts";
 import { FactGateV2 } from "./fact-gate-v2";
 import { ModelRouter } from "./model-router";
 import { ScopeGate } from "./scope-gate";
@@ -19,6 +19,7 @@ type ControlExecutionInput<T> = {
   requestedAction: AIControlAction;
   userInput?: string;
   selectedObjects?: SelectedContextObject[];
+  resolvedContextItems?: ContextItem[];
   conversationHistory?: ConversationContextMessage[];
   preparedContext?: ContextBuilderV2Result;
   action: Parameters<ProjectContextBuilder["build"]>[0]["action"];
@@ -81,7 +82,7 @@ export class AIControlService {
     if (!role) throw new AIControlError("PERMISSION_DENIED");
     const scope = this.scopeGate.evaluate(input);
     if (scope.decision === "OUT_OF_SCOPE") throw new AIControlError("OUT_OF_SCOPE", scope.employeeMessage);
-    const context = input.preparedContext ?? (input.projectId ? await this.contextBuilder.build({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, taskType: input.taskType, action: input.action, studioAction: input.studioAction, selectedObjects: input.selectedObjects, conversationHistory: input.conversationHistory }) : null);
+    const context = input.preparedContext ?? (input.projectId ? await this.contextBuilder.build({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, taskType: input.taskType, action: input.action, studioAction: input.studioAction, selectedObjects: input.selectedObjects, resolvedContextItems: input.resolvedContextItems, conversationHistory: input.conversationHistory }) : null);
     if (!context) throw new AIControlError("NO_CONTEXT");
     input.onContext?.(context);
     const fact = this.factGate.evaluate({ items: context.manifest.items, ownFacts: context.ownFacts.map(({ text }) => text), instruction: input.userInput });

@@ -113,6 +113,10 @@ enum AssetType {
   DOCUMENT
 }
 
+enum ArtifactType {
+  TEXT
+}
+
 enum AssetStatus {
   REMOTE
   DOWNLOADING
@@ -443,6 +447,7 @@ model User {
   deletedDraftBranches    DraftBranch[]                 @relation("DraftBranchDeletedBy")
   createdDraftRevisions   DraftRevision[]               @relation("DraftRevisionCreatedBy")
   createdAssistantThreads AssistantThread[]             @relation("AssistantThreadCreatedBy")
+  createdArtifacts        Artifact[]                    @relation("ArtifactCreatedBy")
   createdCanvasGenerateRuns CanvasGenerateRun[]          @relation("CanvasGenerateRunCreatedBy")
   generatedMethodSuggestions MethodSuggestion[]          @relation("MethodSuggestionGeneratedBy")
   reviewedMethodSuggestions  MethodSuggestion[]          @relation("MethodSuggestionReviewedBy")
@@ -547,6 +552,7 @@ model Workspace {
   draftBranches           DraftBranch[]
   draftRevisions          DraftRevision[]
   assistantThreads        AssistantThread[]
+  artifacts               Artifact[]
   canvasGenerateRuns      CanvasGenerateRun[]
   methodSuggestions       MethodSuggestion[]
   creatorProfileSuggestions CreatorProfileSuggestion[]
@@ -827,6 +833,7 @@ model ContentProject {
   draftRevisions         DraftRevision[]
   primaryDraftBranch     DraftBranch?       @relation("PrimaryDraftBranch", fields: [primaryDraftBranchId], references: [id], onDelete: SetNull)
   assistantThreads       AssistantThread[]
+  artifacts              Artifact[]
   canvasGenerateRuns     CanvasGenerateRun[]
 
   @@index([workspaceId, createdAt])
@@ -864,6 +871,7 @@ model DraftBranch {
   createdBy           User            @relation("DraftBranchCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   updatedBy           User            @relation("DraftBranchUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
   deletedBy           User?           @relation("DraftBranchDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  artifact            Artifact?
 
   @@index([workspaceId, projectId, deletedAt, updatedAt])
   @@index([projectId, deletedAt])
@@ -1888,15 +1896,37 @@ model AssistantMessage {
   content   String                 @db.Text
   status    AssistantMessageStatus @default(PENDING)
   aiRunId   String?                @unique
+  artifactId String?
   metadata  Json?
   errorCode String?
   createdAt DateTime               @default(now())
   updatedAt DateTime               @updatedAt
   thread    AssistantThread        @relation(fields: [threadId], references: [id], onDelete: Cascade)
   aiRun     AIRun?                 @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
+  artifact  Artifact?              @relation(fields: [artifactId], references: [id], onDelete: SetNull)
 
   @@index([threadId, createdAt])
   @@index([threadId, status])
+  @@index([artifactId, createdAt])
+}
+
+model Artifact {
+  id            String       @id @default(cuid())
+  workspaceId   String
+  projectId     String
+  draftBranchId String       @unique
+  createdById   String
+  type          ArtifactType @default(TEXT)
+  title         String
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project       ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  draftBranch   DraftBranch    @relation(fields: [draftBranchId], references: [id], onDelete: Cascade)
+  createdBy     User           @relation("ArtifactCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  messages      AssistantMessage[]
+
+  @@index([workspaceId, projectId, updatedAt])
 }
 
 enum CanvasGenerateRunStatus {

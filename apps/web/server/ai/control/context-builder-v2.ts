@@ -14,6 +14,7 @@ type BuildInput = {
   action: Parameters<ProjectContextBuilder["build"]>[0]["action"];
   studioAction?: Parameters<ProjectContextBuilder["build"]>[0]["studioAction"];
   selectedObjects?: SelectedContextObject[];
+  resolvedContextItems?: ContextItem[];
   conversationHistory?: ConversationContextMessage[];
 };
 
@@ -143,7 +144,10 @@ export class ContextBuilderV2 {
     ]);
     if (!project) return null;
 
-    const selected = await this.selectedObjectAdapter.resolve({ workspaceId: input.workspaceId, projectId: input.projectId, selectedObjects: input.selectedObjects ?? [] });
+    const selected = [
+      ...await this.selectedObjectAdapter.resolve({ workspaceId: input.workspaceId, projectId: input.projectId, selectedObjects: input.selectedObjects ?? [] }),
+      ...(input.resolvedContextItems ?? []),
+    ];
     const draft = project.primaryDraftBranch ?? project.draftBranches[0] ?? null;
     const effectiveDefaultMethod = legacy.selectedMethods.length ? null : legacy.defaultMethod;
     const selectedItems = boundedItems(selected, budgets.selected);

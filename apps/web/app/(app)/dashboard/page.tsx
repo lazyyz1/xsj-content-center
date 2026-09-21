@@ -4,16 +4,22 @@ import { WorkbenchStart } from "@/components/workbench-start";
 import { requireWorkspace } from "@/server/access";
 import { getDashboardWork } from "@/server/dashboard";
 import { loadWorkbenchPageData } from "@/server/workbench-page-data";
+import { ArtifactServiceError } from "@/server/artifacts/service";
 
-export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ project?: string }> }) {
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ project?: string; node?: string }> }) {
   const { session, workspace, role } = await requireWorkspace();
   const query = await searchParams;
   const projectId = typeof query.project === "string" ? query.project.trim() : "";
 
   if (projectId) {
-    const data = await loadWorkbenchPageData({ userId: session.user.id, workspaceId: workspace.id, role, projectId });
+    const node = typeof query.node === "string" ? query.node : null;
+    const activeArtifactId = node?.startsWith("artifact:") ? node.slice("artifact:".length) : null;
+    const data = await loadWorkbenchPageData({ userId: session.user.id, workspaceId: workspace.id, role, projectId, activeArtifactId }).catch((error) => {
+      if (error instanceof ArtifactServiceError && error.code === "ARTIFACT_NOT_FOUND") return null;
+      throw error;
+    });
     if (!data) notFound();
-    return <div className="dashboard-workbench"><div className="studio-page"><StudioShell {...data} /></div></div>;
+    return <div className="dashboard-workbench"><div className="studio-page"><StudioShell {...data} activeNode={node} /></div></div>;
   }
 
   const work = await getDashboardWork(workspace.id);

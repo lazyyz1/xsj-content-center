@@ -184,6 +184,35 @@ async function writeRevision(tx: Prisma.TransactionClient, input: {
   return { branch: branchDTO(branch, input.primaryDraftBranchId), revision: revisionDTO(revision, revision.id), legacyContent, checkpointCreated: true };
 }
 
+/** Internal transaction-scoped revision primitive shared by legacy drafts and Artifact-backed branches. */
+export async function writeDraftRevisionInTransaction(tx: Prisma.TransactionClient, input: {
+  workspaceId: string;
+  userId: string;
+  projectId: string;
+  branchId: string;
+  primaryDraftBranchId: string | null;
+  expectedVersion: number;
+  title: string;
+  body: string;
+  outline: string[];
+  origin?: DraftRevisionOrigin;
+  originNote?: string | null;
+  generateRunId?: string | null;
+  warningSnapshot?: unknown;
+}) {
+  const branch = await tx.draftBranch.findFirst({ where: { id: input.branchId, workspaceId: input.workspaceId, projectId: input.projectId, deletedAt: null }, include: branchInclude });
+  if (!branch) throw new DraftServiceError("DRAFT_NOT_FOUND");
+  return writeRevision(tx, {
+    workspaceId: input.workspaceId,
+    userId: input.userId,
+    projectId: input.projectId,
+    branch,
+    primaryDraftBranchId: input.primaryDraftBranchId,
+    expectedBranchVersion: input.expectedVersion,
+    data: { title: input.title, body: input.body, outline: input.outline, origin: input.origin ?? "HUMAN", originNote: input.originNote, generateRunId: input.generateRunId, warningSnapshot: input.warningSnapshot },
+  });
+}
+
 export async function listDraftBranches(input: { workspaceId: string; userId: string; projectId: string }) {
   const project = await ensurePrimaryBranch(input);
   const branches = await db.draftBranch.findMany({ where: { workspaceId: input.workspaceId, projectId: input.projectId, deletedAt: null }, include: branchInclude, orderBy: [{ updatedAt: "desc" }, { createdAt: "asc" }] });
@@ -232,11 +261,7 @@ export async function createDraftRevision(input: { workspaceId: string; userId: 
   const project = await ensurePrimaryBranch(input);
   requireEdit(project.role);
   if (input.title.length > 2_000 || input.body.length > 1_000_000 || input.outline.length > 200) throw new DraftServiceError("DRAFT_INVALID");
-  return db.$transaction(async (tx) => {
-    const branch = await tx.draftBranch.findFirst({ where: { id: input.branchId, workspaceId: input.workspaceId, projectId: input.projectId, deletedAt: null }, include: branchInclude });
-    if (!branch) throw new DraftServiceError("DRAFT_NOT_FOUND");
-    return writeRevision(tx, { ...input, branch, primaryDraftBranchId: project.primaryDraftBranchId, expectedBranchVersion: input.expectedVersion, data: { title: input.title, body: input.body, outline: input.outline, origin: input.origin ?? "HUMAN", originNote: input.originNote, generateRunId: input.generateRunId, warningSnapshot: input.warningSnapshot } });
-  });
+  return db.$transaction((tx) => writeDraftRevisionInTransaction(tx, { ...input, primaryDraftBranchId: project.primaryDraftBranchId }));
 }
 
 export async function saveDraftWorkingState(input: { workspaceId: string; userId: string; projectId: string; branchId: string; expectedVersion: number; title: string; body: string; outline: string[] }) {

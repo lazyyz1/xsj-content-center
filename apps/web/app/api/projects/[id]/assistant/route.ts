@@ -7,6 +7,7 @@ const requestSchema = z.object({
   content: z.string().trim().min(1).max(4_000),
   selectedObject: z.object({ objectType: z.literal("CANVAS_OBJECT"), objectId: z.string().min(1).max(200), version: z.number().int().positive().optional(), ownership: z.enum(["OWN_CONFIRMED", "EXTERNAL", "PENDING", "HYPOTHETICAL", "PROHIBITED", "METHOD_GUIDANCE"]).optional(), whySelected: z.string().max(200).optional() }).strict().optional(),
   sourceItemIds: z.array(z.string().min(1).max(200)).max(8).transform((ids) => [...new Set(ids)]).optional(),
+  targetArtifactId: z.string().min(1).max(200).optional(),
 }).strict();
 
 type RouteContext = { params: Promise<{ id: string }> };

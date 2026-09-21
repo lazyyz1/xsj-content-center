@@ -14,6 +14,7 @@ import { getProjectMethodState } from "@/server/project-methods/service";
 import { getProjectForUser } from "@/server/project-service";
 import { CreativeBriefPrefillService } from "@/server/studio/creative-brief-prefill";
 import { listCanvasObjects } from "@/server/canvas/service";
+import { getArtifactForUser, listArtifacts } from "@/server/artifacts/service";
 
 type WorkspaceRole = "OWNER" | "ADMIN" | "EDITOR" | "VIEWER";
 
@@ -25,7 +26,7 @@ function jsonObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-export async function loadWorkbenchPageData(input: { userId: string; workspaceId: string; role: WorkspaceRole; projectId: string }) {
+export async function loadWorkbenchPageData(input: { userId: string; workspaceId: string; role: WorkspaceRole; projectId: string; activeArtifactId?: string | null }) {
   const project = await getProjectForUser(input);
   if (!project) return null;
 
@@ -34,7 +35,7 @@ export async function loadWorkbenchPageData(input: { userId: string; workspaceId
     if (!(error instanceof CreationFeedbackError)) throw error;
     return { available: false, projectId: project.id, motherContentId: null, motherContentVersion: null, sourceAiRunId: null, methods: [], feedback: null, unavailableReason: "MOTHER_NOT_READY" as const };
   });
-  const [availableSources, llm, ownProfile, primaryDraft, draftBranches, latestAppliedMotherRun, methodState, feedbackContext, defaultMethod, creationContext, canvasObjects] = await Promise.all([
+  const [availableSources, llm, ownProfile, primaryDraft, draftBranches, latestAppliedMotherRun, methodState, feedbackContext, defaultMethod, creationContext, canvasObjects, artifacts, activeArtifact] = await Promise.all([
     db.sourceItem.findMany({ where: { workspaceId: input.workspaceId, status: "READY", ...(sourceIds.length ? { id: { notIn: sourceIds } } : {}) }, select: { id: true, title: true, sourcePlatform: true, sourceType: true, createdAt: true, materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { summary: true } } }, orderBy: { createdAt: "desc" }, take: 100 }),
     new IntegrationService().getIntegrationStatus(input.workspaceId, "LLM"),
     getCreatorProfile(input.workspaceId, input.userId),
@@ -46,6 +47,8 @@ export async function loadWorkbenchPageData(input: { userId: string; workspaceId
     getPublishedDefaultContentMethodForStudio({ workspaceId: input.workspaceId }),
     new ProjectContextBuilder().build({ workspaceId: input.workspaceId, userId: input.userId, projectId: project.id, action: "REWRITE_SELECTION", studioAction: "TOPIC_IDEAS" }),
     listCanvasObjects(input),
+    listArtifacts(input),
+    input.activeArtifactId ? getArtifactForUser({ ...input, artifactId: input.activeArtifactId }) : null,
   ]);
 
   const brief = project.creativeBrief;
@@ -90,5 +93,7 @@ export async function loadWorkbenchPageData(input: { userId: string; workspaceId
       handoff: typeof briefMetadata.handoff === "string" ? briefMetadata.handoff : null,
     },
     initialWarnings,
+    artifacts,
+    activeArtifact,
   };
 }

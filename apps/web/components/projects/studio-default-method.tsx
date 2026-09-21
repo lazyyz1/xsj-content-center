@@ -2,6 +2,7 @@
 
 import { Button } from "@content-center/ui";
 import { Check, ChevronDown, CircleAlert, CircleCheck, FilePlus2, FileText, Link2, LoaderCircle, Paperclip, RefreshCw, Save, Search, Send, Square, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { StudioActionRecommendation } from "@/server/ai/schemas";
 import type { AssistantExecutionStatus, AssistantMessageDTO, AssistantResultAction, AssistantStreamEvent, NodeAssistantStreamEvent } from "@/server/assistant/service";
@@ -11,11 +12,12 @@ import type { StudioSelectionAction } from "./mother-content-editor";
 import { AssistantResultRenderer } from "./assistant-result-renderer";
 import { StudioMethodSelector } from "./studio-method-selector";
 import type { ProjectMethodStateDTO } from "@/server/project-methods/service";
+import type { ArtifactView } from "@/server/artifacts/view-model";
 
 type TextSelection = { text: string; start: number; end: number };
 type SelectedCanvasReference = { objectType: "CANVAS_OBJECT"; objectId: string; version: number; ownership: "EXTERNAL" | "PENDING"; whySelected: string; label: string };
 export type StudioAssistantHandle = { executeSelection: (action: StudioSelectionAction) => void };
-type Props = { projectId: string; recommendedActions: StudioActionRecommendation[]; editable: boolean; configured: boolean; selection?: TextSelection | null; selectedObject?: SelectedCanvasReference | null; projectMaterials: ProjectMaterial[]; canvasObjects: CanvasObjectDTO[]; methods: ProjectMethodStateDTO; onMethodsChange: (state: ProjectMethodStateDTO) => void; onClose: () => void; onObjectCreated: (object: CanvasObjectDTO) => void };
+type Props = { projectId: string; recommendedActions: StudioActionRecommendation[]; editable: boolean; configured: boolean; selection?: TextSelection | null; selectedObject?: SelectedCanvasReference | null; targetArtifact?: ArtifactView | null; projectMaterials: ProjectMaterial[]; canvasObjects: CanvasObjectDTO[]; methods: ProjectMethodStateDTO; onMethodsChange: (state: ProjectMethodStateDTO) => void; onClose: () => void; onObjectCreated: (object: CanvasObjectDTO) => void };
 
 const actionPrompts: Record<StudioSelectionAction, string> = {
   HUMANIZE_TEXT: "请把这段内容改得更自然、更像本人表达：",
@@ -24,7 +26,7 @@ const actionPrompts: Record<StudioSelectionAction, string> = {
   STRENGTHEN_EVIDENCE: "请检查这段内容还缺哪些真实依据，不要编造案例或数字：",
   FACT_CHECK: "请检查这段内容有没有把外部信息说成我们自己的信息：",
 };
-const saveLabels: Record<AssistantResultAction, string> = { TEXT: "保存为文本", TOPIC: "保存为选题", DRAFT: "创建候选稿" };
+const saveLabels: Record<AssistantResultAction, string> = { TEXT: "保存为文本", TOPIC: "保存为选题", DRAFT: "创建候选稿", CREATE_ARTIFACT: "保存为产出", APPLY_ARTIFACT: "应用到当前产出" };
 
 async function jsonRequest(url: string, init?: RequestInit) {
   const response = await fetch(url, init);
@@ -33,7 +35,8 @@ async function jsonRequest(url: string, init?: RequestInit) {
   return result;
 }
 
-export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(function StudioDefaultMethod({ projectId, recommendedActions, editable, configured, selection, selectedObject, projectMaterials, canvasObjects, methods, onMethodsChange, onClose, onObjectCreated }, ref) {
+export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(function StudioDefaultMethod({ projectId, recommendedActions, editable, configured, selection, selectedObject, targetArtifact, projectMaterials, canvasObjects, methods, onMethodsChange, onClose, onObjectCreated }, ref) {
+  const router = useRouter();
   const [messages, setMessages] = useState<AssistantMessageDTO[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
@@ -78,7 +81,7 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
     const controller = new AbortController(); abortRef.current = controller;
     try {
       const url = selectedObject ? `/api/projects/${projectId}/canvas/objects/${selectedObject.objectId}/assistant` : `/api/projects/${projectId}/assistant`;
-      const body = selectedObject ? { instruction: content, ...(additionalObjectIds.length ? { additionalObjectIds } : {}), ...(materialIds.length ? { sourceItemIds: materialIds } : {}) } : { content, ...(materialIds.length ? { sourceItemIds: materialIds } : {}) };
+      const body = selectedObject ? { instruction: content, ...(additionalObjectIds.length ? { additionalObjectIds } : {}), ...(materialIds.length ? { sourceItemIds: materialIds } : {}) } : { content, ...(targetArtifact ? { targetArtifactId: targetArtifact.artifactId } : {}), ...(materialIds.length ? { sourceItemIds: materialIds } : {}) };
       const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: controller.signal });
       if (!response.ok || !response.body) { const body = await response.json().catch(() => ({})); throw new Error(body.message || "当前 AI 服务暂时不可用，请稍后再试。"); }
       setInput(""); setMaterialIds([]); setAdditionalObjectIds([]); setMaterialOpen(false);
@@ -99,6 +102,10 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
           else if (event.type === "error") { setMessages((current) => current.map((message) => message.id === event.messageId ? { ...message, status: "FAILED" } : message)); setError(event.message); }
         }
       }
+      if (!selectedObject) {
+        const restored = await jsonRequest(url) as { messages?: AssistantMessageDTO[] };
+        setMessages(restored.messages ?? []);
+      }
     } catch (cause) {
       if (controller.signal.aborted) setMessages((current) => current.map((message) => message.status === "STREAMING" || message.status === "PENDING" ? { ...message, status: "STOPPED" } : message));
       else setError(cause instanceof Error ? cause.message : "当前 AI 服务暂时不可用，请稍后再试。");
@@ -110,6 +117,22 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
   const saveResult = async (message: AssistantMessageDTO, action: AssistantResultAction, topicIndex?: number) => {
     setError(""); setNotice("");
     try {
+      if (action === "CREATE_ARTIFACT") {
+        const fallbackTitle = message.content.split(/\r?\n/u).map((line) => line.replace(/^#+\s*/u, "").trim()).find(Boolean)?.slice(0, 80) || "文本产出";
+        const title = window.prompt("产出标题", fallbackTitle)?.trim();
+        if (!title) return;
+        const artifact = await jsonRequest(`/api/projects/${projectId}/artifacts`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "TEXT", title, sourceMessageId: message.id }) }) as ArtifactView;
+        setNotice("已保存为独立文本产出。");
+        router.push(`/dashboard?project=${projectId}&node=artifact:${artifact.artifactId}`);
+        return;
+      }
+      if (action === "APPLY_ARTIFACT") {
+        if (!targetArtifact || message.artifactId !== targetArtifact.artifactId) throw new Error("当前修改结果与选中的产出不一致，请刷新后重试。");
+        await jsonRequest(`/api/projects/${projectId}/artifacts/${targetArtifact.artifactId}/revisions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sourceMessageId: message.id, expectedVersion: targetArtifact.version }) });
+        setNotice("已应用到当前产出，并保留上一版本。");
+        router.refresh();
+        return;
+      }
       const result = await jsonRequest(`/api/projects/${projectId}/assistant/messages/${message.id}/save`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, ...(topicIndex === undefined ? {} : { topicIndex }) }) }) as { object?: CanvasObjectDTO };
       if (result.object) onObjectCreated(result.object);
       setNotice(action === "TEXT" ? "已保存到画布，并选中新文本。" : action === "TOPIC" ? "已保存到选题库。" : "已创建新的候选稿，不会覆盖主稿。");
@@ -123,13 +146,13 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
     {executionStatuses.length ? <section className="studio-assistant-execution" data-testid="studio-resolver-status" aria-live="polite" aria-label="任务执行状态">{executionStatuses.map((status, index) => <div className={`studio-assistant-execution-item is-${status.tone || "neutral"}`} key={`${status.code}-${index}`}>{status.tone === "positive" ? <CircleCheck size={13} aria-hidden="true" /> : status.tone === "warning" ? <CircleAlert size={13} aria-hidden="true" /> : <span className="studio-assistant-execution-dot" aria-hidden="true" />}<span>{status.message}</span></div>)}</section> : null}
     <div className="studio-assistant-stream" ref={streamRef} aria-live="polite">
       {loading ? <div className="studio-assistant-loading"><LoaderCircle size={18} />正在载入项目对话…</div> : null}
-      {!loading && !messages.length ? <section className="studio-assistant-empty"><strong>{selectedObject ? `基于“${selectedObject.label}”继续` : "继续当前创作"}</strong><p>{selectedObject ? "生成结果会成为右侧的新文本，不会覆盖当前内容。" : "我会自动参考创作目标、当前稿件、选中内容和你添加的资料。"}</p><div>{(selectedObject ? ["基于这个给我出 3 个选题", "提炼这个内容的核心观点", "生成另一种表达"] : ["帮我看看这次创作下一步该做什么", "根据当前资料出几个选题", "帮我检查当前稿件"]).map((prompt) => <button type="button" key={prompt} disabled={!configured || Boolean(selectedObject && !editable)} onClick={() => void send(prompt)}>{prompt}</button>)}</div></section> : null}
+      {!loading && !messages.length ? <section className="studio-assistant-empty"><strong>{targetArtifact ? `修改“${targetArtifact.title}”` : selectedObject ? `基于“${selectedObject.label}”继续` : "继续当前创作"}</strong><p>{targetArtifact ? "本次对话只会把修改应用到当前产出，并保留历史版本。" : selectedObject ? "生成结果会成为右侧的新文本，不会覆盖当前内容。" : "我会自动参考创作目标、当前稿件、选中内容和你添加的资料。"}</p><div>{(targetArtifact ? ["请把这篇产出改短一些", "请重写开头并保留其他内容", "请把表达改得更自然"] : selectedObject ? ["基于这个给我出 3 个选题", "提炼这个内容的核心观点", "生成另一种表达"] : ["帮我看看这次创作下一步该做什么", "根据当前资料出几个选题", "帮我检查当前稿件"]).map((prompt) => <button type="button" key={prompt} disabled={!configured || Boolean(selectedObject && !editable)} onClick={() => void send(prompt)}>{prompt}</button>)}</div></section> : null}
       {messages.map((message, index) => <article key={message.id} className={`studio-assistant-message is-${message.role.toLowerCase()} is-${message.status.toLowerCase()} ${message.role === "ASSISTANT" && message.structuredResult ? "has-structured-result" : ""}`}>
         <header><strong>{message.role === "USER" ? "你" : "鑫小助"}</strong><time>{new Date(message.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time>{message.status === "STREAMING" ? <span><i />正在回复</span> : message.status === "STOPPED" ? <span>已停止</span> : message.status === "FAILED" ? <span>未完成</span> : null}</header>
         {message.role === "ASSISTANT" ? <AssistantResultRenderer message={message} onContinue={(instruction) => void send(instruction)} onTopicContinue={(topic) => void send(`继续展开这个选题：${topic.title}${topic.angle ? `。切入角度：${topic.angle}` : ""}`)} onTopicSave={(topicIndex) => void saveResult(message, "TEXT", topicIndex)} /> : <div className="studio-assistant-message-content">{message.content || (message.status === "PENDING" ? "正在准备项目上下文…" : "")}</div>}
         {message.warnings.length ? <div className="studio-assistant-warnings" role="alert"><strong>需要确认</strong>{message.warnings.map((warning) => <p key={warning}>{warning}</p>)}</div> : null}
         {message.sources.length ? <details className="studio-assistant-citations"><summary>来源 {message.sources.length}<ChevronDown size={14} /></summary><div>{message.sources.map((source, sourceIndex) => <section key={`${source.title}-${sourceIndex}`}><span>{source.type}</span><strong>{source.title}</strong><p>{source.excerpt}</p></section>)}</div></details> : null}
-        {message.actions.filter((action) => !(message.structuredResult?.type === "TOPIC" && (action === "TEXT" || action === "TOPIC"))).length ? <footer>{message.actions.filter((action) => !(message.structuredResult?.type === "TOPIC" && (action === "TEXT" || action === "TOPIC"))).map((action) => <button type="button" key={action} disabled={!editable} title={editable ? saveLabels[action] : "当前权限只能查看"} onClick={() => void saveResult(message, action)}>{action === "TEXT" ? <Save size={14} /> : action === "TOPIC" ? <Check size={14} /> : <FilePlus2 size={14} />}{saveLabels[action]}</button>)}</footer> : null}
+        {message.actions.filter((action) => !(message.structuredResult?.type === "TOPIC" && (action === "TEXT" || action === "TOPIC"))).length ? <footer>{message.actions.filter((action) => !(message.structuredResult?.type === "TOPIC" && (action === "TEXT" || action === "TOPIC"))).map((action) => <button type="button" key={action} disabled={!editable} title={editable ? saveLabels[action] : "当前权限只能查看"} onClick={() => void saveResult(message, action)}>{action === "TEXT" ? <Save size={14} /> : action === "TOPIC" || action === "APPLY_ARTIFACT" ? <Check size={14} /> : <FilePlus2 size={14} />}{saveLabels[action]}</button>)}</footer> : null}
         {message.status === "FAILED" ? <button type="button" className="studio-assistant-retry" disabled={sending} onClick={() => { const previous = messages.slice(0, index).reverse().find((item) => item.role === "USER"); void send(previous?.content || lastPromptRef.current); }}><RefreshCw size={14} />重新试一次</button> : null}
       </article>)}
     </div>
@@ -137,6 +160,7 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
     <div className="studio-assistant-quick-prompts" aria-label="快捷任务">{recommendedActions.slice(0, 3).map((item) => <button type="button" key={`${item.action}-${item.label}`} disabled={sending || !configured} onClick={() => void send([item.label, item.instruction].filter(Boolean).join("："))}>{item.label}</button>)}<button type="button" disabled={sending || !configured} onClick={() => void send("请根据当前创作告诉我下一步最值得做什么")}>下一步建议</button></div>
 
     <div className="studio-assistant-references">
+      {targetArtifact ? <span><FileText size={14} />当前产出：{targetArtifact.title} · v{targetArtifact.version}</span> : null}
       {selectedObject ? <span><FileText size={14} />当前正在基于：{selectedObject.label}</span> : null}
       {additionalObjectIds.map((id) => { const object = canvasObjects.find((item) => item.id === id); return object ? <span key={id}><Link2 size={14} />{object.title || "未命名内容"}<button type="button" aria-label={`移除内容 ${object.title || "未命名内容"}`} onClick={() => setAdditionalObjectIds((current) => current.filter((value) => value !== id))}><X size={13} /></button></span> : null; })}
       {materialIds.map((id) => { const source = projectMaterials.find((item) => item.id === id); return source ? <span key={id}><Link2 size={14} />{source.title}<button type="button" aria-label={`移除资料 ${source.title}`} onClick={() => setMaterialIds((current) => current.filter((value) => value !== id))}><X size={13} /></button></span> : null; })}
