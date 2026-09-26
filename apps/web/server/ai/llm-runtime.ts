@@ -1,6 +1,6 @@
 import "server-only";
 
-import { classifyLLMConfig, IntegrationService, type AIModelCapabilities } from "@content-center/integrations";
+import { classifyLLMConfig, getAIModel, IntegrationService, isAIProvider, type AIModelCapabilities, type AIProvider } from "@content-center/integrations";
 import { LLMError, MockLLMProvider, OpenAICompatibleLLMProvider, openAICompatibleConfigSchema, type LLMProvider } from "@content-center/providers";
 
 export type LLMRuntime = {
@@ -11,6 +11,8 @@ export type LLMRuntime = {
   capabilities?: AIModelCapabilities;
   mode?: "REAL" | "FIXTURE" | "MOCK";
 };
+
+export type LLMModelSelection = { provider: AIProvider; modelId: string };
 
 function mockFixture(prompt: string) {
   if (prompt.includes("返回候选信息。")) { const source = prompt.match(/资料：\n([\s\S]*?)\n\n返回候选信息。/u)?.[1]?.trim() || "MOCK MODE 资料"; const excerpt = source.split(/(?<=[。！？!?])|\n/u).find((item) => item.trim())?.trim() || source.slice(0, 120); return { candidates: [{ content: excerpt.replace(/[。！？!?]$/u, ""), category: "FACT", excerpt, confidence: 0.8 }] }; }
@@ -43,7 +45,7 @@ function mockFixture(prompt: string) {
   return { original, aiVersion: `MOCK MODE：${original}` };
 }
 
-export async function loadLLMRuntime(workspaceId: string, service = new IntegrationService()): Promise<LLMRuntime> {
+export async function loadLLMRuntime(workspaceId: string, service = new IntegrationService(), selection?: LLMModelSelection | null): Promise<LLMRuntime> {
   const status = await service.getIntegrationStatus(workspaceId, "LLM");
   if (status.status === "DISABLED") throw new LLMError("LLM_DISABLED", "AI 模型已禁用。", false);
   if (status.status !== "CONFIGURED" && status.status !== "MOCK") {
@@ -58,12 +60,20 @@ export async function loadLLMRuntime(workspaceId: string, service = new Integrat
   const parsed = openAICompatibleConfigSchema.safeParse(config);
   if (!parsed.success) throw new LLMError("KIMI_NOT_CONFIGURED", "AI 模型尚未配置，请联系管理员完成设置。", false);
   const metadata = config as { requestedModel?: string; capabilities?: AIModelCapabilities; mode?: "REAL" | "FIXTURE" };
+  const provider = parsed.data.provider.toUpperCase();
+  const model = selection ? getAIModel(selection.provider, selection.modelId) : isAIProvider(provider) ? getAIModel(provider, parsed.data.model) : null;
+  if (selection && (provider !== selection.provider || !model)) throw new LLMError("KIMI_MODEL_UNAVAILABLE", "所选模型已不可用，请重新选择。", false);
+  if (model) {
+    parsed.data.model = model.modelId;
+    parsed.data.capabilities = model.capabilities;
+    parsed.data.chatStructuredOutput = model.chatStructuredOutput;
+  }
   return {
     provider: new OpenAICompatibleLLMProvider(parsed.data),
     providerName: metadata.mode === "FIXTURE" ? parsed.data.provider : parsed.data.provider.toUpperCase(),
     model: parsed.data.model,
-    requestedModel: metadata.requestedModel ?? parsed.data.model,
-    capabilities: metadata.capabilities,
+    requestedModel: selection?.modelId ?? metadata.requestedModel ?? parsed.data.model,
+    capabilities: parsed.data.capabilities ?? metadata.capabilities,
     mode: metadata.mode,
   };
 }

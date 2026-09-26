@@ -149,6 +149,9 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
 
   async streamText(input: LLMGenerateInput, options: LLMStreamOptions): Promise<ProviderResult<LLMTextResult>> {
     const capabilities = resolveRequestCapabilities(this.config);
+    if (input.content?.some((block) => block.type === "image") && !capabilities.supportsImage) {
+      throw new LLMError("LLM_UNSUPPORTED_INPUT", "当前模型不支持图片输入。", false);
+    }
     const userContent = input.content?.length ? input.content.map(contentBlock) : input.prompt;
     const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(this.timeoutMs)]) : AbortSignal.timeout(this.timeoutMs);
     let response: Response;

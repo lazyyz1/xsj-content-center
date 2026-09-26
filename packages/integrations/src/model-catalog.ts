@@ -26,6 +26,7 @@ const deepSeekTextCapabilities: AIModelCapabilities = { text: true, image: false
 
 export const AI_MODEL_CATALOG = [
   { provider: "KIMI", modelId: "kimi-k2.6", label: "Kimi 2.6", defaultBaseUrl: "https://api.moonshot.cn/v1", capabilities: kimiCapabilities, chatStructuredOutput: "JSON_SCHEMA" },
+  { provider: "DEEPSEEK", modelId: "deepseek-flash", label: "DeepSeek Flash", defaultBaseUrl: "https://api.deepseek.com", capabilities: { ...deepSeekTextCapabilities, image: true }, chatStructuredOutput: "JSON_OBJECT" },
   { provider: "DEEPSEEK", modelId: "deepseek-v4-flash", label: "DeepSeek V4 Flash", defaultBaseUrl: "https://api.deepseek.com", capabilities: deepSeekTextCapabilities, chatStructuredOutput: "JSON_OBJECT" },
   { provider: "DEEPSEEK", modelId: "deepseek-v4-pro", label: "DeepSeek V4 Pro", defaultBaseUrl: "https://api.deepseek.com", capabilities: deepSeekTextCapabilities, chatStructuredOutput: "JSON_OBJECT" },
   { provider: "DEEPSEEK", modelId: "deepseek-v4-flash-vision-exp", label: "DeepSeek V4 Flash Vision Exp", defaultBaseUrl: "https://api.deepseek.com", experimental: true, capabilities: { ...deepSeekTextCapabilities, image: true }, chatStructuredOutput: "JSON_OBJECT" },

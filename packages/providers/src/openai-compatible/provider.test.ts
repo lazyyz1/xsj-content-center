@@ -67,13 +67,13 @@ function kimiProvider(options: { timeoutMs?: number; maxRetries?: 0 | 1 } = {}) 
   return new OpenAICompatibleLLMProvider({ provider: "KIMI", baseUrl: origin, apiKey: "fixture-secret", model: "kimi-k2.6" }, options);
 }
 
-function deepSeekProvider(model: "deepseek-v4-flash" | "deepseek-v4-pro" | "deepseek-v4-flash-vision-exp") {
+function deepSeekProvider(model: "deepseek-flash" | "deepseek-v4-flash" | "deepseek-v4-pro" | "deepseek-v4-flash-vision-exp") {
   return new OpenAICompatibleLLMProvider({
     provider: "DEEPSEEK",
     baseUrl: origin,
     apiKey: "fixture-secret",
     model,
-    capabilities: { text: true, image: model.endsWith("vision-exp"), reasoning: true, structuredOutput: true, jsonObject: true, tools: true, responsesApi: true },
+    capabilities: { text: true, image: model === "deepseek-flash" || model.endsWith("vision-exp"), reasoning: true, structuredOutput: true, jsonObject: true, tools: true, responsesApi: true },
     chatStructuredOutput: "JSON_OBJECT",
   });
 }
@@ -158,12 +158,24 @@ describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
 
   it("sends normalized base64 image content only to an image-capable model", async () => {
     const schema = z.object({ ok: z.boolean(), title: z.string() });
-    await deepSeekProvider("deepseek-v4-flash-vision-exp").generateStructured({
+    await deepSeekProvider("deepseek-flash").generateStructured({
       prompt: "VISION",
       content: [{ type: "text", text: "VISION" }, { type: "image", source: { type: "base64", mediaType: "image/png", data: "aW1hZ2U=" } }],
     }, schema);
     expect(lastRequestBody).toMatchObject({ messages: [expect.objectContaining({ role: "user", content: [{ type: "text", text: "VISION" }, { type: "image_url", image_url: { url: "data:image/png;base64,aW1hZ2U=" } }] })] });
+    await deepSeekProvider("deepseek-flash").generateStructured({
+      prompt: "VISION_URL_AND_FILE",
+      content: [{ type: "text", text: "VISION_URL_AND_FILE" }, { type: "image", source: { type: "url", url: "https://example.test/image.png" } }, { type: "image", source: { type: "file", fileId: "file-api-fixture" } }],
+    }, schema);
+    expect(lastRequestBody).toMatchObject({ messages: [expect.objectContaining({ role: "user", content: [{ type: "text", text: "VISION_URL_AND_FILE" }, { type: "image_url", image_url: { url: "https://example.test/image.png" } }, { type: "file", file_id: "file-api-fixture" }] })] });
     await expect(deepSeekProvider("deepseek-v4-flash").generateStructured({ prompt: "NO_VISION", content: [{ type: "image", source: { type: "base64", mediaType: "image/png", data: "aW1hZ2U=" } }] }, schema)).rejects.toMatchObject({ code: "LLM_UNSUPPORTED_INPUT", message: "当前模型不支持图片输入。" });
+  });
+
+  it("applies the same image capability gate to streaming requests", async () => {
+    const image = { type: "image" as const, source: { type: "url" as const, url: "https://example.test/image.png" } };
+    await expect(deepSeekProvider("deepseek-v4-pro").streamText({ prompt: "NO_VISION", content: [image] }, { onDelta: () => undefined })).rejects.toMatchObject({ code: "LLM_UNSUPPORTED_INPUT" });
+    await deepSeekProvider("deepseek-flash").streamText({ prompt: "STREAM_VISION", content: [{ type: "text", text: "STREAM_VISION" }, image] }, { onDelta: () => undefined });
+    expect(lastRequestBody).toMatchObject({ messages: [expect.objectContaining({ role: "user", content: [{ type: "text", text: "STREAM_VISION" }, { type: "image_url", image_url: { url: "https://example.test/image.png" } }] })] });
   });
 
   it("validates structured JSON with Zod", async () => {

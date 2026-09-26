@@ -2,7 +2,7 @@ import "server-only";
 
 import { getAIModel, type AIModelCapabilities, type AIModelCapability } from "@content-center/integrations";
 import { LLMError } from "@content-center/providers";
-import { loadLLMRuntime, type LLMRuntime } from "../llm-runtime";
+import { loadLLMRuntime, type LLMModelSelection, type LLMRuntime } from "../llm-runtime";
 import { AIControlError, type ModelRouteRequest, type WorkspaceAIEngine } from "./contracts";
 
 export type ModelRouteReceipt = {
@@ -28,12 +28,12 @@ function requirements(input: ModelRouteRequest) {
 }
 
 export class ModelRouter {
-  constructor(private readonly runtimeLoader: (workspaceId: string) => Promise<LLMRuntime> = loadLLMRuntime) {}
+  constructor(private readonly runtimeLoader: (workspaceId: string, selection?: LLMModelSelection | null) => Promise<LLMRuntime> = (workspaceId, selection) => loadLLMRuntime(workspaceId, undefined, selection)) {}
 
-  async route(workspaceId: string, request: ModelRouteRequest): Promise<ModelRoute> {
+  async route(workspaceId: string, request: ModelRouteRequest, selection?: LLMModelSelection | null): Promise<ModelRoute> {
     let runtime: LLMRuntime;
     try {
-      runtime = await this.runtimeLoader(workspaceId);
+      runtime = await this.runtimeLoader(workspaceId, selection);
     } catch (error) {
       if (error instanceof LLMError && ["KIMI_MODEL_ID_MISSING", "KIMI_MODEL_UNAVAILABLE", "LLM_UNSUPPORTED_INPUT"].includes(error.code)) throw new AIControlError("MODEL_UNAVAILABLE");
       throw new AIControlError("PROVIDER_UNAVAILABLE", undefined, true);
