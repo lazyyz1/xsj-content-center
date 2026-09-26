@@ -186,6 +186,8 @@ function asAction(key: string, title: string, description: string, target: Mater
   return { key, title, description, target };
 }
 
+// Legacy compatibility reader for research-era material views and their existing consumers.
+// The current /library/[id] route uses getSourceWorkspaceModel instead.
 export async function getMaterialDetailView(input: { workspaceId: string; userId: string; sourceItemId: string; role: "OWNER" | "ADMIN" | "EDITOR" | "VIEWER" }): Promise<MaterialDetailView | null> {
   const [source, availableTags, availableCollections, availableProjects, currentProjects, relatedTopics] = await Promise.all([
     findSourceForUser(db, { userId: input.userId, workspaceId: input.workspaceId, sourceItemId: input.sourceItemId }),

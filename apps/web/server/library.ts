@@ -11,6 +11,7 @@ export type LibraryQuery = {
   sort?: string;
   page?: string;
   pageSize?: string;
+  view?: string;
 };
 
 const allowedPlatforms = ["GENERIC", "DOUYIN", "XIAOHONGSHU", "WECHAT", "BILIBILI", "YOUTUBE", "TIKTOK", "OTHER"];
@@ -18,7 +19,7 @@ const allowedTypes = ["TEXT", "URL", "VIDEO", "AUDIO", "IMAGE", "DOCUMENT"];
 const allowedStatuses = ["PENDING", "PROCESSING", "READY", "FAILED", "ARCHIVED"];
 
 export async function listLibrarySources(workspaceId: string, query: LibraryQuery) {
-  const page = Math.max(1, Number(query.page) || 1);
+  let page = Math.max(1, Math.floor(Number(query.page) || 1));
   const pageSize = Math.min(50, Math.max(1, Number(query.pageSize) || 12));
   const where: Prisma.SourceItemWhereInput = {
     workspaceId,
@@ -33,7 +34,7 @@ export async function listLibrarySources(workspaceId: string, query: LibraryQuer
       : {}),
     ...(allowedPlatforms.includes(query.sourcePlatform ?? "") ? { sourcePlatform: query.sourcePlatform as never } : {}),
     ...(allowedTypes.includes(query.sourceType ?? "") ? { sourceType: query.sourceType as never } : {}),
-    ...(allowedStatuses.includes(query.status ?? "") ? { status: query.status as never } : {}),
+    ...(allowedStatuses.includes(query.status ?? "") ? { status: query.status as never } : { status: { not: "ARCHIVED" } }),
     ...(query.tag ? { tags: { some: { tagId: query.tag } } } : {}),
     ...(query.collection ? { collections: { some: { collectionId: query.collection } } } : {}),
   };
@@ -43,8 +44,10 @@ export async function listLibrarySources(workspaceId: string, query: LibraryQuer
       : query.sort === "title"
         ? { title: "asc" }
         : { createdAt: "desc" };
-  const [items, total] = await Promise.all([
-    db.sourceItem.findMany({
+  const total = await db.sourceItem.count({ where });
+  const lastPage = Math.max(1, Math.ceil(total / pageSize));
+  page = Math.min(page, lastPage);
+  const items = await db.sourceItem.findMany({
       where,
       select: {
         id: true,
@@ -64,14 +67,11 @@ export async function listLibrarySources(workspaceId: string, query: LibraryQuer
         },
         assets: { select: { id: true, assetType: true, status: true, storageKey: true, mimeType: true } },
         transcript: { select: { providerMode: true } },
-        materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { suggestedTitle: true, summary: true } },
       },
       orderBy,
       skip: (page - 1) * pageSize,
       take: pageSize,
-    }),
-    db.sourceItem.count({ where }),
-  ]);
+    });
   let storage: ReturnType<typeof getStorageProvider> | null = null;
   if (items.some((item) => !item.thumbnailUrl && item.assets.some((asset) => asset.assetType === "IMAGE" && asset.status === "STORED" && asset.storageKey))) {
     try { storage = getStorageProvider(); } catch { storage = null; }

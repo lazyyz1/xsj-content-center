@@ -1,5 +1,6 @@
 import { db, findSourceForUser, hasSourceDeletionReferences } from "@content-center/db";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
 import { getStorageProvider, readSourceMetadataEnvelope } from "@content-center/providers";
 
@@ -21,23 +22,53 @@ export async function GET(_request: Request, route: RouteContext) {
   });
 }
 
-export async function PATCH(_request: Request, route: RouteContext) {
+export async function PATCH(request: Request, route: RouteContext) {
   const context = await getApiWorkspaceContext();
   if (!context) return apiError("UNAUTHORIZED", 401);
   if (context.role === "VIEWER") return apiError("FORBIDDEN", 403);
   const { id } = await route.params;
   const source = await findSourceForUser(db, { userId: context.session.user.id, workspaceId: context.workspace.id, sourceItemId: id });
   if (!source) return apiError("NOT_FOUND", 404);
+  const text = await request.text();
+  let input: unknown;
+  try { input = text ? JSON.parse(text) : {}; } catch { return apiError("INVALID_INPUT", 400); }
+  const parsed = z.object({ action: z.enum(["ARCHIVE", "RESTORE", "UPDATE"]).default("ARCHIVE"), title: z.string().trim().min(1).max(300).optional(), author: z.string().trim().max(200).optional() }).safeParse(input);
+  if (!parsed.success) return apiError("INVALID_INPUT", 400);
+  if (parsed.data.action === "UPDATE") {
+    if (parsed.data.title === undefined && parsed.data.author === undefined) return apiError("INVALID_INPUT", 400);
+    const { title, author } = parsed.data;
+    await db.$transaction([
+      db.sourceItem.update({ where: { id: source.id }, data: { ...(title !== undefined ? { title } : {}), ...(author !== undefined ? { author: author || null } : {}) } }),
+      db.auditLog.create({ data: { workspaceId: context.workspace.id, userId: context.session.user.id, action: "source.updated", resourceType: "source_item", resourceId: source.id } }),
+    ]);
+    return NextResponse.json({ id: source.id });
+  }
+  if (parsed.data.action === "RESTORE") {
+    if (source.status !== "ARCHIVED") return NextResponse.json({ status: source.status });
+    const restored = await db.$transaction(async (tx) => {
+      const archive = await tx.auditLog.findFirst({ where: { workspaceId: context.workspace.id, resourceId: source.id, action: "source.archived" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { metadata: true } });
+      const previous = (archive?.metadata as { from?: string } | null)?.from;
+      // Cancelled processing is not resurrected; the user must explicitly retry it.
+      const status = previous === "READY" ? "READY" : previous === "FAILED" || previous === "PROCESSING" || previous === "PENDING" ? "FAILED" : source.transcript || source.rawText?.trim() ? "READY" : "FAILED";
+      const changed = await tx.sourceItem.updateMany({ where: { id: source.id, workspaceId: context.workspace.id, status: "ARCHIVED" }, data: { status } });
+      if (!changed.count) return null;
+      await tx.auditLog.create({ data: { workspaceId: context.workspace.id, userId: context.session.user.id, action: "source.restored", resourceType: "source_item", resourceId: source.id, metadata: { from: "ARCHIVED", to: status } } });
+      return { status };
+    });
+    return restored ? NextResponse.json(restored) : apiError("SOURCE_CONFLICT", 409, "资料状态已变化，请刷新后重试。");
+  }
   if (source.status === "ARCHIVED") return NextResponse.json({ status: "ARCHIVED" });
-  await db.$transaction([
-    db.sourceItem.update({ where: { id: source.id }, data: { status: "ARCHIVED" } }),
-    db.ingestJob.updateMany({
+  const archived = await db.$transaction(async (tx) => {
+    const changed = await tx.sourceItem.updateMany({ where: { id: source.id, workspaceId: context.workspace.id, status: source.status }, data: { status: "ARCHIVED" } });
+    if (!changed.count) return false;
+    await tx.ingestJob.updateMany({
       where: { sourceItemId: source.id, workspaceId: context.workspace.id, status: { in: ["QUEUED", "RUNNING"] } },
       data: { status: "CANCELLED", finishedAt: new Date() },
-    }),
-    db.auditLog.create({ data: { workspaceId: context.workspace.id, userId: context.session.user.id, action: "source.archived", resourceType: "source_item", resourceId: source.id } }),
-  ]);
-  return NextResponse.json({ status: "ARCHIVED" });
+    });
+    await tx.auditLog.create({ data: { workspaceId: context.workspace.id, userId: context.session.user.id, action: "source.archived", resourceType: "source_item", resourceId: source.id, metadata: { from: source.status } } });
+    return true;
+  });
+  return archived ? NextResponse.json({ status: "ARCHIVED" }) : apiError("SOURCE_CONFLICT", 409, "资料状态已变化，请刷新后重试。");
 }
 
 export async function DELETE(_request: Request, route: RouteContext) {
