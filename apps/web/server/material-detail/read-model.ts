@@ -1,10 +1,12 @@
 import "server-only";
 
 import { db, findSourceForUser } from "@content-center/db";
+import { sourceCapabilities, type SourceCapability } from "@content-center/core";
 import { IntegrationService, parseProviderConfig } from "@content-center/integrations";
 import { getStorageProvider, readSourceMetadataEnvelope, type SourceExternalMetrics } from "@content-center/providers";
 import { getSourceProcessingState, materialTranscriptionViewState, type MaterialTranscriptionViewState } from "../../lib/source-processing-state";
 import { getLocalAsrDisplay } from "../local-asr";
+import { getVisionRoute, understandingExpired } from "./understanding";
 
 type Role = "OWNER" | "ADMIN" | "EDITOR" | "VIEWER";
 type NamedResource = { id: string; name: string };
@@ -61,6 +63,8 @@ export type SourceWorkspaceModel = {
     canManageProjects: boolean;
   };
   workspace: {
+    capabilities: readonly SourceCapability[];
+    understanding: { status: "NOT_STARTED" | "RUNNING" | "COMPLETED" | "FAILED"; text: string | null; error: string | null; available: boolean; unavailableReason: string | null; provider: string | null; model: string | null; updatedAt: string | null } | null;
     assetId: string | null;
     mimeType: string | null;
     sizeLabel: string | null;
@@ -151,9 +155,15 @@ export async function getSourceWorkspaceModel(input: { workspaceId: string; user
       try { url = (await storage.getSignedUrl(asset.storageKey, 300, { assetScope: { workspaceId: input.workspaceId, sourceItemId: source.id, assetId: asset.id } })).data.url; }
       catch { /* Preserve the material detail even when this preview is unavailable. */ }
     }
-    return { id: asset.id, assetType: asset.assetType, url, mimeType: asset.mimeType, sizeBytes: asset.sizeBytes?.toString() ?? null };
+    return { id: asset.id, assetType: asset.assetType, status: asset.status, url, mimeType: asset.mimeType, sizeBytes: asset.sizeBytes?.toString() ?? null };
   }));
-  const primaryAsset = assets.find((asset) => asset.assetType === source.sourceType && asset.url);
+  const primaryType = source.sourceType === "TEXT" ? "DOCUMENT" : source.sourceType;
+  const primaryAsset = assets.find((asset) => asset.assetType === primaryType && asset.status === "STORED") ?? assets.find((asset) => asset.assetType === primaryType);
+  const capabilities = sourceCapabilities(source.sourceType, primaryAsset?.mimeType);
+  const visual = capabilities.includes("understand") || capabilities.includes("understandPages");
+  const savedUnderstanding = visual ? await db.sourceUnderstanding.findFirst({ where: { sourceItemId: source.id, workspaceId: input.workspaceId } }) : null;
+  const vision = visual ? await getVisionRoute(input.workspaceId).catch(() => null) : null;
+  const expired = savedUnderstanding ? understandingExpired(savedUnderstanding) : false;
   const text = source.transcript?.fullText.trim() || source.rawText?.trim() || null;
   const materialJobs = source.ingestJobs.filter((job) => job.jobType in jobLabels);
   const latestTranscription = materialJobs.find((job) => job.jobType === "TRANSCRIBE");
@@ -183,6 +193,16 @@ export async function getSourceWorkspaceModel(input: { workspaceId: string; user
       availableProjects, relatedProjects, canManageProjects: canManage,
     },
     workspace: {
+      capabilities,
+      understanding: visual ? {
+        status: expired ? "FAILED" : savedUnderstanding?.status ?? "NOT_STARTED",
+        text: savedUnderstanding?.text ?? null,
+        error: expired ? "上次处理已中断，可以重试。" : savedUnderstanding?.errorMessage ?? null,
+        available: Boolean(vision && primaryAsset && source.assets.some((asset) => asset.id === primaryAsset.id && asset.status === "STORED" && asset.storageKey)),
+        unavailableReason: !vision ? "当前未配置可用的视觉模型。" : !primaryAsset?.url ? "原件暂时不可读取，请检查文件状态。" : null,
+        provider: savedUnderstanding?.provider ?? null, model: savedUnderstanding?.model ?? null,
+        updatedAt: savedUnderstanding?.updatedAt.toISOString() ?? null,
+      } : null,
       assetId: primaryAsset?.id ?? null, mimeType: primaryAsset?.mimeType ?? null, sizeLabel: bytesLabel(primaryAsset?.sizeBytes ?? null),
       createdAt: source.createdAt.toISOString(), updatedAt: source.updatedAt.toISOString(), transcriptUpdatedAt: source.transcript?.updatedAt.toISOString() ?? (text ? source.updatedAt.toISOString() : null),
       configured: Boolean(configured), busy, canRefresh: Boolean(canRefresh), processingLabel: processing.currentLabel, metrics,

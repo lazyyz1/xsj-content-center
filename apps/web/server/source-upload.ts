@@ -104,9 +104,9 @@ export async function validateUploadedFile(file: File): Promise<ValidatedUpload>
     try {
       contentText = (await (extension(file.name) === ".pdf" ? extractPdfText(bytes) : extractDocxText(bytes))).trim();
     } catch {
-      throw new Error(extension(file.name) === ".pdf" ? "PDF_TEXT_EMPTY" : "DOCX_TEXT_EMPTY");
+      throw new Error(extension(file.name) === ".pdf" ? "PDF_INVALID" : "DOCX_TEXT_EMPTY");
     }
-    if (contentText.length < 1) throw new Error(extension(file.name) === ".pdf" ? "PDF_TEXT_EMPTY" : "DOCX_TEXT_EMPTY");
+    if (!contentText && extension(file.name) !== ".pdf") throw new Error("DOCX_TEXT_EMPTY");
   }
   if (spec.kind === "IMAGE") {
     try {
@@ -117,7 +117,7 @@ export async function validateUploadedFile(file: File): Promise<ValidatedUpload>
   }
   return {
     ...spec,
-    mimeType: declared && declared !== "application/octet-stream" ? declared : spec.mimeType,
+    mimeType: spec.mimeType,
     originalName: normalizedName(file.name),
     title: titleOf(file.name),
     bytes,
@@ -133,7 +133,7 @@ export function uploadErrorMessage(code: string) {
     FILE_TOO_LARGE: "文件太大。",
     MIME_MISMATCH: "文件内容与扩展名不匹配。",
     TEXT_ENCODING_UNSUPPORTED: "暂时只支持 UTF-8 文本文件。",
-    PDF_TEXT_EMPTY: "无法读取这份 PDF 的文字。当前暂不支持扫描版 PDF。",
+    PDF_INVALID: "无法打开这份 PDF，请检查文件是否损坏或已加密。",
     DOCX_TEXT_EMPTY: "无法读取这份 Word 文档的文字。",
     IMAGE_INVALID: "无法读取这张图片，请更换文件后重试。",
   }[code] ?? "上传失败，请重试。";

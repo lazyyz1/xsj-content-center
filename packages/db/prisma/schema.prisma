@@ -521,6 +521,7 @@ model Workspace {
   contentTags         ContentTag[]
   collections         Collection[]
   sourceAssets        SourceAsset[]
+  sourceUnderstandings SourceUnderstanding[]
   apiUsages           ApiUsage[]
   contentProjects     ContentProject[]
   evidenceItems       EvidenceItem[]
@@ -632,6 +633,7 @@ model SourceItem {
   createdBy      User             @relation("SourceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   ingestJobs     IngestJob[]
   transcript     Transcript?
+  sourceUnderstanding SourceUnderstanding?
   tags           SourceItemTag[]
   collections    CollectionItem[]
   assets         SourceAsset[]
@@ -649,6 +651,35 @@ model SourceItem {
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
   @@index([workspaceId, sourcePlatform])
+}
+
+enum SourceUnderstandingStatus {
+  NOT_STARTED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+model SourceUnderstanding {
+  id           String @id @default(cuid())
+  workspaceId  String
+  sourceItemId String @unique
+  assetId      String
+  sourceType   SourceType
+  status       SourceUnderstandingStatus @default(NOT_STARTED)
+  runId        String?
+  text         String?
+  pages        Json?
+  provider     String?
+  model        String?
+  errorCode    String?
+  errorMessage String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceItem   SourceItem @relation(fields: [sourceItemId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
 }
 
 model SourceAsset {

@@ -49,4 +49,19 @@ describe("Material Detail read boundary", () => {
     expect(library.items.find((item) => item.id === sourceItemId)).toMatchObject({ title: "原始资料", status: "READY" });
     expect(library.items.find((item) => item.id === sourceItemId)).not.toHaveProperty("materialAnalyses");
   });
+
+  it("searches native text, transcripts and source metadata inside this workspace", async () => {
+    await db.sourceItem.update({ where: { id: sourceItemId }, data: { description: "来源描述检索", metadata: { external: { originalTitle: "ExternalNeedle", authorName: "作者线索" } }, transcript: { create: { workspaceId, provider: "MANUAL", providerMode: "REAL", fullText: "独有转录关键词", segments: [] } } } });
+    for (const search of ["资料原文", "来源描述检索", "externalneedle", "作者线索", "独有转录关键词"]) {
+      expect((await listLibrarySources(workspaceId, { search })).items.map((item) => item.id)).toContain(sourceItemId);
+    }
+    expect((await listLibrarySources("other-workspace", { search: "独有转录关键词" })).items).toEqual([]);
+  });
+
+  it("retains file actions for uploaded TEXT even if signed preview is unavailable", async () => {
+    const asset = await db.sourceAsset.create({ data: { workspaceId, sourceItemId, sourceProvider: "LOCAL_UPLOAD", assetType: "DOCUMENT", mimeType: "text/markdown", status: "STORED", storageKey: "nonexistent" } });
+    const model = await getSourceWorkspaceModel({ workspaceId, userId, sourceItemId, role: "OWNER" });
+    expect(model?.workspace.assetId).toBe(asset.id);
+    expect(model?.workspace.mimeType).toBe("text/markdown");
+  });
 });

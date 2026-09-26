@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sourceUploadStatusLabel } from "../lib/source-upload-client";
 import { uploadErrorMessage, validateUploadedFile } from "../server/source-upload";
+import { materialPdf } from "./fixtures/material-files";
 
 describe("source upload validation", () => {
   it("reads UTF-8 TXT into source content", async () => {
@@ -11,13 +12,19 @@ describe("source upload validation", () => {
   it("rejects malformed office files and empty files", async () => {
     await expect(validateUploadedFile(new File(["x"], "notes.docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }))).rejects.toThrow("MIME_MISMATCH");
     await expect(validateUploadedFile(new File([], "notes.txt", { type: "text/plain" }))).rejects.toThrow("EMPTY_FILE");
-    expect(uploadErrorMessage("PDF_TEXT_EMPTY")).toContain("扫描版 PDF");
+    expect(uploadErrorMessage("PDF_INVALID")).toContain("损坏");
   });
 
   it("checks a media magic header instead of trusting browser MIME", async () => {
     const fakeMp4 = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112, 109, 112, 52, 50]);
     await expect(validateUploadedFile(new File([fakeMp4], "clip.mp4", { type: "video/mp4" }))).resolves.toMatchObject({ kind: "VIDEO", assetType: "VIDEO" });
     await expect(validateUploadedFile(new File([new TextEncoder().encode("not a video")], "clip.mp4", { type: "video/mp4" }))).rejects.toThrow("MIME_MISMATCH");
+  });
+
+  it("preserves PDFs without a text layer and extracts native text without page markers", async () => {
+    await expect(validateUploadedFile(new File([materialPdf()], "scan.pdf", { type: "application/pdf" }))).resolves.toMatchObject({ sourceType: "DOCUMENT", contentText: "" });
+    await expect(validateUploadedFile(new File([materialPdf(1, "Native text")], "text.pdf", { type: "application/pdf" }))).resolves.toMatchObject({ contentText: "Native text" });
+    await expect(validateUploadedFile(new File(["%PDF-invalid"], "broken.pdf", { type: "application/pdf" }))).rejects.toThrow("PDF_INVALID");
   });
 
   it("accepts decoded PNG images and validates DOCX signatures", async () => {

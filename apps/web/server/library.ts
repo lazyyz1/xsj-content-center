@@ -20,7 +20,7 @@ const allowedStatuses = ["PENDING", "PROCESSING", "READY", "FAILED", "ARCHIVED"]
 
 export async function listLibrarySources(workspaceId: string, query: LibraryQuery) {
   let page = Math.max(1, Math.floor(Number(query.page) || 1));
-  const pageSize = Math.min(50, Math.max(1, Number(query.pageSize) || 12));
+  const pageSize = Math.min(50, Math.max(1, Math.floor(Number(query.pageSize) || 12)));
   const where: Prisma.SourceItemWhereInput = {
     workspaceId,
     ...(query.search?.trim()
@@ -29,6 +29,13 @@ export async function listLibrarySources(workspaceId: string, query: LibraryQuer
             { title: { contains: query.search.trim(), mode: "insensitive" } },
             { author: { contains: query.search.trim(), mode: "insensitive" } },
             { rawText: { contains: query.search.trim(), mode: "insensitive" } },
+            { description: { contains: query.search.trim(), mode: "insensitive" } },
+            { sourceUrl: { contains: query.search.trim(), mode: "insensitive" } },
+            { canonicalUrl: { contains: query.search.trim(), mode: "insensitive" } },
+            { externalId: { contains: query.search.trim(), mode: "insensitive" } },
+            { transcript: { fullText: { contains: query.search.trim(), mode: "insensitive" } } },
+            { sourceUnderstanding: { workspaceId, text: { contains: query.search.trim(), mode: "insensitive" } } },
+            ...["originalTitle", "authorName", "description"].map((key) => ({ metadata: { path: ["external", key], string_contains: query.search!.trim(), mode: "insensitive" as const } })),
           ],
         }
       : {}),
@@ -61,6 +68,7 @@ export async function listLibrarySources(workspaceId: string, query: LibraryQuer
         createdAt: true,
         tags: { select: { tag: { select: { id: true, name: true } } }, take: 5 },
         ingestJobs: {
+          where: { jobType: { in: ["EXTRACT_TEXT", "FETCH_URL", "TRANSCRIBE", "PROCESS_MEDIA"] } },
           select: { id: true, jobType: true, provider: true, providerMode: true, status: true, errorMessage: true, metadata: true },
           orderBy: { createdAt: "desc" },
           take: 1,

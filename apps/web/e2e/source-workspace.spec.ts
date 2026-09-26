@@ -25,17 +25,16 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { if (workspaceId) await db.workspace.delete({ where: { id: workspaceId } }); await db.user.deleteMany({ where: { id: { in: [ownerId, viewerId] } } }); await db.$disconnect(); });
 
-test("source workspace persists preview preferences, saves raw text, renames and links conversation", async ({ page }, info) => {
+test("source workspace reads, saves raw text, renames and links conversation", async ({ page }, info) => {
   test.setTimeout(90_000);
   await page.context().addCookies(ownerCookies);
   await page.setViewportSize({ width: 1680, height: 945 });
   await page.goto(`/library/${textId}`);
+  await expect(page.getByTestId("source-workspace")).toHaveAttribute("data-ready", "true");
   await expect(page.getByRole("heading", { name: "Source workspace text", exact: true })).toBeVisible();
   await expect(page.getByText("AI 一句话总结", { exact: true })).toHaveCount(0);
-  await page.getByLabel("预览比例").selectOption("9/16");
-  await page.getByLabel("画面适配").selectOption("cover");
-  await page.reload();
-  await expect(page.getByLabel("预览比例")).toHaveValue("9/16");
+  await expect(page.getByRole("button", { name: "资料管理", exact: true })).toHaveCount(0);
+  await expect(page.locator(".source-preview-slot")).toHaveCount(0);
   await page.getByLabel("搜索文字内容").fill("第二段");
   await expect(page.locator(".source-text-content")).toContainText("第二段待查找");
   await expect(page.locator(".source-text-content")).not.toContainText("第一段原始");
@@ -51,8 +50,9 @@ test("source workspace persists preview preferences, saves raw text, renames and
   for (const width of [390, 768, 1440, 1920, 2560]) {
     await page.setViewportSize({ width, height: 945 });
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expect.poll(() => page.locator(".source-workspace-actions").evaluate((bar) => [...bar.children].every((child) => child.getBoundingClientRect().right <= innerWidth))).toBe(true);
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1)).toBe(true);
-    const box = await page.locator(".source-viewer").boundingBox();
+    const box = await page.locator(".source-reader").boundingBox();
     expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
     await page.screenshot({ path: info.outputPath(`source-workspace-${width}.png`) });
   }
@@ -68,37 +68,40 @@ test("single-screen text fills the workspace and only the text pane scrolls", as
   await db.sourceItem.update({ where: { id: textId }, data: { rawText: Array.from({ length: 120 }, (_, index) => `第 ${index + 1} 段：用于验证长正文独立滚动，页面本身不产生纵向滚动。`).join("\n") } });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/library/${textId}`);
+  await expect(page.getByTestId("source-workspace")).toHaveAttribute("data-ready", "true");
   expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1)).toBe(true);
   await page.getByRole("button", { name: "专注阅读", exact: true }).click();
   await expect(page.locator(".source-preview-slot")).toBeHidden();
-  await expect(page.getByRole("complementary", { name: "资料属性与操作" })).toBeHidden();
   const area = await page.locator(".source-text-content").boundingBox();
   expect(area!.height).toBeGreaterThan(450);
   expect(area!.width).toBeGreaterThan(1100);
   expect(await page.locator(".source-text-content").evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
   await page.locator(".source-text-content").evaluate((element) => { element.scrollTop = 600; });
   expect(await page.evaluate(() => scrollY)).toBe(0);
-  await page.getByRole("button", { name: "显示预览与属性" }).click();
-  await expect(page.locator(".source-preview-slot")).toBeVisible();
-  await page.getByRole("button", { name: "资料管理", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "资料管理", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "关闭资料管理" }).click();
-  await page.getByRole("button", { name: "来源与处理", exact: true }).click();
-  await page.getByRole("navigation", { name: "资料属性分类" }).getByRole("button", { name: "处理与文件" }).click();
+  await page.getByRole("button", { name: "退出专注" }).click();
+  await page.getByRole("button", { name: "资料信息", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "资料信息", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "处理状态", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "关闭资料信息" }).click();
   expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1)).toBe(true);
 });
 
 test("transcript updates remove stale timings and stale writes return 409", async ({ page }) => {
   await page.context().addCookies(ownerCookies);
   await page.goto(`/library/${videoId}`);
+  await expect(page.getByTestId("source-workspace")).toHaveAttribute("data-ready", "true");
   await expect(page.getByRole("button", { name: "SRT", exact: true })).toBeVisible();
+  await expect(page.locator(".source-transcript-line")).toHaveCount(0);
+  await page.getByRole("button", { name: "时间戳", exact: true }).click();
+  await expect(page.locator(".source-transcript-line")).toHaveCount(1);
+  await page.getByRole("button", { name: "连续正文", exact: true }).click();
   const original = await db.transcript.findUniqueOrThrow({ where: { sourceItemId: videoId } });
   const response = await page.request.put(`/api/source-items/${videoId}/transcript`, { data: { fullText: "更新后的转录正文", expectedUpdatedAt: original.updatedAt.toISOString() } });
   expect(response.status()).toBe(200);
   expect((await db.transcript.findUniqueOrThrow({ where: { sourceItemId: videoId } })).segments).toEqual([]);
   expect((await page.request.put(`/api/source-items/${videoId}/transcript`, { data: { fullText: "过期写入", expectedUpdatedAt: original.updatedAt.toISOString() } })).status()).toBe(409);
   await page.reload();
+  await expect(page.getByTestId("source-workspace")).toHaveAttribute("data-ready", "true");
   await expect(page.getByRole("button", { name: "SRT", exact: true })).toHaveCount(0);
   await expect(page.locator(".source-text-content")).toContainText("更新后的转录正文");
 });
@@ -106,6 +109,7 @@ test("transcript updates remove stale timings and stale writes return 409", asyn
 test("viewer reads source workspace but cannot modify or start a project", async ({ page }) => {
   await page.context().addCookies(viewerCookies);
   await page.goto(`/library/${textId}`);
+  await expect(page.getByTestId("source-workspace")).toHaveAttribute("data-ready", "true");
   await expect(page.getByRole("button", { name: "编辑资料标题" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "基于此资料对话" })).toHaveCount(0);
   expect((await page.request.patch(`/api/source-items/${textId}`, { data: { action: "UPDATE", title: "Denied" } })).status()).toBe(403);

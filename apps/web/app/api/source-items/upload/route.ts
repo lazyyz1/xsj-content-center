@@ -1,6 +1,5 @@
 import { db } from "@content-center/db";
 import { buildSourceAssetObjectKey, getStorageProvider } from "@content-center/providers";
-import { enqueueContentIngest } from "@content-center/worker/queue";
 import { NextResponse } from "next/server";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
 import { MAX_UPLOADS_PER_REQUEST, uploadErrorMessage, validateUploadedFile } from "@/server/source-upload";
@@ -35,10 +34,9 @@ export async function POST(request: Request) {
       continue;
     }
 
-    const existingAssets = await db.sourceAsset.findMany({ where: { workspaceId: context.workspace.id }, select: { sourceItemId: true, metadata: true } });
-    const duplicate = existingAssets.find((asset) => {
-      const metadata = asset.metadata && typeof asset.metadata === "object" && !Array.isArray(asset.metadata) ? asset.metadata as Record<string, unknown> : {};
-      return metadata.sha256 === upload.sha256;
+    const duplicate = await db.sourceAsset.findFirst({
+      where: { workspaceId: context.workspace.id, sourceItem: { workspaceId: context.workspace.id }, status: "STORED", metadata: { path: ["sha256"], equals: upload.sha256 } },
+      select: { sourceItemId: true },
     });
     if (duplicate) {
       results.push({ name: upload.originalName, status: "DUPLICATE", sourceItemId: duplicate.sourceItemId });
@@ -59,7 +57,7 @@ export async function POST(request: Request) {
             sourceProvider: "LOCAL_UPLOAD",
             title: upload.title,
             rawText: upload.contentText ?? null,
-            status: upload.kind === "VIDEO" || upload.kind === "AUDIO" || upload.kind === "IMAGE" ? "READY" : "PENDING",
+            status: "PENDING",
           },
         });
         const asset = await tx.sourceAsset.create({
@@ -82,21 +80,9 @@ export async function POST(request: Request) {
       await storage.upload({ key: storageKey, body: upload.bytes, contentType: upload.mimeType, contentLength: upload.bytes.byteLength, assetScope: { workspaceId: context.workspace.id, sourceItemId: sourceId, assetId } });
       await db.sourceAsset.update({ where: { id: assetId }, data: { status: "STORED", storageKey, storedAt: new Date() } });
 
-      if (upload.kind === "IMAGE" || upload.kind === "VIDEO" || upload.kind === "AUDIO") {
-        results.push({ name: upload.originalName, status: "READY", sourceItemId: sourceId, contentState: "READY" });
-      } else {
-        const job = await db.ingestJob.create({ data: { workspaceId: context.workspace.id, sourceItemId: sourceId, requestedById: context.session.user.id, jobType: "EXTRACT_TEXT", provider: "FILE_READER", providerMode: "REAL", status: "QUEUED", maxAttempts: 3 } });
-        try {
-          await enqueueContentIngest({ jobId: job.id, workspaceId: context.workspace.id, sourceItemId: sourceId, requestedById: context.session.user.id }, job.maxAttempts);
-          results.push({ name: upload.originalName, status: "QUEUED", sourceItemId: sourceId, jobId: job.id, contentState: "READING" });
-        } catch {
-          await db.$transaction([
-            db.ingestJob.update({ where: { id: job.id }, data: { status: "FAILED", errorCode: "QUEUE_UNAVAILABLE", errorMessage: "资料读取队列暂时不可用。", finishedAt: new Date() } }),
-            db.sourceItem.update({ where: { id: sourceId }, data: { status: "FAILED" } }),
-          ]);
-          results.push({ name: upload.originalName, status: "FAILED", sourceItemId: sourceId, jobId: job.id, errorCode: "QUEUE_UNAVAILABLE", message: "上传成功，但资料读取暂时无法开始。" });
-        }
-      }
+      // Validation already extracts native text. No second job or AI call is needed.
+      await db.sourceItem.update({ where: { id: sourceId }, data: { status: "READY" } });
+      results.push({ name: upload.originalName, status: "READY", sourceItemId: sourceId, contentState: upload.kind === "DOCUMENT" && !upload.contentText ? "NO_TEXT" : "READY" });
     } catch (error) {
       if (storageKey) await storage.delete(storageKey, { workspaceId: context.workspace.id, sourceItemId: sourceId, assetId }).catch(() => undefined);
       if (sourceId) await db.sourceItem.delete({ where: { id: sourceId } }).catch(() => undefined);

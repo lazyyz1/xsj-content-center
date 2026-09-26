@@ -22,3 +22,9 @@ export async function validateImageBuffer(data: Uint8Array, expectedMimeType: st
     throw new ImageValidationError();
   }
 }
+
+export async function prepareVisionImage(data: Uint8Array) {
+  return sharp(Buffer.from(data), { limitInputPixels: 40_000_000 })
+    .rotate().resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
+    .flatten({ background: "white" }).jpeg({ quality: 85 }).toBuffer();
+}

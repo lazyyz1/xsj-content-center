@@ -47,10 +47,35 @@ export async function extractPdfText(data: Uint8Array) {
   if (data.byteLength === 0) throw new PdfTextExtractionError("PDF 文件为空。");
   const parser = new PDFParse({ data: Buffer.from(data) });
   try {
-    const result = await parser.getText();
+    const result = await parser.getText({ pageJoiner: "" });
     return normalizePdfText(result.text);
   } catch {
     throw new PdfTextExtractionError();
+  } finally {
+    await parser.destroy();
+  }
+}
+
+// Render every page or reject explicitly; never silently truncate a document.
+export async function renderPdfForUnderstanding(data: Uint8Array) {
+  if (data.byteLength > 25 * 1024 * 1024) throw new Error("VISION_FILE_TOO_LARGE");
+  const parser = new PDFParse({ data: Buffer.from(data) });
+  try {
+    const info = await parser.getInfo({ parsePageInfo: true });
+    if (!info.total || info.total > 4) throw new Error("VISION_PAGE_LIMIT");
+    const pages: Array<{ page: number; data: Uint8Array }> = [];
+    let bytes = 0;
+    for (let page = 1; page <= info.total; page++) {
+      const dimensions = info.pages.find((item) => item.pageNumber === page);
+      if (!dimensions || dimensions.width <= 0 || dimensions.height <= 0) throw new Error("VISION_PDF_INVALID");
+      const result = await parser.getScreenshot({ partial: [page], scale: Math.min(2, 1600 / Math.max(dimensions.width, dimensions.height)), imageDataUrl: false, imageBuffer: true });
+      const screenshot = result.pages[0];
+      if (!screenshot?.data.length) throw new Error("VISION_PDF_INVALID");
+      bytes += Math.ceil(screenshot.data.byteLength / 3) * 4;
+      if (bytes > 12 * 1024 * 1024) throw new Error("VISION_PAYLOAD_LIMIT");
+      pages.push({ page, data: screenshot.data });
+    }
+    return pages;
   } finally {
     await parser.destroy();
   }
