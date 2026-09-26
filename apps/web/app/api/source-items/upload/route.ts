@@ -1,6 +1,5 @@
 import { db } from "@content-center/db";
 import { buildSourceAssetObjectKey, getStorageProvider } from "@content-center/providers";
-import { requestSourceTranscription } from "@content-center/worker/transcription";
 import { enqueueContentIngest } from "@content-center/worker/queue";
 import { NextResponse } from "next/server";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
@@ -83,11 +82,8 @@ export async function POST(request: Request) {
       await storage.upload({ key: storageKey, body: upload.bytes, contentType: upload.mimeType, contentLength: upload.bytes.byteLength, assetScope: { workspaceId: context.workspace.id, sourceItemId: sourceId, assetId } });
       await db.sourceAsset.update({ where: { id: assetId }, data: { status: "STORED", storageKey, storedAt: new Date() } });
 
-      if (upload.kind === "IMAGE") {
+      if (upload.kind === "IMAGE" || upload.kind === "VIDEO" || upload.kind === "AUDIO") {
         results.push({ name: upload.originalName, status: "READY", sourceItemId: sourceId, contentState: "READY" });
-      } else if (upload.kind === "VIDEO" || upload.kind === "AUDIO") {
-        const queued = await requestSourceTranscription({ workspaceId: context.workspace.id, sourceItemId: sourceId, requestedById: context.session.user.id, mediaAssetId: assetId });
-        results.push({ name: upload.originalName, status: "QUEUED", sourceItemId: sourceId, jobId: queued.job.id, contentState: "READING" });
       } else {
         const job = await db.ingestJob.create({ data: { workspaceId: context.workspace.id, sourceItemId: sourceId, requestedById: context.session.user.id, jobType: "EXTRACT_TEXT", provider: "FILE_READER", providerMode: "REAL", status: "QUEUED", maxAttempts: 3 } });
         try {

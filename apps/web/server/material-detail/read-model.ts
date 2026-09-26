@@ -3,7 +3,7 @@ import "server-only";
 import { db, findSourceForUser } from "@content-center/db";
 import { IntegrationService, parseProviderConfig } from "@content-center/integrations";
 import { getStorageProvider, readSourceMetadataEnvelope, type SourceExternalMetrics } from "@content-center/providers";
-import { getSourceProcessingState } from "../../lib/source-processing-state";
+import { getSourceProcessingState, materialTranscriptionViewState, type MaterialTranscriptionViewState } from "../../lib/source-processing-state";
 import { getLocalAsrDisplay } from "../local-asr";
 
 type Role = "OWNER" | "ADMIN" | "EDITOR" | "VIEWER";
@@ -40,7 +40,7 @@ export type SourceWorkspaceModel = {
       unavailableReason: string | null;
     };
     transcript: {
-      state: "NOT_STARTED" | "PROCESSING" | "COMPLETED" | "FAILED" | "UNAVAILABLE";
+      state: MaterialTranscriptionViewState | null;
       text: string | null;
       segments: Array<{ startMs: number | null; endMs: number | null; text: string }>;
     };
@@ -164,8 +164,8 @@ export async function getSourceWorkspaceModel(input: { workspaceId: string; user
   const transcriptionBusy = latestTranscription?.status === "QUEUED" || latestTranscription?.status === "RUNNING";
   const contentBusy = readingJob?.status === "QUEUED" || readingJob?.status === "RUNNING";
   const busy = contentBusy || transcriptionBusy;
-  const transcriptionState = text ? "COMPLETED" : busy ? "PROCESSING" : latestTranscription?.status === "FAILED" || readingJob?.status === "FAILED" ? "FAILED" : configured ? "NOT_STARTED" : "UNAVAILABLE";
-  const processing = getSourceProcessingState({ sourceStatus: source.status, transcriptionStatus: configured ? "CONFIGURED" : "UNCONFIGURED", hasTranscript: Boolean(text), assets: source.assets, jobs: materialJobs });
+  const processing = getSourceProcessingState({ sourceStatus: source.status, transcriptionStatus: configured ? "CONFIGURED" : "UNCONFIGURED", hasTranscript: mediaSource ? Boolean(source.transcript?.fullText.trim()) : Boolean(text), assets: source.assets, jobs: materialJobs });
+  const transcriptionState = materialTranscriptionViewState(source.sourceType, processing.transcription);
   const sourcePlatformLabel = originalUrl ? platformLabels[source.sourcePlatform] || "外部来源" : source.assets.length ? "本地上传" : "手动录入";
   const playable = Boolean(primaryAsset?.url && mediaSource);
 

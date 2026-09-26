@@ -10,7 +10,7 @@ export type SourceUploadResult = {
   jobId?: string;
   message?: string;
   errorCode?: string;
-  contentState?: "READING";
+  contentState?: "READING" | "READY";
 };
 
 export function sourceUploadStatusLabel(result: Pick<SourceUploadResult, "status" | "stage" | "processingStatus">) {

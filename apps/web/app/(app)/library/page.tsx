@@ -19,7 +19,7 @@ function href(query: LibraryQuery & { layout?: string }, updates: Record<string,
   for (const [key, value] of Object.entries({ ...query, ...updates })) if (value) params.set(key, value);
   return `/library?${params}`;
 }
-function state(item: Source) { return getSourceProcessingState({ sourceStatus: item.status, hasTranscript: Boolean(item.transcript || item.rawText?.trim()), assets: item.assets, jobs: item.ingestJobs }); }
+function state(item: Source) { return getSourceProcessingState({ sourceStatus: item.status, hasTranscript: item.sourceType === "VIDEO" || item.sourceType === "AUDIO" ? Boolean(item.transcript) : Boolean(item.transcript || item.rawText?.trim()), assets: item.assets, jobs: item.ingestJobs }); }
 
 function AssetCard({ item, canManage }: { item: Source; canManage: boolean }) {
   const [, label, Icon] = types.find(([value]) => value === item.sourceType) || types[0]!;

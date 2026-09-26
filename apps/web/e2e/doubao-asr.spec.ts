@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { db } from "@content-center/db";
+import { IntegrationService } from "@content-center/integrations";
 import { minioStorageFromEnv } from "@content-center/providers";
 import { createContentIngestWorker, createTranscribeSourceWorker } from "@content-center/worker/queue";
 import { expect, test } from "@playwright/test";
@@ -115,48 +116,39 @@ test.afterAll(async () => {
   delete process.env.INGEST_TEST_FIXTURE_ORIGIN;
 });
 
-test("RedFox saved video automatically becomes a real Doubao transcript", async ({ page }) => {
+test("RedFox video waits for a user request before Doubao transcription", async ({ page }) => {
   test.setTimeout(90_000);
-  await page.goto("/register");
-  await page.getByLabel("姓名").fill("Doubao E2E Owner");
-  await page.getByLabel("邮箱").fill(email);
-  await page.getByLabel("密码").fill(password);
-  await page.getByRole("button", { name: "创建账号" }).click();
-  await page.getByLabel("Workspace 名称").fill("Doubao E2E Workspace");
-  await page.getByRole("button", { name: "创建 Workspace" }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
+  expect((await page.request.post("/api/internal-signup", { data: { name: "Doubao E2E Owner", email, password, inviteCode: "test-invite" } })).ok()).toBe(true);
+  expect((await page.request.post("/api/auth/sign-in/email", { data: { email, password } })).ok()).toBe(true);
+  const user = await db.user.findUniqueOrThrow({ where: { email }, include: { workspaceMemberships: true } });
+  const workspaceId = user.workspaceMemberships[0]!.workspaceId;
+  const integrations = new IntegrationService();
+  await integrations.saveIntegrationConfig({ workspaceId, userId: user.id, provider: "REDFOX", config: { baseUrl: fixtureOrigin, apiKey: "redfox-e2e-key" } });
+  await integrations.saveIntegrationConfig({ workspaceId, userId: user.id, provider: "DOUBAO_ASR", config: { authMode: "API_KEY", baseUrl: fixtureOrigin, apiKey: doubaoKey } });
+  await integrations.saveIntegrationConfig({ workspaceId, userId: user.id, provider: "TRANSCRIPTION", config: { source: "DOUBAO", qualityMode: "BALANCED", selectionMode: "AUTO", fallbackToDoubao: false } });
 
-  await page.goto("/settings/integrations");
-  await page.getByLabel("RedFox Base URL").fill(fixtureOrigin);
-  await page.getByLabel("RedFox API Key").fill("redfox-e2e-key");
-  await page.getByLabel("RedFox 配置").getByRole("button", { name: "保存配置" }).click();
-  await page.getByLabel("豆包语音识别 API Key").fill(doubaoKey);
-  await page.getByLabel("豆包语音识别 配置").getByText("高级设置", { exact: true }).click();
-  await page.getByLabel("豆包语音识别 Base URL").fill(fixtureOrigin);
-  await page.getByLabel("豆包语音识别 配置").getByRole("button", { name: "保存配置" }).click();
-  await expect(page.getByLabel("豆包语音识别 已保存凭证")).toContainText(doubaoKey.slice(-4));
-  await page.getByLabel("语音转写配置").getByText("豆包云端", { exact: true }).click();
-  await page.getByLabel("语音转写配置").getByRole("button", { name: "保存转写设置" }).click();
-  await expect(page.getByLabel("语音转写配置").getByText("语音转写设置已保存。")).toBeVisible();
+  const created = await page.request.post("/api/source-items", { data: { kind: "DOUYIN", shareText: douyinUrl } });
+  expect(created.status()).toBe(202);
+  const { sourceItemId: sourceId } = await created.json() as { sourceItemId: string };
+  await expect.poll(async () => (await db.sourceItem.findUnique({ where: { id: sourceId } }))?.status, { timeout: 30_000 }).toBe("READY");
+  expect(await db.ingestJob.count({ where: { sourceItemId: sourceId, jobType: "TRANSCRIBE" } })).toBe(0);
+  await expect(db.transcript.findUnique({ where: { sourceItemId: sourceId } })).resolves.toBeNull();
+  expect(transcriptionCalls).toBe(0);
 
-  await page.goto("/library");
-  await page.getByRole("button", { name: "收录内容" }).click();
-  await page.getByRole("button", { name: "抖音视频" }).click();
-  await page.getByLabel("抖音分享链接或分享文案").fill(douyinUrl);
-  await page.getByRole("button", { name: "提交收录" }).click();
-  await page.getByRole("link", { name: "查看资料" }).click();
+  await page.goto(`/library/${sourceId}`);
+  await page.getByRole("button", { name: "来源与处理" }).click();
+  await page.getByRole("navigation", { name: "资料属性分类" }).getByRole("button", { name: "处理与文件" }).click();
+  const rail = page.getByRole("complementary", { name: "资料属性与操作" });
+  await expect(rail.getByText("未转录", { exact: true })).toBeVisible();
+  await rail.getByRole("button", { name: "开始转录" }).click();
+  await expect.poll(async () => (await db.transcript.findUnique({ where: { sourceItemId: sourceId } }))?.provider, { timeout: 30_000 }).toBe("DOUBAO_ASR");
+  await page.reload();
+  await expect(page.locator(".source-text-content")).toContainText("豆包真实转写");
+  await expect(page.locator(".source-text-content")).toContainText("已完成。");
 
-  await expect(page.getByRole("heading", { name: "文字稿" })).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("tab", { name: "处理", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "处理进度" })).toBeVisible();
-  await expect(page.getByText("豆包真实转写已完成。", { exact: true })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole("button", { name: "复制全文" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "重新转写" })).toBeVisible();
-
-  const sourceId = new URL(page.url()).pathname.split("/").pop();
-  if (!sourceId) throw new Error("Missing source id");
   const source = await db.sourceItem.findUniqueOrThrow({ where: { id: sourceId }, include: { assets: true, transcript: true, ingestJobs: true } });
   expect(source).toMatchObject({ status: "READY", transcript: { provider: "DOUBAO_ASR", providerMode: "REAL" } });
+  expect(source.transcript?.fullText).toBe("豆包真实转写已完成。");
   expect(source.assets.map((asset) => asset.assetType)).toEqual(expect.arrayContaining(["VIDEO", "AUDIO"]));
   expect(source.assets.find((asset) => asset.assetType === "AUDIO")).toMatchObject({ status: "STORED", sourceProvider: "FFMPEG" });
   expect(source.ingestJobs.map((job) => job.jobType)).toEqual(expect.arrayContaining(["PROCESS_MEDIA", "TRANSCRIBE"]));
@@ -164,9 +156,12 @@ test("RedFox saved video automatically becomes a real Doubao transcript", async 
   expect(transcriptionCalls).toBe(1);
   expect(await db.apiUsage.count({ where: { workspaceId: source.workspaceId, provider: "REDFOX", operation: "PARSE_WORK" } })).toBe(1);
   expect(await db.apiUsage.count({ where: { workspaceId: source.workspaceId, provider: "DOUBAO_ASR", operation: "TRANSCRIBE_FLASH" } })).toBe(1);
+  expect(await db.materialAnalysis.count({ where: { sourceItemId: sourceId } })).toBe(0);
 
-  await page.getByRole("button", { name: "重新转写" }).click();
+  await page.getByRole("button", { name: "来源与处理" }).click();
+  await page.getByRole("navigation", { name: "资料属性分类" }).getByRole("button", { name: "处理与文件" }).click();
+  await page.getByRole("complementary", { name: "资料属性与操作" }).getByRole("button", { name: "重新转录" }).click();
   await expect.poll(() => transcriptionCalls, { timeout: 30_000 }).toBe(2);
-  await expect(page.getByRole("button", { name: "重新转写" })).toBeVisible({ timeout: 30_000 });
+  await expect.poll(async () => await db.ingestJob.count({ where: { sourceItemId: sourceId, jobType: "TRANSCRIBE", status: "SUCCEEDED" } }), { timeout: 30_000 }).toBe(2);
   expect(await db.sourceAsset.count({ where: { sourceItemId: sourceId, assetType: "AUDIO", status: "STORED" } })).toBe(1);
 });

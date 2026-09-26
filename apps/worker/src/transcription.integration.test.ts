@@ -186,27 +186,9 @@ describe("TRANSCRIBE_SOURCE integration", () => {
       },
     });
     await minioStorageFromEnv().upload({ key: videoAsset.storageKey!, body: videoBody, contentType: "video/mp4" });
-    const jobRecord = await db.ingestJob.create({
-      data: {
-        workspaceId,
-        sourceItemId: source.id,
-        requestedById: userId,
-        jobType: "TRANSCRIBE",
-        provider: "DOUBAO_ASR",
-        providerMode: "REAL",
-        maxAttempts: 3,
-      },
-    });
-    const queue = createTranscribeSourceQueue();
-    const queueJob = await queue.add(TRANSCRIBE_SOURCE, {
-      jobId: jobRecord.id,
-      workspaceId,
-      sourceItemId: source.id,
-      videoAssetId: videoAsset.id,
-      requestedById: userId,
-    }, { attempts: 3, removeOnComplete: true, removeOnFail: true });
-    await expect(queueJob.waitUntilFinished(events, 30_000)).resolves.toMatchObject({ status: "ok", sourceItemId: source.id });
-    await queue.close();
+    const requested = await requestSourceTranscription({ workspaceId, sourceItemId: source.id, requestedById: userId, mediaAssetId: videoAsset.id });
+    expect(requested.job.status).toBe("QUEUED");
+    await expect.poll(async () => (await db.ingestJob.findUnique({ where: { id: requested.job.id } }))?.status, { timeout: 30_000 }).toBe("SUCCEEDED");
 
     expect(providerCalls).toBe(1);
     await expect(db.sourceItem.findUnique({ where: { id: source.id } })).resolves.toMatchObject({ status: "READY" });
@@ -220,6 +202,7 @@ describe("TRANSCRIBE_SOURCE integration", () => {
       fullText: "这是一段真实链路测试转写。",
       durationMs: 1_000,
     });
+    expect(await db.materialAnalysis.count({ where: { sourceItemId: source.id } })).toBe(0);
     await expect(db.apiUsage.findFirst({ where: { workspaceId, provider: "DOUBAO_ASR", operation: "TRANSCRIBE_FLASH" } })).resolves.toMatchObject({
       success: true,
       cost: null,
@@ -294,4 +277,18 @@ describe("TRANSCRIBE_SOURCE integration", () => {
     expect(await db.sourceAsset.count({ where: { sourceItemId: source.id, assetType: "AUDIO", status: "STORED" } })).toBe(beforeAudioCount);
     expect(providerCalls).toBe(2);
   }, 30_000);
+
+  it("retries only after an explicit request and keeps the existing transcript readable", async () => {
+    fixtureMode = "SUCCESS";
+    const source = await db.sourceItem.findUniqueOrThrow({ where: { id: completedSourceId }, include: { assets: true, transcript: true } });
+    const video = source.assets.find((asset) => asset.assetType === "VIDEO" && asset.status === "STORED");
+    if (!video) throw new Error("Missing video fixture");
+    const previousText = source.transcript?.fullText;
+    const requested = await requestSourceTranscription({ workspaceId, sourceItemId: source.id, requestedById: userId, mediaAssetId: video.id });
+    expect(requested.job.status).toBe("QUEUED");
+    await expect.poll(async () => (await db.ingestJob.findUnique({ where: { id: requested.job.id } }))?.status, { timeout: 30_000 }).toBe("SUCCEEDED");
+    await expect(db.transcript.findUnique({ where: { sourceItemId: source.id } })).resolves.toMatchObject({ fullText: previousText });
+    expect(await db.materialAnalysis.count({ where: { sourceItemId: source.id } })).toBe(0);
+    expect(providerCalls).toBe(3);
+  }, 40_000);
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getSourceProcessingState } from "../lib/source-processing-state";
+import { getSourceProcessingState, materialTranscriptionViewState } from "../lib/source-processing-state";
 
 const storedVideo = { assetType: "VIDEO", status: "STORED" } as const;
 const storedAudio = { assetType: "AUDIO", status: "STORED" } as const;
@@ -72,5 +72,34 @@ describe("getSourceProcessingState", () => {
       assets: [{ assetType: "IMAGE", status: "STORED" }],
       jobs: [redfoxSucceeded],
     }).steps).toMatchObject({ redfoxParse: "SUCCEEDED", videoSave: "SUCCEEDED", audioExtraction: "SKIPPED", aiTranscription: "SKIPPED" });
+  });
+
+  it("maps internal ASR progress to the five user-visible states", () => {
+    for (const sourceType of ["VIDEO", "AUDIO"] as const) {
+      expect(materialTranscriptionViewState(sourceType, "NOT_CONFIGURED")).toBe("NOT_TRANSCRIBED");
+      expect(materialTranscriptionViewState(sourceType, "NOT_STARTED")).toBe("NOT_TRANSCRIBED");
+      expect(materialTranscriptionViewState(sourceType, "QUEUED")).toBe("QUEUED");
+      expect(materialTranscriptionViewState(sourceType, "EXTRACTING_AUDIO")).toBe("PROCESSING");
+      expect(materialTranscriptionViewState(sourceType, "TRANSCRIBING")).toBe("PROCESSING");
+      expect(materialTranscriptionViewState(sourceType, "SUCCEEDED")).toBe("COMPLETE");
+      expect(materialTranscriptionViewState(sourceType, "FAILED")).toBe("FAILED");
+    }
+    for (const sourceType of ["IMAGE", "DOCUMENT", "URL", "TEXT"] as const) {
+      expect(materialTranscriptionViewState(sourceType, "NOT_STARTED")).toBeNull();
+      expect(materialTranscriptionViewState(sourceType, "FAILED")).toBeNull();
+    }
+  });
+
+  it("shows a saved audio file as waiting for an optional transcription", () => {
+    expect(getSourceProcessingState({ sourceStatus: "READY", transcriptionStatus: "CONFIGURED", hasTranscript: false, assets: [storedAudio], jobs: [] })).toMatchObject({
+      transcription: "NOT_STARTED",
+      libraryLabel: "已保存 · 待转写",
+      busy: false,
+    });
+  });
+
+  it("keeps an existing transcript complete without a new job", () => {
+    const processing = getSourceProcessingState({ sourceStatus: "READY", transcriptionStatus: "CONFIGURED", hasTranscript: true, assets: [storedVideo], jobs: [] });
+    expect(materialTranscriptionViewState("VIDEO", processing.transcription)).toBe("COMPLETE");
   });
 });

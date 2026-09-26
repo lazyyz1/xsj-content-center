@@ -9,6 +9,17 @@ export type TranscriptionState =
   | "SUCCEEDED"
   | "FAILED";
 
+export type MaterialTranscriptionViewState = "NOT_TRANSCRIBED" | "QUEUED" | "PROCESSING" | "COMPLETE" | "FAILED";
+
+export function materialTranscriptionViewState(sourceType: "VIDEO" | "AUDIO" | "IMAGE" | "DOCUMENT" | "URL" | "TEXT", state: TranscriptionState): MaterialTranscriptionViewState | null {
+  if (sourceType !== "VIDEO" && sourceType !== "AUDIO") return null;
+  if (state === "QUEUED") return "QUEUED";
+  if (state === "EXTRACTING_AUDIO" || state === "TRANSCRIBING") return "PROCESSING";
+  if (state === "SUCCEEDED") return "COMPLETE";
+  if (state === "FAILED") return "FAILED";
+  return "NOT_TRANSCRIBED";
+}
+
 type SourceProcessingInput = {
   sourceStatus: "PENDING" | "PROCESSING" | "READY" | "FAILED" | "ARCHIVED";
   transcriptionStatus?: "UNCONFIGURED" | "CONFIGURED" | "DISABLED" | "MOCK" | "ERROR";
@@ -45,6 +56,7 @@ export function getSourceProcessingState(input: SourceProcessingInput) {
   const storedPrimaryMedia = input.assets.some((asset) => (asset.assetType === "VIDEO" || asset.assetType === "IMAGE" || asset.assetType === "DOCUMENT") && asset.status === "STORED");
   const failedPrimaryMedia = input.assets.some((asset) => (asset.assetType === "VIDEO" || asset.assetType === "IMAGE" || asset.assetType === "DOCUMENT") && asset.status === "FAILED");
   const storedAudio = input.assets.some((asset) => asset.assetType === "AUDIO" && asset.status === "STORED");
+  const storedMedia = storedVideo || storedAudio;
   const failedAudio = input.assets.some((asset) => asset.assetType === "AUDIO" && asset.status === "FAILED");
   const transcriptionConfigured = input.transcriptionStatus === "CONFIGURED";
   const stage = progressStage(transcriptionJob?.metadata);
@@ -101,7 +113,7 @@ export function getSourceProcessingState(input: SourceProcessingInput) {
           ? "SKIPPED"
           : "WAITING";
 
-  const libraryLabel = storedVideo
+  const libraryLabel = storedMedia
     ? input.hasTranscript
       ? "已转写"
       : transcription === "QUEUED" || transcription === "EXTRACTING_AUDIO" || transcription === "TRANSCRIBING"

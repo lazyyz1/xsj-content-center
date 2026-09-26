@@ -187,6 +187,7 @@ describe("CONTENT_INGEST integration", () => {
     expect(stored.status).toBe(200);
     expect(Buffer.from(await stored.arrayBuffer())).toHaveLength(12);
     await expect(db.transcript.findUnique({ where: { sourceItemId: source.id } })).resolves.toBeNull();
+    expect(await db.ingestJob.count({ where: { sourceItemId: source.id, jobType: "TRANSCRIBE" } })).toBe(0);
     await expect(db.apiUsage.findFirst({ where: { workspaceId, provider: "REDFOX", operation: "PARSE_WORK" } })).resolves.toMatchObject({ success: true, units: 1, cost: null, providerRequestId: "worker-redfox-request" });
   });
 

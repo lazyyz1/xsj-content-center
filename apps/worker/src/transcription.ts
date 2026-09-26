@@ -35,7 +35,6 @@ import {
 } from "@content-center/providers";
 import { UnrecoverableError, type Job } from "bullmq";
 import { enqueueTranscribeSource, type TranscribeSourcePayload } from "./transcription-queue";
-import { requestMaterialAnalysisJob } from "./material-analysis-request";
 
 type ProgressStage = "QUEUED" | "EXTRACTING_AUDIO" | "UPLOADING_AUDIO" | "TRANSCRIBING" | "PERSISTING" | "SUCCEEDED";
 type TranscriptionRecord = Prisma.IngestJobGetPayload<{ include: { sourceItem: { include: { assets: true } } } }>;
@@ -675,8 +674,6 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
         },
       });
     });
-    try { await requestMaterialAnalysisJob({ workspaceId: record.workspaceId, sourceItemId: record.sourceItemId, requestedById: record.requestedById }); }
-    catch (error) { console.warn("MATERIAL_ANALYSIS_AUTO_ENQUEUE_FAILED", { sourceItemId: record.sourceItemId, errorCode: error instanceof Error ? error.message : "UNKNOWN" }); }
     return { status: "ok" as const, sourceItemId: record.sourceItemId };
   } catch (error) {
     const failure = publicFailure(error);

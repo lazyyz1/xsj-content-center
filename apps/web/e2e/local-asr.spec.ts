@@ -87,38 +87,33 @@ test.afterAll(async () => {
   delete process.env.INGEST_TEST_FIXTURE_ORIGIN;
 });
 
-test("saved RedFox video is transcribed by the real local model without Doubao", async ({ page }) => {
+test("saved RedFox video waits for a user request to the local model", async ({ page }) => {
   test.setTimeout(180_000);
-  await page.goto("/register");
-  await page.getByLabel("姓名").fill("Local ASR E2E Owner");
-  await page.getByLabel("邮箱").fill(email);
-  await page.getByLabel("密码").fill(password);
-  await page.getByRole("button", { name: "创建账号" }).click();
-  await page.getByLabel("Workspace 名称").fill("Local ASR E2E Workspace");
-  await page.getByRole("button", { name: "创建 Workspace" }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
+  expect((await page.request.post("/api/internal-signup", { data: { name: "Local ASR E2E Owner", email, password, inviteCode: "test-invite" } })).ok()).toBe(true);
+  expect((await page.request.post("/api/auth/sign-in/email", { data: { email, password } })).ok()).toBe(true);
+  const user = await db.user.findUniqueOrThrow({ where: { email }, include: { workspaceMemberships: true } });
+  const workspaceId = user.workspaceMemberships[0]!.workspaceId;
+  const integrations = new IntegrationService();
+  await integrations.saveIntegrationConfig({ workspaceId, userId: user.id, provider: "REDFOX", config: { baseUrl: fixtureOrigin, apiKey: "redfox-local-asr-e2e-key" } });
+  await integrations.saveIntegrationConfig({ workspaceId, userId: user.id, provider: "TRANSCRIPTION", config: { source: "LOCAL_FUNASR", qualityMode: "BALANCED", selectionMode: "AUTO", fallbackToDoubao: false, endpoint: "http://127.0.0.1:8765" } });
 
-  await page.goto("/settings/integrations");
-  await expect(page.getByLabel("语音转写配置").getByText("本地服务正常", { exact: true }).first()).toBeVisible();
-  await page.getByLabel("RedFox Base URL").fill(fixtureOrigin);
-  await page.getByLabel("RedFox API Key").fill("redfox-local-asr-e2e-key");
-  await page.getByLabel("RedFox 配置").getByRole("button", { name: "保存配置" }).click();
-  await expect(page.getByLabel("RedFox 已保存凭证")).toBeVisible();
+  const created = await page.request.post("/api/source-items", { data: { kind: "DOUYIN", shareText: douyinUrl } });
+  expect(created.status()).toBe(202);
+  const { sourceItemId: sourceId } = await created.json() as { sourceItemId: string };
+  await expect.poll(async () => (await db.sourceItem.findUnique({ where: { id: sourceId } }))?.status, { timeout: 30_000 }).toBe("READY");
+  expect(await db.ingestJob.count({ where: { sourceItemId: sourceId, jobType: "TRANSCRIBE" } })).toBe(0);
+  await expect(db.transcript.findUnique({ where: { sourceItemId: sourceId } })).resolves.toBeNull();
 
-  await page.goto("/library");
-  await page.getByRole("button", { name: "收录内容" }).click();
-  await page.getByRole("button", { name: "抖音视频" }).click();
-  await page.getByLabel("抖音分享链接或分享文案").fill(douyinUrl);
-  await page.getByRole("button", { name: "提交收录" }).click();
-  await page.getByRole("link", { name: "查看资料" }).click();
+  await page.goto(`/library/${sourceId}`);
+  await page.getByRole("button", { name: "来源与处理" }).click();
+  await page.getByRole("navigation", { name: "资料属性分类" }).getByRole("button", { name: "处理与文件" }).click();
+  const rail = page.getByRole("complementary", { name: "资料属性与操作" });
+  await expect(rail.getByText("未转录", { exact: true })).toBeVisible();
+  await rail.getByRole("button", { name: "开始转录" }).click();
+  await expect.poll(async () => (await db.transcript.findUnique({ where: { sourceItemId: sourceId } }))?.provider, { timeout: 120_000 }).toBe("LOCAL_FUNASR");
+  await page.reload();
+  await expect(page.locator(".source-text-content")).toContainText("今天我们来聊一聊如何把零散素材整理成清晰可靠的内容项目");
 
-  await expect(page.getByText("今天我们来聊一聊如何把零散素材整理成清晰可靠的内容项目", { exact: false }))
-    .toBeVisible({ timeout: 120_000 });
-  await expect(page.getByText("本地转写", { exact: true })).toBeVisible();
-  await expect(page.getByText("均衡", { exact: true })).toBeVisible();
-
-  const sourceId = new URL(page.url()).pathname.split("/").pop();
-  if (!sourceId) throw new Error("Missing source id");
   const source = await db.sourceItem.findUniqueOrThrow({ where: { id: sourceId }, include: { transcript: true } });
   expect(source.transcript).toMatchObject({ provider: "LOCAL_FUNASR", providerMode: "REAL" });
   const metadata = source.transcript?.metadata as { method?: string; qualityMode?: string; technical?: { model?: string; device?: string } } | null;
@@ -127,8 +122,8 @@ test("saved RedFox video is transcribed by the real local model without Doubao",
   const usage = await db.apiUsage.findFirstOrThrow({ where: { workspaceId: source.workspaceId, provider: "LOCAL_FUNASR", operation: "TRANSCRIBE_LOCAL" } });
   expect(usage.success).toBe(true);
   expect(usage.cost?.toString()).toBe("0");
+  expect(await db.materialAnalysis.count({ where: { sourceItemId: sourceId } })).toBe(0);
 
-  const user = await db.user.findUniqueOrThrow({ where: { email } });
   await new IntegrationService().saveIntegrationConfig({
     workspaceId: source.workspaceId,
     userId: user.id,
