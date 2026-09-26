@@ -90,9 +90,9 @@ describe("Phase 10D-1 material knowledge", () => {
     const built = await new ProjectContextBuilder().build({ workspaceId, userId: ownerId, projectId, action: "PROJECT_ASSISTANT" }); expect(built.ownFacts.map(({ sourceId }) => sourceId)).not.toContain(candidate.id); expect(JSON.stringify(built.context)).toContain(candidate.id);
   });
 
-  it("keeps the migration and employee-facing orchestration contract", async () => {
-    const [migration, ingest, transcription, card] = await Promise.all([readFile(new URL("../../../packages/db/prisma/migrations/20260913200000_material_knowledge_candidates/migration.sql", import.meta.url), "utf8"), readFile(new URL("../../worker/src/ingest.ts", import.meta.url), "utf8"), readFile(new URL("../../worker/src/transcription.ts", import.meta.url), "utf8"), readFile(new URL("../components/library/material-knowledge-card.tsx", import.meta.url), "utf8")]);
+  it("keeps historical knowledge data while requiring an explicit analysis request", async () => {
+    const [migration, ingest, transcription, analysisApi, card] = await Promise.all([readFile(new URL("../../../packages/db/prisma/migrations/20260913200000_material_knowledge_candidates/migration.sql", import.meta.url), "utf8"), readFile(new URL("../../worker/src/ingest.ts", import.meta.url), "utf8"), readFile(new URL("../../worker/src/transcription.ts", import.meta.url), "utf8"), readFile(new URL("../app/api/source-items/[id]/material-analysis/route.ts", import.meta.url), "utf8"), readFile(new URL("../components/library/material-knowledge-card.tsx", import.meta.url), "utf8")]);
     expect(migration).toContain('CREATE TYPE "EvidenceOwnership"'); expect(migration).toContain('CREATE TYPE "EvidenceStatus"'); expect(migration).not.toMatch(/DROP TABLE|DROP COLUMN/u);
-    expect(ingest).toContain("requestMaterialAnalysisJob"); expect(transcription).toContain("requestMaterialAnalysisJob"); expect(card).toContain("整理结果"); expect(card).toContain("编辑待确认内容"); expect(card).toContain('decide(candidate.id, "CONFIRM", edits[candidate.id])'); expect(card).not.toMatch(/INGEST|TRANSCRIBE|ANALYZE|DISTILL/u);
+    expect(ingest).not.toContain("requestMaterialAnalysisJob"); expect(transcription).not.toContain("requestMaterialAnalysisJob"); expect(analysisApi).toContain("requestMaterialAnalysis"); expect(card).toContain("整理结果"); expect(card).toContain("编辑待确认内容"); expect(card).toContain('decide(candidate.id, "CONFIRM", edits[candidate.id])'); expect(card).not.toMatch(/INGEST|TRANSCRIBE|ANALYZE|DISTILL/u);
   });
 });

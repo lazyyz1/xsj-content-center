@@ -103,8 +103,10 @@ describe("CONTENT_INGEST integration", () => {
     const run = await createAndRun("TEXT", "Manual integration text stored without pretending to be ASR.");
     await expect(run.queueJob.waitUntilFinished(events, 10_000)).resolves.toMatchObject({ status: "ok" });
     await run.queue.close();
-    await expect(db.sourceItem.findUnique({ where: { id: run.source.id } })).resolves.toMatchObject({ status: "READY" });
+    await expect(db.sourceItem.findUnique({ where: { id: run.source.id } })).resolves.toMatchObject({ status: "READY", rawText: "Manual integration text stored without pretending to be ASR." });
     await expect(db.transcript.findUnique({ where: { sourceItemId: run.source.id } })).resolves.toBeNull();
+    expect(await db.ingestJob.count({ where: { sourceItemId: run.source.id, jobType: "ANALYZE_MATERIAL" } })).toBe(0);
+    expect(await db.materialAnalysis.count({ where: { sourceItemId: run.source.id } })).toBe(0);
   });
 
   it("processes document text without creating a Transcript", async () => {
@@ -113,6 +115,7 @@ describe("CONTENT_INGEST integration", () => {
     await run.queue.close();
     await expect(db.sourceItem.findUnique({ where: { id: run.source.id } })).resolves.toMatchObject({ status: "READY", rawText: "DOCX or PDF extracted text stays readable source content only." });
     await expect(db.transcript.findUnique({ where: { sourceItemId: run.source.id } })).resolves.toBeNull();
+    expect(await db.ingestJob.count({ where: { sourceItemId: run.source.id, jobType: "ANALYZE_MATERIAL" } })).toBe(0);
   });
 
   it("extracts a local fixture URL into READY plain text", async () => {
@@ -123,6 +126,8 @@ describe("CONTENT_INGEST integration", () => {
     expect(source).toMatchObject({ status: "READY", title: "Local Fixture", author: "Fixture Author" });
     expect(source.rawText).toContain("deterministic text");
     await expect(db.transcript.findUnique({ where: { sourceItemId: run.source.id } })).resolves.toBeNull();
+    expect(await db.ingestJob.count({ where: { sourceItemId: run.source.id, jobType: "ANALYZE_MATERIAL" } })).toBe(0);
+    expect(await db.materialAnalysis.count({ where: { sourceItemId: run.source.id } })).toBe(0);
   });
 
   it("persists a permanent SSRF failure without retrying", async () => {
