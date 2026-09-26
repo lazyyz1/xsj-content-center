@@ -448,6 +448,8 @@ model User {
   createdDraftRevisions   DraftRevision[]               @relation("DraftRevisionCreatedBy")
   createdAssistantThreads AssistantThread[]             @relation("AssistantThreadCreatedBy")
   createdArtifacts        Artifact[]                    @relation("ArtifactCreatedBy")
+  projectFolders                   ProjectFolder[]
+  projectPreferences               UserProjectPreference[]
   createdCanvasGenerateRuns CanvasGenerateRun[]          @relation("CanvasGenerateRunCreatedBy")
   generatedMethodSuggestions MethodSuggestion[]          @relation("MethodSuggestionGeneratedBy")
   reviewedMethodSuggestions  MethodSuggestion[]          @relation("MethodSuggestionReviewedBy")
@@ -553,6 +555,8 @@ model Workspace {
   draftRevisions          DraftRevision[]
   assistantThreads        AssistantThread[]
   artifacts               Artifact[]
+  projectFolders            ProjectFolder[]
+  userProjectPreferences    UserProjectPreference[]
   canvasGenerateRuns      CanvasGenerateRun[]
   methodSuggestions       MethodSuggestion[]
   creatorProfileSuggestions CreatorProfileSuggestion[]
@@ -834,12 +838,51 @@ model ContentProject {
   primaryDraftBranch     DraftBranch?       @relation("PrimaryDraftBranch", fields: [primaryDraftBranchId], references: [id], onDelete: SetNull)
   assistantThreads       AssistantThread[]
   artifacts              Artifact[]
+  userPreferences          UserProjectPreference[]
   canvasGenerateRuns     CanvasGenerateRun[]
 
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
   @@index([createdById])
   @@index([creatorProfileId])
+}
+
+model ProjectFolder {
+  id          String                  @id @default(cuid())
+  workspaceId String
+  userId      String
+  name        String
+  sortOrder   Int                     @default(0)
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  workspace   Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preferences UserProjectPreference[]
+
+  @@unique([workspaceId, userId, name])
+  @@index([workspaceId, userId, sortOrder])
+}
+
+model UserProjectPreference {
+  id           String         @id @default(cuid())
+  workspaceId  String
+  userId       String
+  projectId    String
+  folderId     String?
+  pinnedAt     DateTime?
+  sortOrder    Int            @default(0)
+  lastOpenedAt DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project      ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  folder       ProjectFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, userId, projectId])
+  @@index([workspaceId, userId, pinnedAt])
+  @@index([workspaceId, userId, folderId, sortOrder])
+  @@index([workspaceId, userId, lastOpenedAt])
 }
 
 model DraftBranch {
