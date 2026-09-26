@@ -1,5 +1,7 @@
 # AI 内容生产中心
 
+> **治理提示：** 当前产品与架构定义以 [PRODUCT.md](PRODUCT.md)、[ARCHITECTURE.md](ARCHITECTURE.md)、[LEGACY.md](LEGACY.md)、[AGENTS.md](AGENTS.md) 为准。下文部分阶段状态、功能完成度和历史开发说明尚未同步，不能作为当前产品定义。
+
 > **主仓定位：** [`lazyyz1/xsj-content-center`](https://github.com/lazyyz1/xsj-content-center) 是 AI 内容生产中心后续开发、问题跟踪和文档维护的唯一主仓。新功能和修复应从本仓选择明确的目标分支开始；当前 Cleanup 尚未建立 `main`，也未切换 GitHub 默认分支。
 
 旧仓 [`lazyyz1/XSJ`](https://github.com/lazyyz1/XSJ) 仅作为历史实现、数据和迁移参考保留，不再作为后续开发入口。旧仓仍有未提交代码、本地数据库及交付资产，备份和恢复状态尚未完整验证；引用其中内容前须重新审查，不能把旧仓状态当作本仓事实。
