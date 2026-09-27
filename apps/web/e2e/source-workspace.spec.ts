@@ -116,3 +116,58 @@ test("viewer reads source workspace but cannot modify or start a project", async
   expect((await page.request.put(`/api/source-items/${textId}/transcript`, { data: { fullText: "Denied" } })).status()).toBe(403);
   expect((await page.request.post(`/api/projects`, { data: { title: "Denied", sourceItemId: textId } })).status()).toBe(403);
 });
+
+test("transcription progress and new text appear without a manual page refresh", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.context().addCookies(ownerCookies);
+  await page.goto(`/library/${videoId}`);
+  await expect(page.getByTestId("source-workspace")).toHaveAttribute("data-ready", "true");
+  let jobId = "";
+  let requests = 0;
+  await page.route(`**/api/source-items/${videoId}/transcribe`, async (route) => {
+    requests += 1;
+    const job = await db.ingestJob.create({ data: {
+      workspaceId, sourceItemId: videoId, requestedById: ownerId,
+      jobType: "TRANSCRIBE", provider: "LOCAL_FUNASR", providerMode: "REAL", status: "QUEUED",
+      progress: 0, metadata: { progressStage: "QUEUED" },
+    } });
+    jobId = job.id;
+    await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ jobId, status: "QUEUED" }) });
+  });
+  await page.getByRole("button", { name: "资料信息", exact: true }).click();
+  await page.getByRole("dialog", { name: "资料信息" }).getByRole("button", { name: "重新转录" }).click();
+  await page.getByRole("button", { name: "关闭资料信息" }).click();
+  const state = page.getByRole("region", { name: "转录状态" });
+  await expect(state).toContainText("排队");
+  expect(requests).toBe(1);
+  expect(jobId).toBeTruthy();
+  // The old poller skipped every request while the browser reported a hidden tab.
+  await page.evaluate(() => Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" }));
+
+  await db.ingestJob.update({ where: { id: jobId }, data: { status: "RUNNING", progress: 5, metadata: { progressStage: "EXTRACTING_AUDIO" } } });
+  await expect(state).toContainText("正在提取音频", { timeout: 15_000 });
+  await expect(page.getByRole("progressbar", { name: "转录处理进度" })).toHaveAttribute("value", "5");
+
+  await db.ingestJob.update({ where: { id: jobId }, data: { progress: 65, metadata: { progressStage: "TRANSCRIBING" } } });
+  await expect(state).toContainText("正在转写", { timeout: 15_000 });
+  await expect(page.getByRole("progressbar", { name: "转录处理进度" })).toHaveAttribute("value", "65");
+
+  await db.$transaction([
+    db.transcript.update({ where: { sourceItemId: videoId }, data: { fullText: "无需手动刷新即可看见的文字稿", segments: [] } }),
+    db.ingestJob.update({ where: { id: jobId }, data: { status: "SUCCEEDED", progress: 100, metadata: { progressStage: "SUCCEEDED" }, finishedAt: new Date() } }),
+  ]);
+  await expect(page.locator(".source-text-content")).toContainText("无需手动刷新即可看见的文字稿", { timeout: 20_000 });
+  await expect(state).toHaveCount(0);
+  expect(requests).toBe(1);
+
+  await db.ingestJob.create({ data: {
+    workspaceId, sourceItemId: videoId, requestedById: ownerId,
+    jobType: "TRANSCRIBE", provider: "LOCAL_FUNASR", providerMode: "REAL", status: "FAILED",
+    errorCode: "LOCAL_ASR_NOT_RUNNING", errorMessage: "转录服务暂不可用，请重试。", finishedAt: new Date(),
+  } });
+  await page.reload();
+  await expect(page.getByTestId("source-workspace")).toHaveAttribute("data-ready", "true");
+  await expect(page.getByRole("region", { name: "转录状态" })).toContainText("转录服务暂不可用，请重试。");
+  await expect(page.getByRole("button", { name: "重试转录", exact: true }).first()).toBeEnabled();
+  await expect(page.locator(".source-text-content")).toContainText("无需手动刷新即可看见的文字稿");
+});

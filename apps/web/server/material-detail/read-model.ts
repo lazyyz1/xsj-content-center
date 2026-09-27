@@ -71,6 +71,7 @@ export type SourceWorkspaceModel = {
     createdAt: string;
     updatedAt: string;
     transcriptUpdatedAt: string | null;
+    transcriptionError: string | null;
     configured: boolean;
     busy: boolean;
     canRefresh: boolean;
@@ -205,6 +206,7 @@ export async function getSourceWorkspaceModel(input: { workspaceId: string; user
       } : null,
       assetId: primaryAsset?.id ?? null, mimeType: primaryAsset?.mimeType ?? null, sizeLabel: bytesLabel(primaryAsset?.sizeBytes ?? null),
       createdAt: source.createdAt.toISOString(), updatedAt: source.updatedAt.toISOString(), transcriptUpdatedAt: source.transcript?.updatedAt.toISOString() ?? (text ? source.updatedAt.toISOString() : null),
+      transcriptionError: latestTranscription?.status === "FAILED" ? latestTranscription.errorMessage?.slice(0, 200) ?? null : null,
       configured: Boolean(configured), busy, canRefresh: Boolean(canRefresh), processingLabel: processing.currentLabel, metrics,
     },
     adminDetails: input.role === "OWNER" || input.role === "ADMIN" ? {
