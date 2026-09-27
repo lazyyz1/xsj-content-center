@@ -45,7 +45,7 @@ export function AppShell({ userName, workspaceName, isSystemAdmin, initialPinned
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const currentProjectId = pathname === "/dashboard" ? searchParams.get("project") : null;
-  const activeNavigation = currentProjectId ? "项目" : pathname === "/dashboard" ? "开始工作" : pathname.startsWith("/projects") ? "项目" : pathname.startsWith("/library/methods") ? "Skill" : pathname.startsWith("/library") ? "资料" : pathname.startsWith("/discovery") ? "研究" : null;
+  const activeNavigation = currentProjectId ? "项目" : pathname === "/dashboard" ? "开始工作" : pathname.startsWith("/projects") ? "项目" : pathname.startsWith("/library/methods") ? "Skill" : pathname.startsWith("/library") ? "资料" : pathname.startsWith("/discovery") || pathname.startsWith("/research") ? "研究" : null;
   const [machine, dispatch] = useReducer(sidebarMachineReducer, initialPinned, initialSidebarState);
   const [hoverCapable, setHoverCapable] = useState(true);
   const [menu, setMenu] = useState<string | null>(null);

@@ -8,3 +8,4 @@ export * from "./content-project-state";
 export * from "./discovery-query";
 export * from "./trend";
 export * from "./today-recommendation";
+export * from "./research";

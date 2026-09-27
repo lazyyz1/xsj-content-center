@@ -86,7 +86,9 @@ function pageMeta(value: unknown) {
   const total = number(valueAt(combined, ["total", "totalCount", "count"]));
   const hasMoreValue = valueAt(combined, ["hasMore", "has_more"]);
   const hasMore = typeof hasMoreValue === "boolean" ? hasMoreValue : number(hasMoreValue) === null ? null : number(hasMoreValue) !== 0;
-  return { total, hasMore };
+  const rawOffset = number(valueAt(combined, ["nextOffset", "next_offset", "max_cursor", "cursor", "offset"]));
+  const nextOffset = rawOffset !== null && Number.isSafeInteger(rawOffset) && rawOffset >= 0 ? rawOffset : null;
+  return { total, hasMore, nextOffset };
 }
 
 function defaultContentUrl(platform: DiscoveryPlatform, externalId: string) {

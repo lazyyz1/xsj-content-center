@@ -138,14 +138,15 @@ describe("M11 benchmark-inspired topics", () => {
   });
 
   it("keeps both employee entries lightweight", async () => {
-    const [sourceActions, benchmarkWorkspace, creatorProfile, panel] = await Promise.all([
+    const [sourceActions, researchHome, benchmarkDetail, panel] = await Promise.all([
       readFile(new URL("../components/library/source-actions.tsx", import.meta.url), "utf8"),
-      readFile(new URL("../components/discovery/benchmark-workspace.tsx", import.meta.url), "utf8"),
-      readFile(new URL("../components/discovery/benchmark-creator-profile.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/(app)/research/page.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/(app)/research/benchmarks/[id]/page.tsx", import.meta.url), "utf8"),
       readFile(new URL("../components/discovery/benchmark-topic-generator.tsx", import.meta.url), "utf8"),
     ]);
     expect(sourceActions).toContain("用这条找选题");
-    expect(`${benchmarkWorkspace}${creatorProfile}`).toContain("看看我们能做什么题");
+    expect(researchHome).toContain("开始一次研究");
+    expect(benchmarkDetail).toContain("研究这个账号");
     for (const label of ["为什么值得做", "我们自己的切入", "可以直接讲", "可以用假设场景", "建议补真实案例", "建议补真实数据", "选这个题去创作"]) expect(panel).toContain(label);
     for (const forbidden of ["factState", "source ownership", "MethodUsage", "AIRun", "Schema"]) expect(panel).not.toContain(forbidden);
   });

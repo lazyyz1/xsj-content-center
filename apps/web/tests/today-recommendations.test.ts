@@ -11,6 +11,7 @@ import { actOnRecommendation, generateRecommendationBatch, getCurrentRecommendat
 
 describe("Content Discovery D4 today recommendations", () => {
   const suffix = randomUUID(); const ownerId = `recommend-owner-${suffix}`; const otherId = `recommend-other-${suffix}`;
+  const viewerId = `recommend-viewer-${suffix}`;
   let workspaceId = ""; let otherWorkspaceId = ""; const sourceIds: string[] = [];
 
   beforeAll(async () => {
@@ -20,6 +21,9 @@ describe("Content Discovery D4 today recommendations", () => {
       db.workspace.create({ data: { name: "Other Recommendation Workspace", slug: `recommend-other-${suffix}`, members: { create: { userId: otherId, role: "OWNER" } } } }),
     ]);
     workspaceId = workspace.id; otherWorkspaceId = other.id;
+    await db.promptTemplate.create({ data: { workspaceId, name: "Recommendation test", type: "GENERATE_TODAY_RECOMMENDATIONS", version: 1, systemPrompt: "Use supplied evidence only.", template: "{{context}}" } });
+    await db.user.create({ data: { id: viewerId, name: "Viewer", email: `${viewerId}@example.test` } });
+    await db.workspaceMember.createMany({ data: [{ workspaceId, userId: otherId, role: "EDITOR" }, { workspaceId, userId: viewerId, role: "VIEWER" }] });
   });
 
   beforeEach(async () => {
@@ -38,7 +42,7 @@ describe("Content Discovery D4 today recommendations", () => {
 
   afterAll(async () => {
     await db.workspace.deleteMany({ where: { id: { in: [workspaceId, otherWorkspaceId] } } });
-    await db.user.deleteMany({ where: { id: { in: [ownerId, otherId] } } });
+    await db.user.deleteMany({ where: { id: { in: [ownerId, otherId, viewerId] } } });
     await db.$disconnect();
   });
 
@@ -90,5 +94,42 @@ describe("Content Discovery D4 today recommendations", () => {
     await db.recommendationBatch.deleteMany({ where: { workspaceId } }); await db.sourceItem.deleteMany({ where: { workspaceId } });
     await expect(generateRecommendationBatch({ workspaceId, userId: ownerId, force: true }, { runtime: { provider: new MockLLMProvider(() => ({})), providerName: "MOCK", model: "mock" } })).rejects.toBeInstanceOf(RecommendationServiceError);
     expect(await getCurrentRecommendationBatch({ workspaceId, userId: ownerId })).toBeNull();
+  });
+
+  it("keeps recommendations private from another member of the same workspace", async () => {
+    const runtime = { provider: new MockLLMProvider(() => ({})), providerName: "MOCK", model: "mock" };
+    const batch = await generateRecommendationBatch({ workspaceId, userId: ownerId, force: true }, { runtime });
+    expect(await getCurrentRecommendationBatch({ workspaceId, userId: otherId })).toBeNull();
+    expect(await getRecommendationItem({ workspaceId, userId: otherId, itemId: batch.items[0]!.id })).toBeNull();
+    for (const action of ["DISMISS", "SAVE_IDEA", "START_RESEARCH", "START_CREATION"] as const) {
+      await expect(actOnRecommendation({ workspaceId, userId: otherId, itemId: batch.items[0]!.id, action })).rejects.toMatchObject({ code: "RECOMMENDATION_NOT_FOUND" });
+      await expect(actOnRecommendation({ workspaceId: otherWorkspaceId, userId: otherId, itemId: batch.items[0]!.id, action })).rejects.toMatchObject({ code: "RECOMMENDATION_NOT_FOUND" });
+    }
+    expect(await db.contentIdea.count({ where: { workspaceId } })).toBe(0);
+    expect((await getRecommendationItem({ workspaceId, userId: ownerId, itemId: batch.items[0]!.id }))?.status).toBe("NEW");
+    const own = await generateRecommendationBatch({ workspaceId, userId: otherId }, { runtime });
+    expect((await getCurrentRecommendationBatch({ workspaceId, userId: otherId }))?.id).toBe(own.id);
+    expect((await getCurrentRecommendationBatch({ workspaceId, userId: ownerId }))?.id).toBe(batch.id);
+  });
+
+  it("denies viewer generation and actions at the service boundary", async () => {
+    const runtime = { provider: new MockLLMProvider(() => ({})), providerName: "MOCK", model: "mock" };
+    await expect(generateRecommendationBatch({ workspaceId, userId: viewerId }, { runtime })).rejects.toMatchObject({ code: "RECOMMENDATION_FORBIDDEN" });
+    const batch = await db.recommendationBatch.create({ data: { workspaceId, createdById: viewerId, mode: "DETERMINISTIC", expiresAt: new Date(Date.now() + 60000), items: { create: { workspaceId, position: 0, title: "Viewer topic", coreQuestion: "Question", angle: "Angle", whyRecommended: "Reason", whyNow: "Now", creatorFit: "Fit", differenceFromRecentContent: "Different", suggestedNextStep: "Next", riskNotes: [] } } }, include: { items: true } });
+    for (const action of ["DISMISS", "SAVE_IDEA", "START_RESEARCH", "START_CREATION"] as const) await expect(actOnRecommendation({ workspaceId, userId: viewerId, itemId: batch.items[0]!.id, action })).rejects.toMatchObject({ code: "RECOMMENDATION_FORBIDDEN" });
+  });
+
+  it("shares only the selected topic and public source refs, once under concurrent saves", async () => {
+    const batch = await generateRecommendationBatch({ workspaceId, userId: ownerId, force: true }, { runtime: { provider: new MockLLMProvider(() => ({})), providerName: "MOCK", model: "mock" } });
+    const item = batch.items[0]!;
+    await db.recommendationItem.update({ where: { id: item.id }, data: { whyRecommended: "PRIVATE_RATIONALE", creatorFit: "PRIVATE_FIT" } });
+    await db.recommendationEvidence.create({ data: { workspaceId, recommendationItemId: item.id, type: "CREATOR_PROFILE", referenceId: "private-profile", snapshot: { positioning: "PRIVATE_PROFILE" } } });
+    const results = await Promise.all([1, 2].map(() => actOnRecommendation({ workspaceId, userId: ownerId, itemId: item.id, action: "SAVE_IDEA" })));
+    expect(results[0]).toEqual(results[1]);
+    const ideas = await db.contentIdea.findMany({ where: { workspaceId }, include: { references: true } });
+    expect(ideas).toHaveLength(1);
+    expect(ideas[0]).toMatchObject({ title: item.title, description: item.angle, creatorProfileId: null, aiRationale: null });
+    expect(JSON.stringify(ideas)).not.toContain("PRIVATE_");
+    expect(ideas[0]!.references.length).toBeGreaterThan(0);
   });
 });

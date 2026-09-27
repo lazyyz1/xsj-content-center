@@ -46,5 +46,6 @@ export type ExternalResultPage<T> = {
   items: T[];
   total: number | null;
   hasMore: boolean | null;
+  nextOffset?: number | null;
   providerRequestId?: string;
 };

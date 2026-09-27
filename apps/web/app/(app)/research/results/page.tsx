@@ -1,0 +1,20 @@
+import Link from "next/link";
+import { requireWorkspace } from "@/server/access";
+import { researchProjectOptions, researchResultLibrary } from "@/server/research/read-model";
+import { RESEARCH_ENTRY_LABELS } from "@content-center/core";
+import { db } from "@content-center/db";
+type Query = { q?: string; library?: string; type?: string; projectId?: string; accountId?: string; trendKey?: string; before?: string; page?: string };
+export default async function ResultsPage({ searchParams }: { searchParams: Promise<Query> }) {
+  const { workspace, session } = await requireWorkspace(); const query = await searchParams; const actor = { workspaceId: workspace.id, userId: session.user.id };
+  const [results, projects, accounts] = await Promise.all([researchResultLibrary(actor, query), researchProjectOptions(actor), db.benchmarkAccount.findMany({ where: { workspaceId: actor.workspaceId, enabled: true }, select: { id: true, name: true }, orderBy: { updatedAt: "desc" }, take: 100 })]);
+  const history = query.library === "workspace";
+  const href = (page: number) => { const params = new URLSearchParams(Object.entries(query).filter((entry): entry is [string, string] => typeof entry[1] === "string")); params.set("page", String(page)); return `/research/results?${params}`; };
+  return <div><header className="research-page-heading"><div><span className="research-eyebrow">长期保存，可以继续使用</span><h1>研究成果</h1><p>私人研究只显示你明确保存的结果；工作空间历史保留已有账号研究，不会自动公开私人会话。</p></div></header>
+    <nav className="research-subnav" aria-label="成果范围"><Link href="/research/results" aria-current={!history ? "page" : undefined}>我保存的</Link><Link href="/research/results?library=workspace" aria-current={history ? "page" : undefined}>工作空间历史</Link></nav>
+    <form className="research-toolbar research-filters"><input type="hidden" name="library" value={history ? "workspace" : "mine"} />{query.trendKey && !history ? <input type="hidden" name="trendKey" value={query.trendKey} /> : null}<label>查找成果<input type="search" name="q" defaultValue={query.q} placeholder={history ? "查找关联账号" : "按研究问题或标题查找"} /></label>{!history ? <><label>研究类型<select name="type" defaultValue={query.type || ""}><option value="">全部类型</option>{Object.entries(RESEARCH_ENTRY_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><label>项目背景<select name="projectId" defaultValue={query.projectId || ""}><option value="">全部项目</option>{projects.map(project => <option key={project.id} value={project.id}>{project.title}</option>)}</select></label><label>对标账号<select name="accountId" defaultValue={query.accountId || ""}><option value="">全部账号</option>{accounts.map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label></> : null}<label>截至日期<input type="date" name="before" defaultValue={query.before} /></label><button type="submit">筛选</button></form>
+    {query.trendKey && !history ? <p className="research-caption">当前仅显示所选趋势关联的私人已保存成果。<Link href="/research/results">清除趋势范围</Link></p> : null}
+    <p className="research-caption">共 {results.count} 项 · {history ? "仅包含已完成的旧账号研究；样本与版本保持原记录。" : "关联项目仅表示研究背景，不代表已分享。"}</p>
+    {results.items.length ? <ul className="research-results-list">{results.items.map(item => <li key={item.id}><Link href={`/research/results/${item.kind}/${item.id}`}><small>{item.label} · {item.date.toLocaleDateString("zh-CN")}</small><h2>{item.title}</h2><p>{item.context} · 查看结果、范围与来源 →</p></Link></li>)}</ul> : <div className="research-center-empty"><h2>{query.q || query.type || query.projectId || query.accountId || query.trendKey ? "没有找到匹配成果" : "还没有保存研究成果"}</h2><p>{history ? "完成的历史账号研究会保留在这里。" : "在研究工作区完成一次研究后，选择“保存本次成果”。"}</p><Link href="/research">开始研究 →</Link></div>}
+    {results.pages > 1 ? <nav className="research-pagination" aria-label="成果分页">{results.page > 1 ? <Link href={href(results.page - 1)}>上一页</Link> : null}<span>第 {results.page} / {results.pages} 页</span>{results.page < results.pages ? <Link href={href(results.page + 1)}>下一页</Link> : null}</nav> : null}
+  </div>;
+}

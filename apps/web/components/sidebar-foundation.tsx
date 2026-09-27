@@ -15,7 +15,7 @@ const navigation = [
   { label: "项目", href: "/projects", icon: Folder },
   { label: "资料", href: "/library", icon: FileText },
   { label: "Skill", href: "/library/methods", icon: Zap },
-  { label: "研究", href: "/discovery", icon: Compass },
+  { label: "研究", href: "/research", icon: Compass },
 ] as const;
 
 type SidebarProps = {
@@ -95,6 +95,7 @@ export function SidebarFoundation({
         <span className="app-sidebar-icon-slot"><Icon strokeWidth={1.8} /></span>
         <span className="app-sidebar-copy">{label}</span>
       </Link>)}
+      {currentProjectId ? <Link href={`/research?projectId=${encodeURIComponent(currentProjectId)}`} aria-label="从此项目开始研究" title={collapsed ? "从此项目开始研究" : undefined}><span className="app-sidebar-icon-slot"><Compass strokeWidth={1.8} /></span><span className="app-sidebar-copy">从此项目开始研究</span></Link> : null}
     </nav>
 
     <SidebarProjectSections view={projectListView} currentProjectId={currentProjectId} onViewChange={onProjectListViewChange} onOpenNewProject={() => setNewProjectOpen(true)} onInteractionLockChange={onInteractionLockChange} />

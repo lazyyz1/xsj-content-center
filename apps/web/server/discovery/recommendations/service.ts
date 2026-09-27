@@ -11,12 +11,17 @@ import { buildRecommendationContext } from "./context-builder";
 import { recommendationOutputSchema, type RecommendationOutputItem } from "./schemas";
 
 function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
-function record(value: unknown) { return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
-function strings(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
 function endOfLocalDay(now: Date) { const value = new Date(now); value.setHours(24, 0, 0, 0); return value; }
 
 export class RecommendationServiceError extends Error {
-  constructor(readonly code: "RECOMMENDATION_NOT_FOUND" | "RECOMMENDATION_NO_DATA" | "RECOMMENDATION_AI_FAILED", message: string) { super(message); this.name = "RecommendationServiceError"; }
+  constructor(readonly code: "RECOMMENDATION_NOT_FOUND" | "RECOMMENDATION_NO_DATA" | "RECOMMENDATION_AI_FAILED" | "RECOMMENDATION_FORBIDDEN", message: string) { super(message); this.name = "RecommendationServiceError"; }
+}
+
+const ownerBatch = (input: { workspaceId: string; userId: string }) => ({ workspaceId: input.workspaceId, createdById: input.userId, workspace: { members: { some: { userId: input.userId, user: { disabledAt: null } } } } });
+const ownerItem = (input: { workspaceId: string; userId: string; itemId: string }) => ({ id: input.itemId, workspaceId: input.workspaceId, batch: ownerBatch(input) });
+async function requireWriter(input: { workspaceId: string; userId: string }) {
+  const member = await db.workspaceMember.findFirst({ where: { workspaceId: input.workspaceId, userId: input.userId, user: { disabledAt: null } } });
+  if (!member || member.role === "VIEWER") throw new RecommendationServiceError("RECOMMENDATION_FORBIDDEN", "当前权限不能修改个人推荐。");
 }
 
 const includeBatch = { items: { include: { evidence: true }, orderBy: { position: "asc" as const } } };
@@ -37,7 +42,7 @@ async function recommendationMode(workspaceId: string, runtime?: LLMRuntime): Pr
 
 export function getCurrentRecommendationBatch(input: { workspaceId: string; userId: string; now?: Date }) {
   const now = input.now ?? new Date();
-  return db.recommendationBatch.findFirst({ where: { workspaceId: input.workspaceId, expiresAt: { gt: now } }, orderBy: { generatedAt: "desc" }, include: includeBatch });
+  return db.recommendationBatch.findFirst({ where: { ...ownerBatch(input), expiresAt: { gt: now } }, orderBy: { generatedAt: "desc" }, include: includeBatch });
 }
 
 function deterministicItems(candidates: RecommendationCandidate[], hasProfile: boolean): RecommendationOutputItem[] {
@@ -58,10 +63,11 @@ function deterministicItems(candidates: RecommendationCandidate[], hasProfile: b
 }
 
 export async function generateRecommendationBatch(input: { workspaceId: string; userId: string; force?: boolean; now?: Date }, dependencies: { runtime?: LLMRuntime } = {}) {
+  await requireWriter(input);
   const now = input.now ?? new Date();
   const resolved = await recommendationMode(input.workspaceId, dependencies.runtime);
   if (!input.force) {
-    const current = await db.recommendationBatch.findFirst({ where: { workspaceId: input.workspaceId, createdById: input.userId, expiresAt: { gt: now } }, orderBy: { generatedAt: "desc" }, include: includeBatch });
+    const current = await getCurrentRecommendationBatch({ ...input, now });
     if (current && current.mode === resolved.mode) return current;
   }
   const context = await buildRecommendationContext({ ...input, now });
@@ -103,49 +109,52 @@ export async function generateRecommendationBatch(input: { workspaceId: string; 
 }
 
 export function getRecommendationItem(input: { workspaceId: string; userId: string; itemId: string }) {
-  return db.recommendationItem.findFirst({ where: { id: input.itemId, workspaceId: input.workspaceId }, include: { evidence: true, batch: { select: { mode: true, generatedAt: true, creatorProfileId: true } } } });
+  return db.recommendationItem.findFirst({ where: ownerItem(input), include: { evidence: true, batch: { select: { mode: true, generatedAt: true, creatorProfileId: true } } } });
 }
 
 async function createIdeaFromRecommendation(input: { workspaceId: string; userId: string; itemId: string; status: "INBOX" | "READY" }) {
-  const item = await getRecommendationItem(input);
-  if (!item) throw new RecommendationServiceError("RECOMMENDATION_NOT_FOUND", "推荐内容不存在。");
-  if (item.contentIdeaId) {
-    if (input.status === "READY") await db.contentIdea.updateMany({ where: { id: item.contentIdeaId, workspaceId: input.workspaceId }, data: { status: "READY" } });
-    return item.contentIdeaId;
-  }
-  const idea = await db.$transaction(async (tx) => {
-    const created = await tx.contentIdea.create({ data: { workspaceId: input.workspaceId, creatorProfileId: item.batch.creatorProfileId, title: item.title, description: item.angle, status: input.status, aiRationale: json({ recommendationItemId: item.id, recommendationMode: item.batch.mode, whyRecommended: item.whyRecommended, riskNotes: strings(item.riskNotes) }), createdById: input.userId } });
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT i."id" FROM "RecommendationItem" i JOIN "RecommendationBatch" b ON b."id" = i."batchId" WHERE i."id" = ${input.itemId} AND i."workspaceId" = ${input.workspaceId} AND b."workspaceId" = ${input.workspaceId} AND b."createdById" = ${input.userId} FOR UPDATE OF i`;
+    const item = await tx.recommendationItem.findFirst({ where: ownerItem(input), include: { evidence: true, batch: { select: { mode: true } } } });
+    if (!item) throw new RecommendationServiceError("RECOMMENDATION_NOT_FOUND", "推荐内容不存在。");
+    if (item.contentIdeaId) {
+      const existing = await tx.contentIdea.findFirst({ where: { id: item.contentIdeaId, workspaceId: input.workspaceId, createdById: input.userId }, select: { id: true } });
+      if (!existing) throw new RecommendationServiceError("RECOMMENDATION_NOT_FOUND", "已保存的选题不可访问。");
+      if (input.status === "READY") await tx.contentIdea.updateMany({ where: { id: existing.id, workspaceId: input.workspaceId, createdById: input.userId }, data: { status: "READY" } });
+      return existing.id;
+    }
+    // Saving is an explicit share of the chosen topic, not of the private profile or rationale.
+    const created = await tx.contentIdea.create({ data: { workspaceId: input.workspaceId, title: item.title, description: item.angle, status: input.status, createdById: input.userId } });
     for (const evidence of item.evidence) {
-      const snapshot = record(evidence.snapshot);
       if (evidence.type === "TREND") {
         const trend = await tx.trendSnapshot.findFirst({ where: { id: evidence.referenceId, workspaceId: input.workspaceId } });
         if (trend) await tx.contentIdeaReference.create({ data: { ideaId: created.id, platform: trend.platform === "GLOBAL" ? "OTHER" : trend.platform, externalId: trend.externalKey, title: trend.title, url: `/discovery/trends/${encodeURIComponent(trend.externalKey)}`, metadataSnapshot: json({ referenceType: "TREND", observedAt: trend.observedAt }), trendSnapshotId: trend.id } });
       }
       if (evidence.type === "BENCHMARK_CONTENT") {
         const benchmark = await tx.benchmarkContentSnapshot.findFirst({ where: { id: evidence.referenceId, workspaceId: input.workspaceId } });
-        if (benchmark) await tx.contentIdeaReference.create({ data: { ideaId: created.id, platform: benchmark.platform, externalId: benchmark.externalId, title: benchmark.title, url: benchmark.url, authorName: benchmark.authorName, coverUrl: benchmark.coverUrl, metadataSnapshot: json({ ...record(benchmark.metadata), referenceType: "BENCHMARK_CONTENT", observedAt: benchmark.observedAt }) } });
+        if (benchmark) await tx.contentIdeaReference.create({ data: { ideaId: created.id, platform: benchmark.platform, externalId: benchmark.externalId, title: benchmark.title, url: benchmark.url, authorName: benchmark.authorName, coverUrl: benchmark.coverUrl, metadataSnapshot: json({ referenceType: "BENCHMARK_CONTENT", observedAt: benchmark.observedAt }) } });
       }
       if (evidence.type === "SOURCE_ITEM") {
         const source = await tx.sourceItem.findFirst({ where: { id: evidence.referenceId, workspaceId: input.workspaceId } });
-        if (source) await tx.contentIdeaReference.create({ data: { ideaId: created.id, platform: source.sourcePlatform, externalId: source.externalId ?? source.id, title: source.title || item.title, url: source.sourceUrl || `/library/${source.id}`, authorName: source.author, coverUrl: source.thumbnailUrl, metadataSnapshot: json({ referenceType: "SOURCE_ITEM", title: snapshot.title ?? source.title }), sourceItemId: source.id } });
+        if (source) await tx.contentIdeaReference.create({ data: { ideaId: created.id, platform: source.sourcePlatform, externalId: source.externalId ?? source.id, title: source.title || item.title, url: source.sourceUrl || `/library/${source.id}`, authorName: source.author, coverUrl: source.thumbnailUrl, metadataSnapshot: json({ referenceType: "SOURCE_ITEM", title: source.title }), sourceItemId: source.id } });
       }
     }
-    await tx.recommendationItem.update({ where: { id: item.id }, data: { contentIdeaId: created.id, status: "SAVED" } });
+    await tx.recommendationItem.updateMany({ where: ownerItem(input), data: { contentIdeaId: created.id, status: "SAVED" } });
     await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "discovery.recommendation_saved", resourceType: "recommendation_item", resourceId: item.id, metadata: json({ contentIdeaId: created.id, mode: item.batch.mode }) } });
-    return created;
+    return created.id;
   });
-  return idea.id;
 }
 
 export async function actOnRecommendation(input: { workspaceId: string; userId: string; itemId: string; action: "DISMISS" | "SAVE_IDEA" | "START_RESEARCH" | "START_CREATION"; collectMissing?: boolean }) {
+  await requireWriter(input);
   const item = await getRecommendationItem(input);
   if (!item) throw new RecommendationServiceError("RECOMMENDATION_NOT_FOUND", "推荐内容不存在。");
-  if (input.action === "DISMISS") { await db.recommendationItem.update({ where: { id: item.id }, data: { status: "DISMISSED" } }); return { status: "DISMISSED" as const }; }
+  if (input.action === "DISMISS") { await db.recommendationItem.updateMany({ where: ownerItem(input), data: { status: "DISMISSED" } }); return { status: "DISMISSED" as const }; }
   const ideaId = await createIdeaFromRecommendation({ ...input, status: input.action === "SAVE_IDEA" ? "INBOX" : "READY" });
   if (input.action !== "START_CREATION") return { status: "SAVED" as const, ideaId };
   try {
     const started = await startIdeaProject({ workspaceId: input.workspaceId, userId: input.userId, ideaId, collectMissing: input.collectMissing ?? false });
-    await db.recommendationItem.update({ where: { id: item.id }, data: { status: "STARTED", projectId: started.projectId } });
+    await db.recommendationItem.updateMany({ where: ownerItem(input), data: { status: "STARTED", projectId: started.projectId } });
     return { status: "STARTED" as const, ideaId, projectId: started.projectId };
   } catch (error) {
     if (error instanceof DiscoveryServiceError && error.code === "IDEA_REFERENCES_REQUIRE_COLLECTION") return { status: "CONFIRM_COLLECTION" as const, ideaId };

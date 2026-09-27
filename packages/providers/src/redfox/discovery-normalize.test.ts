@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { normalizeAccountPage, normalizeContentPage } from "./discovery-normalize";
 
 describe("RedFox discovery normalization", () => {
+  it("preserves pagination cursors without inventing them", () => {
+    expect(normalizeContentPage("DOUYIN", { data: { has_more: 1, max_cursor: "12345", aweme_list: [] } })).toMatchObject({ hasMore: true, nextOffset: 12345 });
+    expect(normalizeContentPage("DOUYIN", { hasMore: true, list: [] }).nextOffset).toBeNull();
+    expect(normalizeContentPage("DOUYIN", { hasMore: true, cursor: -1, list: [] }).nextOffset).toBeNull();
+  });
   it("normalizes Douyin content without turning missing metrics into zero", () => {
     const page = normalizeContentPage("DOUYIN", {
       total: 1,
