@@ -209,35 +209,44 @@ export async function requestSourceTranscription(input: {
     orderBy: { createdAt: "desc" },
   });
   if (!mediaAsset) throw new Error("ASR_MEDIA_NOT_AVAILABLE");
-  const active = await db.ingestJob.findFirst({
-    where: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, jobType: "TRANSCRIBE", status: { in: ["QUEUED", "RUNNING"] } },
-    orderBy: { createdAt: "desc" },
-  });
-  if (active) throw new TranscriptionAlreadyRunningError(active.id);
-
-  const job = await db.ingestJob.create({
-    data: {
-      workspaceId: input.workspaceId,
-      sourceItemId: input.sourceItemId,
-      requestedById: input.requestedById,
-      jobType: "TRANSCRIBE",
-      provider: plan.provider,
-      providerMode: "REAL",
-      status: "QUEUED",
-      progress: 0,
-      maxAttempts: 3,
-      metadata: json({ progressStage: "QUEUED", mediaAssetId: mediaAsset.id, transcriptionPlan: plan }),
-    },
-  });
-  await db.auditLog.create({
-    data: {
-      workspaceId: input.workspaceId,
-      userId: input.requestedById,
-      action: "transcription.queued",
-      resourceType: "ingest_job",
-      resourceId: job.id,
+  const job = await db.$transaction(async (tx) => {
+    // Serialize requests for this source before checking for an active job.
+    const source = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "SourceItem"
+      WHERE "id" = ${input.sourceItemId} AND "workspaceId" = ${input.workspaceId}
+      FOR UPDATE
+    `;
+    if (!source.length) throw new Error("SOURCE_NOT_FOUND");
+    const active = await tx.ingestJob.findFirst({
+      where: { workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, jobType: "TRANSCRIBE", status: { in: ["QUEUED", "RUNNING"] } },
+      orderBy: { createdAt: "desc" },
+    });
+    if (active) throw new TranscriptionAlreadyRunningError(active.id);
+    const created = await tx.ingestJob.create({
+      data: {
+        workspaceId: input.workspaceId,
+        sourceItemId: input.sourceItemId,
+        requestedById: input.requestedById,
+        jobType: "TRANSCRIBE",
+        provider: plan.provider,
+        providerMode: "REAL",
+        status: "QUEUED",
+        progress: 0,
+        maxAttempts: 3,
+        metadata: json({ progressStage: "QUEUED", mediaAssetId: mediaAsset.id, transcriptionPlan: plan }),
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        workspaceId: input.workspaceId,
+        userId: input.requestedById,
+        action: "transcription.queued",
+        resourceType: "ingest_job",
+        resourceId: created.id,
         metadata: json({ sourceItemId: input.sourceItemId, mediaAssetId: mediaAsset.id, provider: plan.provider, qualityMode: plan.qualityMode }),
-    },
+      },
+    });
+    return created;
   });
   try {
     await enqueueTranscribeSource({
@@ -308,18 +317,20 @@ export function transcriptionUsageOperation(provider: TranscriptionProviderName,
   return protocol === "RECORDING_FILE_2_0" ? "TRANSCRIBE_RECORDING_FILE_2_0" as const : "TRANSCRIBE_FLASH" as const;
 }
 
-export async function cleanupExpiredAsrAudio(now = Date.now()) {
+export async function cleanupExpiredAsrAudio(now = Date.now(), workspaceId?: string) {
   const retentionHours = readAsrAudioRetentionHours();
   const cutoff = new Date(now - retentionHours * 60 * 60 * 1_000);
   const assets = await db.sourceAsset.findMany({
-    where: { assetType: "AUDIO", status: "STORED", storageKey: { not: null }, storedAt: { lt: cutoff } },
-    select: { id: true, workspaceId: true, sourceItemId: true, storageKey: true },
+    where: { ...(workspaceId ? { workspaceId } : {}), assetType: "AUDIO", sourceProvider: "FFMPEG", sourceItem: { sourceType: "VIDEO" }, status: "STORED", storageKey: { not: null }, storedAt: { lt: cutoff } },
+    select: { id: true, workspaceId: true, sourceItemId: true, storageKey: true, metadata: true },
     take: 100,
   });
   const storage = assets.length > 0 ? getStorageProvider() : null;
   let cleaned = 0;
   for (const asset of assets) {
     if (!asset.storageKey || !storage) continue;
+    const metadata = asset.metadata && typeof asset.metadata === "object" && !Array.isArray(asset.metadata) ? asset.metadata as Record<string, unknown> : null;
+    if (typeof metadata?.derivedFromAssetId !== "string" || !metadata.derivedFromAssetId) continue;
     try {
       await storage.delete(asset.storageKey, { workspaceId: asset.workspaceId, sourceItemId: asset.sourceItemId, assetId: asset.id });
       await db.sourceAsset.update({ where: { id: asset.id }, data: { status: "FAILED", storageKey: null, sizeBytes: null, storedAt: null } });

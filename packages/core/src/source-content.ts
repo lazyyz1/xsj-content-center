@@ -25,10 +25,10 @@ export function resolveSourceContent(input: SourceContentInput): SourceContent |
   const media = input.sourceType === "VIDEO" || input.sourceType === "AUDIO";
   const transcriptText = input.transcript?.fullText.trim() ?? "";
   const rawText = input.rawText?.trim() ?? "";
-  const contentText = media ? transcriptText : rawText || transcriptText;
+  const contentText = media ? transcriptText || rawText : rawText || transcriptText;
   // IMAGE is intentionally media-only until a stable Vision route is enabled.
   if (!contentText) return null;
-  const useTranscript = media || (!rawText && Boolean(input.transcript));
+  const useTranscript = Boolean(transcriptText) && (media || !rawText);
   const updatedAt = useTranscript ? input.transcript!.updatedAt : input.sourceUpdatedAt;
   const contentSource: SourceContentSource = useTranscript ? "TRANSCRIPT" : "EXTRACTED_TEXT";
   return {

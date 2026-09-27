@@ -14,6 +14,8 @@ describe("Material readable content boundary", () => {
   let imageId = "";
   let pdfId = "";
   let videoId = "";
+  let manualVideoId = "";
+  let manualAudioId = "";
 
   beforeAll(async () => {
     await db.user.createMany({ data: [
@@ -38,6 +40,8 @@ describe("Material readable content boundary", () => {
       transcript: { create: { workspaceId, provider: "MANUAL", providerMode: "REAL", fullText: "人工转录正文", segments: [] } },
     } });
     videoId = video.id;
+    manualVideoId = (await db.sourceItem.create({ data: { workspaceId, createdById: ownerId, sourceType: "VIDEO", title: "Manual video", rawText: "人工补充视频文字", status: "READY" } })).id;
+    manualAudioId = (await db.sourceItem.create({ data: { workspaceId, createdById: ownerId, sourceType: "AUDIO", title: "Manual audio", rawText: "人工补充音频文字", status: "READY" } })).id;
   });
   afterAll(async () => {
     if (workspaceId) await db.workspace.delete({ where: { id: workspaceId } });
@@ -61,6 +65,13 @@ describe("Material readable content boundary", () => {
     expect(await read(videoId)).toMatchObject({ contentText: "人工转录正文", contentSource: "TRANSCRIPT" });
     await db.sourceItem.update({ where: { id: pdfId }, data: { rawText: null } });
     expect(await read(pdfId)).toMatchObject({ contentText: "识别后的正文", contentSource: "SOURCE_UNDERSTANDING" });
+  });
+
+  it("exposes manually saved media text and prefers Transcript when both exist", async () => {
+    expect(await read(manualVideoId)).toMatchObject({ contentText: "人工补充视频文字", contentSource: "EXTRACTED_TEXT", transcriptId: null });
+    expect(await read(manualAudioId)).toMatchObject({ contentText: "人工补充音频文字", contentSource: "EXTRACTED_TEXT", transcriptId: null });
+    await db.sourceItem.update({ where: { id: videoId }, data: { rawText: "旧的人工文字" } });
+    expect(await read(videoId)).toMatchObject({ contentText: "人工转录正文", contentSource: "TRANSCRIPT" });
   });
 
   it("enforces workspace membership and source scope before returning content", async () => {

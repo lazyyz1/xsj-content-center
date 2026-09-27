@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { db } from "@content-center/db";
 import { IntegrationService } from "@content-center/integrations";
-import { LocalAsrError, minioStorageFromEnv } from "@content-center/providers";
+import { buildSourceAssetObjectKey, LocalAsrError, minioStorageFromEnv } from "@content-center/providers";
 import { QueueEvents } from "bullmq";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -17,7 +17,7 @@ import {
   TRANSCRIBE_SOURCE_QUEUE,
 } from "./queue";
 import { createRedisConnection } from "./redis-connection";
-import { requestSourceTranscription, resolveWorkspaceTranscriptionPlan, TranscriptionAlreadyRunningError } from "./transcription";
+import { cleanupExpiredAsrAudio, requestSourceTranscription, resolveWorkspaceTranscriptionPlan, TranscriptionAlreadyRunningError } from "./transcription";
 
 const execFileAsync = promisify(execFile);
 
@@ -291,4 +291,59 @@ describe("TRANSCRIBE_SOURCE integration", () => {
     expect(await db.materialAnalysis.count({ where: { sourceItemId: source.id } })).toBe(0);
     expect(providerCalls).toBe(3);
   }, 40_000);
+
+  it("creates one queued job and one provider call for concurrent requests, then permits retranscription", async () => {
+    fixtureMode = "SUCCESS";
+    const source = await db.sourceItem.findUniqueOrThrow({ where: { id: completedSourceId }, include: { assets: true } });
+    const video = source.assets.find((asset) => asset.assetType === "VIDEO" && asset.status === "STORED");
+    if (!video) throw new Error("Missing video fixture");
+    const baseline = providerCalls;
+    await worker.pause();
+    let firstJobId = "";
+    try {
+      const requests = await Promise.allSettled([1, 2].map(() => requestSourceTranscription({ workspaceId, sourceItemId: source.id, requestedById: userId, mediaAssetId: video.id })));
+      const accepted = requests.filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof requestSourceTranscription>>> => result.status === "fulfilled");
+      const rejected = requests.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+      expect(accepted).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0]?.reason).toBeInstanceOf(TranscriptionAlreadyRunningError);
+      firstJobId = accepted[0]!.value.job.id;
+      expect(await db.ingestJob.count({ where: { workspaceId, sourceItemId: source.id, jobType: "TRANSCRIBE", status: { in: ["QUEUED", "RUNNING"] } } })).toBe(1);
+      const queue = createTranscribeSourceQueue();
+      try {
+        const jobs = await queue.getJobs(["waiting", "active", "delayed"]);
+        expect(jobs.filter((job) => job.data.sourceItemId === source.id).map((job) => job.data.jobId)).toEqual([firstJobId]);
+      } finally { await queue.close(); }
+    } finally { await worker.resume(); }
+    await expect.poll(async () => (await db.ingestJob.findUnique({ where: { id: firstJobId } }))?.status, { timeout: 30_000 }).toBe("SUCCEEDED");
+    expect(providerCalls - baseline).toBe(1);
+
+    const again = await requestSourceTranscription({ workspaceId, sourceItemId: source.id, requestedById: userId, mediaAssetId: video.id });
+    expect(again.job.id).not.toBe(firstJobId);
+    await expect.poll(async () => (await db.ingestJob.findUnique({ where: { id: again.job.id } }))?.status, { timeout: 30_000 }).toBe("SUCCEEDED");
+    expect(providerCalls - baseline).toBe(2);
+  }, 80_000);
+
+  it("cleans only expired video-derived audio and preserves original audio and Transcript", async () => {
+    const old = new Date("2020-01-01T00:00:00.000Z");
+    const originalSource = await db.sourceItem.create({ data: { workspaceId, createdById: userId, sourceType: "AUDIO", title: "Uploaded original audio", status: "READY" } });
+    const original = await db.sourceAsset.create({ data: {
+      workspaceId, sourceItemId: originalSource.id, assetType: "AUDIO", sourceProvider: "LOCAL_UPLOAD", status: "DOWNLOADING", mimeType: "audio/mpeg",
+    } });
+    const originalKey = buildSourceAssetObjectKey({ workspaceId, sourceItemId: originalSource.id, assetId: original.id, assetType: "AUDIO", mimeType: "audio/mpeg" });
+    await minioStorageFromEnv().upload({ key: originalKey, body: Buffer.from("ID3original-audio"), contentType: "audio/mpeg" });
+    await db.sourceAsset.update({ where: { id: original.id }, data: { status: "STORED", storageKey: originalKey, sizeBytes: BigInt(17), storedAt: old } });
+
+    const derived = await db.sourceAsset.findFirstOrThrow({ where: { workspaceId, sourceItemId: completedSourceId, assetType: "AUDIO", sourceProvider: "FFMPEG", status: "STORED" } });
+    await db.sourceAsset.update({ where: { id: derived.id }, data: { storedAt: old } });
+    const transcriptBefore = await db.transcript.findUniqueOrThrow({ where: { sourceItemId: completedSourceId } });
+    const result = await cleanupExpiredAsrAudio(Date.now(), workspaceId);
+    expect(result.cleaned).toBe(1);
+    await expect(db.sourceItem.findUnique({ where: { id: originalSource.id } })).resolves.toMatchObject({ status: "READY" });
+    await expect(db.sourceAsset.findUnique({ where: { id: original.id } })).resolves.toMatchObject({ status: "STORED", storageKey: originalKey });
+    expect((await fetch((await minioStorageFromEnv().getSignedUrl(originalKey)).data.url)).status).toBe(200);
+    await expect(db.sourceAsset.findUnique({ where: { id: derived.id } })).resolves.toMatchObject({ status: "FAILED", storageKey: null });
+    await expect(db.sourceItem.findUnique({ where: { id: completedSourceId } })).resolves.toMatchObject({ status: "READY" });
+    await expect(db.transcript.findUnique({ where: { sourceItemId: completedSourceId } })).resolves.toMatchObject({ id: transcriptBefore.id, fullText: transcriptBefore.fullText });
+  }, 30_000);
 });
