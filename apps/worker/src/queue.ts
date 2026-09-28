@@ -1,3 +1,4 @@
+import { freeWorkerMode, runFreeTask } from "./free-runtime";
 import { experienceLimitsEnabled, reserveExperienceUsage, ExperienceLimitError } from "./experience-limits";
 import { Queue, UnrecoverableError, Worker, type Job } from "bullmq";
 import { processContentIngestJob } from "./ingest";
@@ -127,7 +128,7 @@ export async function enqueueContentIngest(payload: ContentIngestPayload, maxAtt
 export function createContentIngestWorker() {
   return new Worker<ContentIngestJobPayload>(
     CONTENT_INGEST_QUEUE,
-    async (job) => {
+    async (job) => runFreeTask(async () => {
       const release = job.name !== CONTENT_INGEST && job.name !== COLLECT_BENCHMARK_RUN ? await reserveExperienceUsage({ workspaceId: job.data.workspaceId, userId: job.data.requestedById, operation: "AI" }).catch(error => { throw error instanceof ExperienceLimitError ? new UnrecoverableError(error.message) : error; }) : async () => {};
       try {
       if (job.name === CONTENT_INGEST) {
@@ -151,18 +152,18 @@ export function createContentIngestWorker() {
       if (job.name === DISTILL_MATERIAL) return await processMaterialDistillationJob(job as Job<ContentIngestPayload>);
       throw new UnrecoverableError(`Unsupported job: ${job.name}`);
       } finally { await release(); }
-    },
-    { connection: createRedisConnection(), concurrency: 2 },
+    }),
+    { connection: createRedisConnection(), concurrency: freeWorkerMode() ? 1 : 2 },
   );
 }
 
 export function createTranscribeSourceWorker() {
   return new Worker<TranscribeSourcePayload>(
     TRANSCRIBE_SOURCE_QUEUE,
-    async (job) => {
+    async (job) => runFreeTask(async () => {
       if (job.name !== TRANSCRIBE_SOURCE) throw new UnrecoverableError(`Unsupported job: ${job.name}`);
       return await processTranscribeSourceJob(job);
-    },
-    { connection: transcriptionQueueConnection(), concurrency: experienceLimitsEnabled() ? 2 : 1 },
+    }),
+    { connection: transcriptionQueueConnection(), concurrency: freeWorkerMode() ? 1 : experienceLimitsEnabled() ? 2 : 1 },
   );
 }

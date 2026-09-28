@@ -1,3 +1,4 @@
+import { freeWorkerMode } from "./free-runtime";
 import { experienceLimitsEnabled } from "./experience-limits";
 import { Queue, type ConnectionOptions } from "bullmq";
 import { createRedisConnection } from "./redis-connection";
@@ -25,7 +26,7 @@ export function createTranscribeSourceQueue() {
 export async function enqueueTranscribeSource(payload: TranscribeSourcePayload, maxAttempts = 3) {
   const queue = createTranscribeSourceQueue();
   try {
-    if (experienceLimitsEnabled()) await queue.setGlobalConcurrency(2);
+    if (experienceLimitsEnabled()) await queue.setGlobalConcurrency(freeWorkerMode() ? 1 : 2);
     return await queue.add(TRANSCRIBE_SOURCE, payload, {
       jobId: `${payload.jobId}-${Date.now()}`,
       attempts: maxAttempts,

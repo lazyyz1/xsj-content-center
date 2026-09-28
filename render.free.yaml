@@ -1,4 +1,4 @@
-# V1-C free staging only. This file intentionally has no Worker or Persistent Disk.
+# Free demo: Web and serialized Worker share one ephemeral instance.
 services:
   - type: web
     name: xsj-content-web-free-staging
@@ -11,7 +11,7 @@ services:
     # Free staging only builds the Web app; Turbo's full monorepo build is unnecessarily memory-heavy here.
     buildCommand: pnpm install --frozen-lockfile && pnpm --filter @content-center/web exec next build --webpack
     # Free services do not support preDeployCommand; migrate deploy is idempotent and runs before start.
-    startCommand: pnpm --filter @content-center/db db:migrate && pnpm --filter @content-center/web admin:bootstrap && pnpm --filter @content-center/web experience:bootstrap && pnpm --filter @content-center/web start
+    startCommand: pnpm --filter @content-center/db db:migrate && pnpm --filter @content-center/web admin:bootstrap && pnpm --filter @content-center/web experience:bootstrap && node scripts/start-free-experience.mjs
     healthCheckPath: /login
     envVars:
       - key: NODE_ENV
