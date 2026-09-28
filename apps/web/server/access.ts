@@ -7,7 +7,7 @@ import { auth } from "@/lib/auth";
 
 export async function requireSession() {
   const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/login");
+  if (!session) redirect(process.env.DEMO_AUTO_LOGIN === "true" ? "/experience" : "/login");
   const user = await db.user.findUnique({ where: { id: session.user.id }, select: { disabledAt: true } });
   if (!user || user.disabledAt) redirect("/login");
   return session;

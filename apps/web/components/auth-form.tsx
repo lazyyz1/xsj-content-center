@@ -16,7 +16,8 @@ export function AuthForm({ mode, allowRegistration = false }: { mode: "login" | 
     setPending(true);
     setError("");
     const form = new FormData(event.currentTarget);
-    const email = String(form.get("email"));
+    const identifier = String(form.get("email")).trim();
+    const email = mode === "login" && identifier.toLowerCase() === "xsj666" ? "xsj666@experience.invalid" : identifier;
     const password = String(form.get("password"));
     if (mode === "register") {
       const response = await fetch("/api/internal-signup", {
@@ -57,12 +58,12 @@ export function AuthForm({ mode, allowRegistration = false }: { mode: "login" | 
         </label>
       ) : null}
       <label className="block space-y-2 text-sm font-medium">
-        <span>邮箱</span>
-        <Input name="email" type="email" autoComplete="email" required />
+        <span>{isRegister ? "邮箱" : "账号或邮箱"}</span>
+        <Input name="email" type={isRegister ? "email" : "text"} autoComplete="username" required />
       </label>
       <label className="block space-y-2 text-sm font-medium">
         <span>密码</span>
-        <Input name="password" type="password" autoComplete={isRegister ? "new-password" : "current-password"} minLength={8} required />
+        <Input name="password" type="password" autoComplete={isRegister ? "new-password" : "current-password"} minLength={isRegister ? 8 : 1} required />
       </label>
       {isRegister ? (
         <label className="block space-y-2 text-sm font-medium">
