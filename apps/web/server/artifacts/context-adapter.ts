@@ -16,6 +16,7 @@ export class ArtifactContextAdapter {
         provenance: "artifact:text",
         whySelected: "用户明确指定的文本产出",
         truncated: false,
+        source: { sourceType: "ARTIFACT", sourceId: artifact.artifactId, title: artifact.title, version: artifact.version, generated: true, href: `/dashboard?project=${input.projectId}&node=artifact:${artifact.artifactId}` },
         content: JSON.stringify({ artifactId: artifact.artifactId, title: artifact.title, content: artifact.content }),
       },
     };

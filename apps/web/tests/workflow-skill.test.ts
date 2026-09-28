@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseWorkflowSkill, WorkflowSkillParseError } from "../server/workflow-skill/contract";
+import { parseImportedSkill, parseWorkflowSkill, WorkflowSkillParseError } from "../server/workflow-skill/contract";
 
 const valid = [
   "# 创作方法：知识型口播",
@@ -63,5 +63,23 @@ describe("workflow skill contract", () => {
   it("rejects unsupported output types", () => {
     try { parseWorkflowSkill(valid.replace("ORAL_VIDEO_SCRIPT", "XIAOHONGSHU_POST")); throw new Error("expected parse failure"); }
     catch (error) { expect(error).toBeInstanceOf(WorkflowSkillParseError); expect((error as WorkflowSkillParseError).issues).toContain("不支持当前输出类型，请使用短视频口播稿。"); }
+  });
+});
+
+describe("ordinary Markdown import", () => {
+  it("preserves full Markdown including whitespace and repeated headings", () => {
+    const raw = "\n# 写作助手\n\n## 步骤\n先提问。\n## 步骤\n再写作。\n";
+    expect(parseImportedSkill(raw)).toMatchObject({ name: "写作助手", outputType: "TEXT", rawMarkdown: raw });
+  });
+  it("reads frontmatter name and retains all instructions beyond the card excerpt", () => {
+    const raw = "---\nname: 'my-skill'\ndescription: writing\n---\n" + "正文".repeat(1000) + "\n最后要求：保留证据。";
+    expect(parseImportedSkill(raw).name).toBe("my-skill");
+    expect(parseImportedSkill(raw).rawMarkdown).toBe(raw);
+  });
+  it("preserves structured legacy imports", () => {
+    expect(parseImportedSkill(valid)).toMatchObject({ name: "知识型口播", rawMarkdown: valid, outputType: "ORAL_VIDEO_SCRIPT" });
+  });
+  it("rejects empty, filename-only, binary and oversized content", () => {
+    for (const raw of [" ", "test_SKILL.md", "abc\0def", "x".repeat(100001)]) expect(() => parseImportedSkill(raw)).toThrow(WorkflowSkillParseError);
   });
 });

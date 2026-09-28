@@ -1,4 +1,5 @@
 import type { AIModelCapability } from "@content-center/integrations";
+import type { SourceReference } from "../../assistant/references";
 
 export const AI_CONTROL_TASKS = [
   "CONTENT_CHECK",
@@ -63,6 +64,7 @@ export type ConversationContextMessage = {
 };
 
 export type ContextItem = {
+  source?: SourceReference;
   objectType: string;
   objectId: string;
   version: number | string | null;
@@ -74,6 +76,9 @@ export type ContextItem = {
 };
 
 export type ContextManifest = {
+  toolResults?: Array<{ tool: string; status: "COMPLETED" | "SKIPPED"; sourceId?: string; result?: { characters: number; truncated: boolean }; error?: string }>;
+  budget?: { maximumBytes: number; usedBytes: number; omitted: string[] };
+  warnings?: string[];
   schemaVersion: "ai-context-manifest-v1";
   manifestId: string;
   generatedAt: string;

@@ -1,7 +1,7 @@
 export type ResearchProvenance = "REAL_DATA" | "COMPUTED" | "AI_INTERPRETATION";
 export type ResearchSource = {
   ref: string;
-  kind: "MATERIAL" | "BENCHMARK_ACCOUNT" | "BENCHMARK_WORK" | "TREND" | "PROJECT_ARTIFACT" | "USER_INPUT" | "CREATOR_PROFILE";
+  kind: "MATERIAL" | "BENCHMARK_ACCOUNT" | "BENCHMARK_WORK" | "BENCHMARK_COMMENT" | "TREND" | "PROJECT_ARTIFACT" | "USER_INPUT" | "CREATOR_PROFILE";
   objectId: string;
   title: string;
   href: string | null;

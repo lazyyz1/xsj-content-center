@@ -17,10 +17,10 @@ export class RecommendationServiceError extends Error {
   constructor(readonly code: "RECOMMENDATION_NOT_FOUND" | "RECOMMENDATION_NO_DATA" | "RECOMMENDATION_AI_FAILED" | "RECOMMENDATION_FORBIDDEN", message: string) { super(message); this.name = "RecommendationServiceError"; }
 }
 
-const ownerBatch = (input: { workspaceId: string; userId: string }) => ({ workspaceId: input.workspaceId, createdById: input.userId, workspace: { members: { some: { userId: input.userId, user: { disabledAt: null } } } } });
+const ownerBatch = (input: { workspaceId: string; userId: string }) => ({ workspaceId: input.workspaceId, createdById: input.userId, workspace: { members: { some: { userId: input.userId, disabledAt: null, workspace: { disabledAt: null }, user: { disabledAt: null } } } } });
 const ownerItem = (input: { workspaceId: string; userId: string; itemId: string }) => ({ id: input.itemId, workspaceId: input.workspaceId, batch: ownerBatch(input) });
 async function requireWriter(input: { workspaceId: string; userId: string }) {
-  const member = await db.workspaceMember.findFirst({ where: { workspaceId: input.workspaceId, userId: input.userId, user: { disabledAt: null } } });
+  const member = await db.workspaceMember.findFirst({ where: { workspaceId: input.workspaceId, userId: input.userId, disabledAt: null, workspace: { disabledAt: null }, user: { disabledAt: null } } });
   if (!member || member.role === "VIEWER") throw new RecommendationServiceError("RECOMMENDATION_FORBIDDEN", "当前权限不能修改个人推荐。");
 }
 

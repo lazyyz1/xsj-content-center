@@ -16,7 +16,7 @@ export function parseTrendStableKey(key: string): Identity {
 
 type TrendRow = Identity & { id: string; title: string; keyword: string | null; rank: number | null; metrics: unknown; windowStart: Date; windowEnd: Date; observedAt: Date; previousRank: number | null; previousObservedAt: Date | null; state: "FIRST_SEEN" | "RISING" | "PERSISTING"; total: bigint };
 export function safeTrendMetrics(value: unknown) { const raw = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; const number = (name: string) => typeof raw[name] === "number" && Number.isFinite(raw[name]) && (raw[name] as number) >= 0 ? raw[name] as number : null; return { contentCount: number("contentCount"), engagement: number("engagement"), growth: number("growth"), likes: number("likes"), comments: number("comments") }; }
-export async function researchTrendList(actor: ResearchActor, input: { q?: string; platform?: string; type?: string; state?: string; since?: string; page?: string }): Promise<{ items: Array<Omit<TrendRow, "metrics"> & { stableKey: string; metrics: ReturnType<typeof safeTrendMetrics>; rankDelta: number | null }>; count: number; page: number; pages: number }> {
+export async function researchTrendList(actor: ResearchActor, input: { q?: string; platform?: string; type?: string; state?: string; since?: string; page?: string }): Promise<{ items: Array<Omit<TrendRow, "metrics"> & { stableKey: string; metrics: ReturnType<typeof safeTrendMetrics>; rankDelta: number | null; followed: boolean }>; count: number; page: number; pages: number }> {
   await researchMember(actor);
   const page = Math.min(1000, Math.max(1, Number(input.page) || 1));
   const q = input.q?.trim().slice(0, 100) ?? "";
@@ -58,8 +58,10 @@ export async function researchTrendList(actor: ResearchActor, input: { q?: strin
     ORDER BY "observedAt" DESC, "rank" ASC NULLS LAST, "id" DESC
     LIMIT 20 OFFSET ${(page - 1) * 20}`;
   if (!rows.length && page > 1) { const first = await researchTrendList(actor, { ...input, page: "1" }); return { ...first, items: [], page }; }
+  const preferences = rows.length ? await db.researchObjectPreference.findMany({ where: { workspaceId: actor.workspaceId, userId: actor.userId, kind: "TREND", followedAt: { not: null }, objectKey: { in: rows.map(row => trendStableKey(row)) } }, select: { objectKey: true } }) : [];
+  const followedKeys = new Set(preferences.map(row => row.objectKey));
   const count = Number(rows[0]?.total ?? 0);
-  return { items: rows.map(row => ({ ...row, stableKey: trendStableKey(row), metrics: safeTrendMetrics(row.metrics), rankDelta: row.rank === null || row.previousRank === null ? null : row.previousRank - row.rank })), count, page, pages: Math.max(1, Math.ceil(count / 20)) };
+  return { items: rows.map(row => ({ ...row, stableKey: trendStableKey(row), followed: followedKeys.has(trendStableKey(row)), metrics: safeTrendMetrics(row.metrics), rankDelta: row.rank === null || row.previousRank === null ? null : row.previousRank - row.rank })), count, page, pages: Math.max(1, Math.ceil(count / 20)) };
 }
 
 export async function researchTrendDetail(actor: ResearchActor, stableKey: string, page = 1) {

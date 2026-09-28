@@ -4,7 +4,7 @@ import { ChevronDown, Compass, FileText, Folder, PanelLeftClose, PanelLeftOpen, 
 import Link from "next/link";
 import { useState, type RefObject } from "react";
 import type { ProjectListView } from "@/server/sidebar/view-model";
-import { SidebarSearch } from "./sidebar/sidebar-search";
+import { GlobalSearch } from "./global-search";
 import { LogoutButton } from "./logout-button";
 import { NewProjectDialog } from "./sidebar/new-project-dialog";
 import { SidebarProjectSections } from "./sidebar/project-sections";
@@ -86,7 +86,7 @@ export function SidebarFoundation({
         <button type="button" className="app-sidebar-pin app-sidebar-icon-slot" aria-label={controlLabel} aria-pressed={pinned} onClick={toggle}>
           {pinned ? <PanelLeftClose /> : <PanelLeftOpen />}
         </button>
-        <div className="app-sidebar-search"><SidebarSearch onOpenChange={(open) => onInteractionLockChange("SEARCH", open)} /></div>
+        <div className="app-sidebar-search"><GlobalSearch compact onOpenChange={(open) => onInteractionLockChange("SEARCH", open)} /></div>
       </div>
     </header>
 
@@ -95,12 +95,12 @@ export function SidebarFoundation({
         <span className="app-sidebar-icon-slot"><Icon strokeWidth={1.8} /></span>
         <span className="app-sidebar-copy">{label}</span>
       </Link>)}
-      {currentProjectId ? <Link href={`/research?projectId=${encodeURIComponent(currentProjectId)}`} aria-label="从此项目开始研究" title={collapsed ? "从此项目开始研究" : undefined}><span className="app-sidebar-icon-slot"><Compass strokeWidth={1.8} /></span><span className="app-sidebar-copy">从此项目开始研究</span></Link> : null}
+      {currentProjectId && !collapsed ? <Link href={`/research?projectId=${encodeURIComponent(currentProjectId)}`} aria-label="从此项目开始研究" title={collapsed ? "从此项目开始研究" : undefined}><span className="app-sidebar-icon-slot"><Compass strokeWidth={1.8} /></span><span className="app-sidebar-copy">从此项目开始研究</span></Link> : null}
     </nav>
 
     <SidebarProjectSections view={projectListView} currentProjectId={currentProjectId} onViewChange={onProjectListViewChange} onOpenNewProject={() => setNewProjectOpen(true)} onInteractionLockChange={onInteractionLockChange} />
 
-    <div id="xsj-project-tree-slot" />
+
 
     <details
       ref={accountRef}
@@ -115,8 +115,9 @@ export function SidebarFoundation({
       <div className="app-sidebar-account-menu">
         <header><strong>{userName}</strong><small>{workspaceName}</small></header>
         <span className="app-sidebar-account-divider" />
-        <Link href="/settings">个人设置</Link>
-        <Link href="/settings/members">团队与权限</Link>
+        <Link href="/settings/account" onClick={() => { if (accountRef.current) accountRef.current.open = false; }}>我的账号</Link>
+        <Link href="/settings" onClick={() => { if (accountRef.current) accountRef.current.open = false; }}>设置</Link>
+        <Link href="/settings/members" onClick={() => { if (accountRef.current) accountRef.current.open = false; }}>成员与权限</Link>
         {isSystemAdmin ? <><span className="app-sidebar-account-divider" /><Link href="/admin">系统管理</Link></> : null}
         <span className="app-sidebar-account-divider" />
         <LogoutButton />

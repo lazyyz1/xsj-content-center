@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  configuredLLMChoice, resolveLLMModelId,
   CONFIGURABLE_INTEGRATION_PROVIDERS,
   DOUBAO_DEFAULT_BASE_URL,
   DOUBAO_DEFAULT_RESOURCE_ID,
@@ -26,16 +27,17 @@ export type IntegrationDisplay = {
   usage: readonly string[];
   defaults: Record<string, string>;
   managedBy: "WORKSPACE" | "ENVIRONMENT";
-  connectionTest: "UNSUPPORTED_UNTIL_PROVIDER_STAGE" | "LIVE_API_TEST_NOT_AVAILABLE" | "NOT_APPLICABLE";
+  connectionTest: "LIVE" | "UNSUPPORTED_UNTIL_PROVIDER_STAGE" | "LIVE_API_TEST_NOT_AVAILABLE" | "NOT_APPLICABLE";
   models?: Array<{ provider: AIProvider; modelId: string; label: string; defaultBaseUrl: string; experimental?: boolean; capabilities: AIModelCapabilities }>;
 };
 
 const service = new IntegrationService();
 
 const providerDetails: Record<ConfigurableIntegrationProvider, { name: string; description: string; usage: readonly string[]; defaults: Record<string, string> }> = {
+  WEB_SEARCH: { name: "联网搜索 · Exa", description: "为 Agent 搜索普通网页、新闻和官网。只发送检索词，不发送项目资料或历史对话。", usage: ["网页搜索", "来源引用"], defaults: {} },
   REDFOX: {
     name: "RedFox",
-    description: "为内容发现与素材收录提供抖音、小红书内容数据。",
+    description: "为研究与资料收录提供平台数据。",
     usage: ["内容发现", "抖音 / 小红书素材收录"],
     defaults: { baseUrl: REDFOX_DEFAULT_BASE_URL },
   },
@@ -53,8 +55,8 @@ const providerDetails: Record<ConfigurableIntegrationProvider, { name: string; d
   },
   LLM: {
     name: "AI 模型",
-    description: "为内容拆解、视频提炼和创作提供模型能力。普通成员无需选择模型。",
-    usage: ["内容拆解", "深度创作包", "多平台生成", "AI 审核"],
+    description: "为项目对话、资料理解和研究分析提供模型能力。",
+    usage: ["项目对话", "资料理解", "研究分析"],
     defaults: { provider: "KIMI", modelId: "kimi-k2.6", baseUrl: "https://api.moonshot.cn/v1" },
   },
 };
@@ -65,13 +67,12 @@ export async function getIntegrationStatuses(workspaceId: string): Promise<Integ
       const current = await service.getIntegrationStatus(workspaceId, provider);
       return {
         ...current,
+        ...(provider === "LLM" ? { publicConfig: { ...current.publicConfig, resolvedModelId: configuredLLMChoice(current.publicConfig).apiModelId, resolvedModelLabel: configuredLLMChoice(current.publicConfig).label } } : {}),
         updatedAt: current.updatedAt?.toISOString() ?? null,
         ...providerDetails[provider],
-        ...(provider === "LLM" ? { models: getAIModels().map((model) => ({ provider: model.provider, modelId: model.modelId, label: model.label, defaultBaseUrl: model.defaultBaseUrl, ...("experimental" in model && model.experimental ? { experimental: true } : {}), capabilities: model.capabilities })) } : {}),
+        ...(provider === "LLM" ? { models: getAIModels().filter(model => resolveLLMModelId(model.provider, model.modelId) === model.modelId).map((model) => ({ provider: model.provider, modelId: model.modelId, label: model.label, defaultBaseUrl: model.defaultBaseUrl, ...("experimental" in model && model.experimental ? { experimental: true } : {}), capabilities: model.capabilities })) } : {}),
         managedBy: "WORKSPACE" as const,
-        connectionTest: provider === "REDFOX" || provider === "DOUBAO_ASR" || provider === "LLM"
-          ? "LIVE_API_TEST_NOT_AVAILABLE" as const
-          : "UNSUPPORTED_UNTIL_PROVIDER_STAGE" as const,
+        connectionTest: "LIVE" as const,
       };
     }),
   );

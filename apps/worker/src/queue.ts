@@ -1,3 +1,4 @@
+import { experienceLimitsEnabled, reserveExperienceUsage, ExperienceLimitError } from "./experience-limits";
 import { Queue, UnrecoverableError, Worker, type Job } from "bullmq";
 import { processContentIngestJob } from "./ingest";
 import { processMaterialAnalysisJob } from "./material-analysis";
@@ -7,7 +8,8 @@ import { processBenchmarkCreatorProfileJob } from "./benchmark-creator-profile";
 import { processBenchmarkCollectionRunJob } from "./benchmark-collection";
 import { processMaterialDistillationJob } from "./material-distillation";
 import { createRedisConnection } from "./redis-connection";
-import { processTranscribeSourceJob } from "./transcription";
+import { db } from "@content-center/db";
+import { processTranscribeSourceJob, requestSourceTranscription, TranscriptionAlreadyRunningError } from "./transcription";
 import {
   transcriptionQueueConnection,
   TRANSCRIBE_SOURCE,
@@ -126,14 +128,29 @@ export function createContentIngestWorker() {
   return new Worker<ContentIngestJobPayload>(
     CONTENT_INGEST_QUEUE,
     async (job) => {
-      if (job.name === CONTENT_INGEST) return processContentIngestJob(job as Job<ContentIngestPayload>);
-      if (job.name === ANALYZE_MATERIAL) return processMaterialAnalysisJob(job as Job<ContentIngestPayload>);
-      if (job.name === ANALYZE_BENCHMARK) return processBenchmarkStudyJob(job as Job<BenchmarkStudyPayload>);
-      if (job.name === IDENTIFY_BENCHMARK_PLAYBOOKS) return processBenchmarkPlaybookJob(job as Job<BenchmarkStudyPayload>);
-      if (job.name === GENERATE_BENCHMARK_CREATOR_PROFILE) return processBenchmarkCreatorProfileJob(job as Job<BenchmarkStudyPayload>);
-      if (job.name === COLLECT_BENCHMARK_RUN) return processBenchmarkCollectionRunJob(job as Job<BenchmarkCollectionPayload>);
-      if (job.name === DISTILL_MATERIAL) return processMaterialDistillationJob(job as Job<ContentIngestPayload>);
+      const release = job.name !== CONTENT_INGEST && job.name !== COLLECT_BENCHMARK_RUN ? await reserveExperienceUsage({ workspaceId: job.data.workspaceId, userId: job.data.requestedById, operation: "AI" }).catch(error => { throw error instanceof ExperienceLimitError ? new UnrecoverableError(error.message) : error; }) : async () => {};
+      try {
+      if (job.name === CONTENT_INGEST) {
+        const ingestJob = job as Job<ContentIngestPayload>;
+        const result = await processContentIngestJob(ingestJob);
+        const record = await db.ingestJob.findUnique({where:{id:ingestJob.data.jobId},select:{status:true,metadata:true}});
+        const auto = record?.metadata && typeof record.metadata === "object" && !Array.isArray(record.metadata) && record.metadata.autoTranscribe === true;
+        if (record?.status === "SUCCEEDED" && auto && !await db.transcript.findUnique({where:{sourceItemId:ingestJob.data.sourceItemId},select:{id:true}})) {
+          try { await requestSourceTranscription({...ingestJob.data}); }
+          catch (error) {
+            if (!(error instanceof TranscriptionAlreadyRunningError)) await db.ingestJob.create({data:{workspaceId:ingestJob.data.workspaceId,sourceItemId:ingestJob.data.sourceItemId,requestedById:ingestJob.data.requestedById,jobType:"TRANSCRIBE",provider:"AUTO",providerMode:"REAL",status:"FAILED",errorCode:"AUTO_TRANSCRIPTION_FAILED",errorMessage:error instanceof ExperienceLimitError ? error.message : "采集完成，但自动转写未能启动，请检查转写配置后重试。",finishedAt:new Date()}});
+          }
+        }
+        return result;
+      }
+      if (job.name === ANALYZE_MATERIAL) return await processMaterialAnalysisJob(job as Job<ContentIngestPayload>);
+      if (job.name === ANALYZE_BENCHMARK) return await processBenchmarkStudyJob(job as Job<BenchmarkStudyPayload>);
+      if (job.name === IDENTIFY_BENCHMARK_PLAYBOOKS) return await processBenchmarkPlaybookJob(job as Job<BenchmarkStudyPayload>);
+      if (job.name === GENERATE_BENCHMARK_CREATOR_PROFILE) return await processBenchmarkCreatorProfileJob(job as Job<BenchmarkStudyPayload>);
+      if (job.name === COLLECT_BENCHMARK_RUN) return await processBenchmarkCollectionRunJob(job as Job<BenchmarkCollectionPayload>);
+      if (job.name === DISTILL_MATERIAL) return await processMaterialDistillationJob(job as Job<ContentIngestPayload>);
       throw new UnrecoverableError(`Unsupported job: ${job.name}`);
+      } finally { await release(); }
     },
     { connection: createRedisConnection(), concurrency: 2 },
   );
@@ -144,8 +161,8 @@ export function createTranscribeSourceWorker() {
     TRANSCRIBE_SOURCE_QUEUE,
     async (job) => {
       if (job.name !== TRANSCRIBE_SOURCE) throw new UnrecoverableError(`Unsupported job: ${job.name}`);
-      return processTranscribeSourceJob(job);
+      return await processTranscribeSourceJob(job);
     },
-    { connection: transcriptionQueueConnection(), concurrency: 1 },
+    { connection: transcriptionQueueConnection(), concurrency: experienceLimitsEnabled() ? 2 : 1 },
   );
 }

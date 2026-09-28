@@ -1,28 +1,8 @@
-import { createRequire } from "node:module";
-import { dirname, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { PDFParse } from "pdf-parse";
+import { getData } from "pdf-parse/worker";
 
-function resolvePdfWorker() {
-  const packageJsonCandidates = [
-    typeof __filename === "string" ? __filename : null,
-    resolve(process.cwd(), "package.json"),
-    resolve(process.cwd(), "packages/providers/package.json"),
-    resolve(process.cwd(), "../../packages/providers/package.json"),
-  ].filter((candidate): candidate is string => Boolean(candidate));
-  for (const packageJson of packageJsonCandidates) {
-    try {
-      const packageRequire = createRequire(packageJson);
-      const packageEntry = packageRequire.resolve("pdf-parse");
-      return pathToFileURL(resolve(dirname(packageEntry), "../esm/pdf.worker.mjs")).toString();
-    } catch {
-      // Try the next workspace package root; development commands use different cwd values.
-    }
-  }
-  throw new Error("Unable to resolve the pdf-parse worker.");
-}
-
-PDFParse.setWorker(resolvePdfWorker());
+// The packaged data URL survives both server bundling and worker execution.
+PDFParse.setWorker(getData());
 
 export class PdfTextExtractionError extends Error {
   readonly code = "PDF_TEXT_EXTRACTION_FAILED";
@@ -79,4 +59,19 @@ export async function renderPdfForUnderstanding(data: Uint8Array) {
   } finally {
     await parser.destroy();
   }
+}
+
+/** Single-page display rendering, independent of browser PDF plugins and AI. */
+export async function renderPdfPreviewPage(data: Uint8Array, page: number) {
+  if (!data.byteLength || data.byteLength > 25 * 1024 * 1024 || !Number.isInteger(page) || page < 1) throw new Error("PDF_PREVIEW_INVALID");
+  const parser = new PDFParse({ data: Buffer.from(data) });
+  try {
+    const info = await parser.getInfo({ parsePageInfo: true });
+    if (page > info.total) throw new Error("PDF_PAGE_NOT_FOUND");
+    const dimensions = info.pages.find(item => item.pageNumber === page);
+    if (!dimensions || dimensions.width <= 0 || dimensions.height <= 0) throw new Error("PDF_PREVIEW_INVALID");
+    const image = await parser.getScreenshot({ partial: [page], scale: Math.min(2, 1600 / Math.max(dimensions.width, dimensions.height)), imageDataUrl: false, imageBuffer: true });
+    if (!image.pages[0]?.data.length) throw new Error("PDF_PREVIEW_INVALID");
+    return { data: image.pages[0].data, page, total: info.total };
+  } finally { await parser.destroy(); }
 }

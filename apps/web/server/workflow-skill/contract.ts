@@ -1,10 +1,11 @@
 import { z } from "zod";
 
-export const WORKFLOW_SKILL_OUTPUT_TYPES = ["ORAL_VIDEO_SCRIPT"] as const;
+export const WORKFLOW_SKILL_OUTPUT_TYPES = ["ORAL_VIDEO_SCRIPT", "TEXT"] as const;
 export type WorkflowSkillOutputType = (typeof WORKFLOW_SKILL_OUTPUT_TYPES)[number];
 
 export const workflowSkillContractSchema = z.object({
   contractVersion: z.literal("workflow-skill-v1"),
+  rawMarkdown: z.string().max(100_000).optional(),
   name: z.string().trim().min(1).max(200),
   outputType: z.enum(WORKFLOW_SKILL_OUTPUT_TYPES),
   scenarios: z.array(z.string().trim().min(1).max(300)).min(1).max(8),
@@ -167,6 +168,7 @@ export function parseWorkflowSkill(markdown: string): WorkflowSkillContract {
 
 export function workflowSkillPreview(contract: WorkflowSkillContract) {
   return {
+    rawMarkdown: contract.rawMarkdown,
     name: contract.name,
     outputType: contract.outputType,
     scenarios: contract.scenarios,
@@ -181,4 +183,22 @@ export function workflowSkillPreview(contract: WorkflowSkillContract) {
     sourceNote: contract.sourceNote,
     hasExamples: Boolean(contract.examples?.input || contract.examples?.output),
   };
+}
+
+/** Import ordinary Markdown losslessly; structured contracts remain compatible. */
+export function parseImportedSkill(markdown: string): WorkflowSkillContract {
+  if (!markdown.trim() || markdown.length > 100_000 || markdown.includes("\0")) throw new WorkflowSkillParseError(["请选择有效的 Markdown 文件（最多 100,000 字符）。"]);
+  if (/^[^\r\n]+\.(?:md|markdown)$/iu.test(markdown.trim())) throw new WorkflowSkillParseError(["这里只有文件名，请点击“选择 .md 文件”读取文件内容，或粘贴正文。"]);
+  try { return { ...parseWorkflowSkill(markdown), rawMarkdown: markdown }; } catch (error) { if (!(error instanceof WorkflowSkillParseError)) throw error; }
+  const body = markdown.replace(/^\uFEFF/u, "");
+  const frontmatter = body.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u);
+  const content = frontmatter ? body.slice(frontmatter[0].length) : body;
+  const name = frontmatter?.[1]?.match(/^name:\s*['"]?(.+?)['"]?\s*$/mu)?.[1] || content.match(/^#\s+(.+)$/mu)?.[1] || content.split(/\r?\n/u).find(line => line.trim()) || "导入的 Skill";
+  return workflowSkillContractSchema.parse({
+    contractVersion: "workflow-skill-v1", rawMarkdown: markdown, name: name.trim().slice(0, 200), outputType: "TEXT",
+    scenarios: ["由用户主动选择使用"], systemInputs: ["当前对话及已选择资料"], userInputs: ["当前任务"], preconditions: ["按当前任务使用"],
+    steps: [content.trim().slice(0, 480) || "按 Markdown 正文执行"], judgementRules: ["结合当前任务使用原文中的方法"], expressionRules: ["遵循 Skill 正文的表达要求"],
+    prohibitions: ["不把示例视为用户事实"], outputRequirements: ["按用户要求和 Skill 正文输出"], factBoundary: ["Skill 是方法指导，不是事实证据"],
+    sourceType: "INTERNAL_METHOD", sourceNote: "用户导入 Markdown", references: [], examples: null,
+  });
 }

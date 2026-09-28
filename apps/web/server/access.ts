@@ -1,7 +1,8 @@
 import { canManageWorkspace, canReadWorkspace, hasWorkspaceRole, type WorkspaceRole } from "@content-center/core";
-import { db, ensurePersonalWorkspaceForUser, findWorkspaceForUser } from "@content-center/db";
+import { db, findWorkspaceForUser } from "@content-center/db";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { resolveWorkspaceMembership } from "./workspace-context";
 import { auth } from "@/lib/auth";
 
 export async function requireSession() {
@@ -17,24 +18,12 @@ export async function requireWorkspace(workspaceId?: string) {
   if (workspaceId) {
     const workspace = await findWorkspaceForUser(db, { userId: session.user.id, workspaceId });
     const membership = workspace?.members[0];
-    if (!workspace || !membership) redirect("/onboarding");
+    if (!workspace || !membership) redirect("/workspace-unavailable");
     return { session, workspace, role: membership.role as WorkspaceRole };
   }
 
-  let membership = await db.workspaceMember.findFirst({
-    where: { userId: session.user.id },
-    include: { workspace: true },
-    orderBy: { createdAt: "asc" },
-  });
-  if (!membership) {
-    await ensurePersonalWorkspaceForUser(db, { userId: session.user.id });
-    membership = await db.workspaceMember.findFirst({
-      where: { userId: session.user.id },
-      include: { workspace: true },
-      orderBy: { createdAt: "asc" },
-    });
-  }
-  if (!membership) throw new Error("PERSONAL_WORKSPACE_PROVISIONING_FAILED");
+  const membership = await resolveWorkspaceMembership(session.user.id, session.session.id, true);
+  if (!membership) redirect("/workspace-unavailable");
   return { session, workspace: membership.workspace, role: membership.role as WorkspaceRole };
 }
 

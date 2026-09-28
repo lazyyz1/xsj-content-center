@@ -383,3 +383,22 @@ body:has(.app-shell[data-shell="v4"] .xsj-app-sidebar.is-pinned) .app-main {
 .sidebar-search-dialog form > button { border: 0; border-radius: 7px; background: #35353b; color: #fff; padding: 9px 14px; }
 @media (hover: none), (pointer: coarse) { .sidebar-row-action, .app-sidebar-project-toolbar > div { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .sidebar-row-action { transition: none; } }
+
+/* A collapsed rail contains navigation icons only; project labels must not be clipped. */
+.xsj-app-sidebar.is-collapsed .app-sidebar-project-organization,
+.xsj-app-sidebar.is-collapsed .app-sidebar-projects,
+.xsj-app-sidebar.is-collapsed #xsj-project-tree-slot { display:none; }
+.xsj-app-sidebar.is-collapsed .app-sidebar-copy { display:none; }
+.xsj-app-sidebar.is-collapsed .app-sidebar-navigation > a { justify-content:center; padding-inline:0; }
+.xsj-app-sidebar.is-collapsed .app-sidebar-account { margin-top:auto; }
+
+.sidebar-command-submenu > summary {display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:6px;list-style:none;cursor:pointer;font-size:12px;}
+.sidebar-command-submenu > summary::-webkit-details-marker {display:none;}
+.sidebar-command-submenu > summary > svg {width:15px;height:15px;color:#85858f;}
+.sidebar-command-submenu > summary > span {margin-left:auto;color:#8b8b94;}
+.sidebar-command-submenu[open] > summary > span {transform:rotate(90deg);}
+.sidebar-command-submenu > summary:hover {background:#f3f3f5;}
+.sidebar-command-submenu > div {margin:2px 5px 5px 16px;padding:4px;border-left:1px solid #e7e7ec;max-height:180px;overflow:auto;}
+.sidebar-command-submenu small {display:block;padding:8px;color:#92929c;font-size:11px;line-height:1.6;}
+.sidebar-command-surface > hr {margin:5px 4px;border:0;border-top:1px solid #ededf1;}
+.sidebar-command-surface > .is-danger {color:#cf4747;}

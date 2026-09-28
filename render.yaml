@@ -4,13 +4,17 @@ services:
     runtime: node
     repo: https://github.com/lazyyz1/xsj-content-center
     region: singapore
-    branch: feat/production-readiness-v1b
+    branch: feat/web-integration-release
     autoDeployTrigger: commit
     buildCommand: pnpm install --frozen-lockfile && pnpm exec turbo build
-    preDeployCommand: pnpm db:migrate
+    preDeployCommand: pnpm --filter @content-center/db db:migrate
     startCommand: pnpm --filter @content-center/web start
     healthCheckPath: /login
     envVars:
+      - key: EXPERIENCE_LIMITS_ENABLED
+        value: "true"
+      - key: EXPERIENCE_SITE_ID
+        value: xsj-web-experience
       - key: NODE_ENV
         value: production
       - key: STORAGE_DRIVER
@@ -44,8 +48,9 @@ services:
           property: connectionString
       - key: AUTH_SECRET
         generateValue: true
+      # Supply a stable 32-byte Base64 key; preserve it across deploys.
       - key: INTEGRATION_ENCRYPTION_KEY
-        generateValue: true
+        sync: false
       - key: ALLOW_PUBLIC_SIGNUP
         value: "false"
       - key: NEXT_PUBLIC_ALLOW_PUBLIC_SIGNUP
@@ -60,11 +65,15 @@ services:
     runtime: node
     repo: https://github.com/lazyyz1/xsj-content-center
     region: singapore
-    branch: feat/production-readiness-v1b
+    branch: feat/web-integration-release
     autoDeployTrigger: commit
     buildCommand: pnpm install --frozen-lockfile && pnpm --filter @content-center/worker build
     startCommand: pnpm --filter @content-center/worker start
     envVars:
+      - key: EXPERIENCE_LIMITS_ENABLED
+        value: "true"
+      - key: EXPERIENCE_SITE_ID
+        value: xsj-web-experience
       - key: NODE_ENV
         value: production
       - key: STORAGE_DRIVER

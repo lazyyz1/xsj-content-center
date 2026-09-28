@@ -66,6 +66,8 @@ export type BenchmarkCandidateDTO = {
   materialDistillationVersion: number | null;
   ready: boolean;
   playbookReady: boolean;
+  hasTranscript?: boolean;
+  contentType?: "VIDEO" | "IMAGE" | "ARTICLE" | "UNKNOWN";
 };
 
 type BenchmarkStudySampleDTO = {
@@ -80,6 +82,7 @@ type BenchmarkStudySampleDTO = {
 
 export type BenchmarkStudyDTO = {
   id: string;
+  collectionRunId: string | null;
   benchmarkAccountId: string;
   benchmarkAccountName: string;
   version: number;
@@ -159,12 +162,21 @@ async function assertStudyWriter(workspaceId: string, userId: string) {
   if (!member || member.role === "VIEWER") throw new BenchmarkStudyError("BENCHMARK_FORBIDDEN", "当前权限不能发起账号研究。");
 }
 
+async function validateStudyCollectionRun(tx: Prisma.TransactionClient, input: { workspaceId: string; benchmarkAccountId: string; collectionRunId?: string }, snapshotIds: string[]) {
+  if (!input.collectionRunId) return null;
+  const run = await tx.benchmarkCollectionRun.findFirst({ where: { id: input.collectionRunId, workspaceId: input.workspaceId, benchmarkAccountId: input.benchmarkAccountId, status: { in: ["COMPLETED", "PARTIAL"] } }, select: { id: true } });
+  if (!run) throw new BenchmarkStudyError("BENCHMARK_INVALID_SAMPLES", "所选批次不可用，请刷新后重试。");
+  const count = await tx.benchmarkCollectionRunItem.count({ where: { collectionRunId: run.id, snapshotId: { in: snapshotIds }, inRange: true } });
+  if (count !== snapshotIds.length) throw new BenchmarkStudyError("BENCHMARK_INVALID_SAMPLES", "研究样本不属于所选采集批次。");
+  return run.id;
+}
+
 export async function listBenchmarkCandidates(input: { workspaceId: string; benchmarkAccountId: string }) {
   const benchmark = await account(input.workspaceId, input.benchmarkAccountId);
   const snapshots = await db.benchmarkContentSnapshot.findMany({
     where: { workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id },
     orderBy: [{ observedAt: "desc" }, { publishedAt: "desc" }],
-    take: 100,
+    take: 500,
   });
   if (!snapshots.length) return [];
   const sources = await db.sourceItem.findMany({
@@ -173,9 +185,9 @@ export async function listBenchmarkCandidates(input: { workspaceId: string; benc
       id: true,
       sourcePlatform: true,
       externalId: true,
-      transcript: { select: { fullText: true } },
+      transcript: { select: { fullText: true, updatedAt: true } },
       materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { id: true, version: true, understanding: true } },
-      materialDistillations: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 20, select: { id: true, version: true, schemaVersion: true, output: true } },
+      materialDistillations: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 20, select: { id: true, version: true, schemaVersion: true, output: true, transcriptUpdatedAtAtDistillation: true } },
     },
   });
   const sourceMap = new Map(sources.map((source) => [key(source.sourcePlatform, source.externalId ?? ""), source]));
@@ -184,10 +196,15 @@ export async function listBenchmarkCandidates(input: { workspaceId: string; benc
     const analysis = source?.materialAnalyses[0];
     const parsedAnalysis = analysis ? materialAnalysisOutputSchema.safeParse(analysis.understanding) : null;
     const ready = Boolean(parsedAnalysis?.success && "expression" in parsedAnalysis.data);
-    const distillation = source?.materialDistillations.find((item) => traceableDistillation(item));
+    const distillation = source?.materialDistillations.find((item) => item.transcriptUpdatedAtAtDistillation.getTime() === source.transcript?.updatedAt.getTime() && traceableDistillation(item));
     const playbookReady = Boolean(source?.transcript?.fullText.trim() && distillation);
     return {
       id: snapshot.id,
+      contentType: (() => {
+        const metadata = snapshot.metadata as { contentType?: unknown } | null;
+        const value = metadata?.contentType;
+        return value === "VIDEO" || value === "IMAGE" || value === "ARTICLE" ? value : "UNKNOWN";
+      })(),
       externalId: snapshot.externalId,
       title: snapshot.title,
       url: snapshot.url,
@@ -201,6 +218,7 @@ export async function listBenchmarkCandidates(input: { workspaceId: string; benc
       materialDistillationVersion: playbookReady ? distillation?.version ?? null : null,
       ready,
       playbookReady,
+      hasTranscript: Boolean(source?.transcript?.fullText.trim()),
     };
   });
 }
@@ -217,6 +235,7 @@ function toDTO(row: StudyRow): BenchmarkStudyDTO {
   const locks = new Map(stored.locks.map((item) => [item.sampleId, item]));
   return {
     id: row.id,
+    collectionRunId: row.collectionRunId,
     benchmarkAccountId: row.benchmarkAccountId,
     benchmarkAccountName: row.benchmarkAccount.name,
     version: row.version,
@@ -257,7 +276,7 @@ export async function getBenchmarkStudy(input: { workspaceId: string; benchmarkA
   return toDTO(result);
 }
 
-export async function createBenchmarkStudy(input: { workspaceId: string; benchmarkAccountId: string; userId: string; sampleIds: string[] }) {
+export async function createBenchmarkStudy(input: { workspaceId: string; benchmarkAccountId: string; userId: string; sampleIds: string[]; collectionRunId?: string }) {
   await assertStudyWriter(input.workspaceId, input.userId);
   const parsed = createBenchmarkStudySchema.safeParse({ sampleIds: input.sampleIds });
   if (!parsed.success) throw new BenchmarkStudyError("BENCHMARK_INVALID_SAMPLES", "请选择 1–10 条不重复的代表内容。");
@@ -269,6 +288,7 @@ export async function createBenchmarkStudy(input: { workspaceId: string; benchma
       if (processing) throw new BenchmarkStudyError("BENCHMARK_STUDY_IN_PROGRESS", "这个账号已有一项研究正在进行，请稍候。 ");
       const snapshots = await tx.benchmarkContentSnapshot.findMany({ where: { id: { in: parsed.data.sampleIds }, workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id }, select: { id: true, platform: true, externalId: true } });
       if (snapshots.length !== parsed.data.sampleIds.length) throw new BenchmarkStudyError("BENCHMARK_INVALID_SAMPLES", "代表内容已变化，请刷新后重新选择。");
+      const collectionRunId = await validateStudyCollectionRun(tx, { ...input, benchmarkAccountId: benchmark.id }, snapshots.map(({ id }) => id));
       const sourceItems = await tx.sourceItem.findMany({ where: { workspaceId: input.workspaceId, OR: snapshots.map((snapshot) => ({ sourcePlatform: snapshot.platform, externalId: snapshot.externalId })) }, select: { id: true, sourcePlatform: true, externalId: true } });
       const sourceMap = new Map(sourceItems.map((source) => [key(source.sourcePlatform, source.externalId ?? ""), source]));
       const candidates = snapshots.map((snapshot) => ({ snapshot, source: sourceMap.get(key(snapshot.platform, snapshot.externalId)) })).filter((item): item is { snapshot: typeof snapshots[number]; source: typeof sourceItems[number] } => Boolean(item.source));
@@ -282,7 +302,7 @@ export async function createBenchmarkStudy(input: { workspaceId: string; benchma
         return !parsed?.success || !("expression" in parsed.data);
       })) throw new BenchmarkStudyError("BENCHMARK_SAMPLE_NOT_READY", "有代表内容还没有完成整理，请先去内容库处理后再试。");
       const previous = await tx.benchmarkStudy.findFirst({ where: { benchmarkAccountId: benchmark.id }, orderBy: { version: "desc" }, select: { version: true } });
-      const study = await tx.benchmarkStudy.create({ data: { workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id, createdById: input.userId, version: (previous?.version ?? 0) + 1, status: "PROCESSING", sampleCount: candidates.length, insufficientSamples: candidates.length < 5, samples: { create: candidates.map((item) => ({ sourceItemId: item.source.id, materialAnalysisId: latest.get(item.source.id)!.id, snapshotId: item.snapshot.id })) } } });
+      const study = await tx.benchmarkStudy.create({ data: { workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id, collectionRunId, createdById: input.userId, version: (previous?.version ?? 0) + 1, status: "PROCESSING", sampleCount: candidates.length, insufficientSamples: candidates.length < 5, samples: { create: candidates.map((item) => ({ sourceItemId: item.source.id, materialAnalysisId: latest.get(item.source.id)!.id, snapshotId: item.snapshot.id })) } } });
       await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "benchmark_study.created", resourceType: "benchmark_study", resourceId: study.id, metadata: json({ benchmarkAccountId: benchmark.id, sampleCount: candidates.length, insufficientSamples: candidates.length < 5 }) } });
       return { id: study.id, maxAttempts: 3 };
     }, { isolationLevel: "Serializable" });
@@ -301,7 +321,7 @@ export async function createBenchmarkStudy(input: { workspaceId: string; benchma
   return getBenchmarkStudy({ workspaceId: input.workspaceId, benchmarkAccountId: input.benchmarkAccountId, studyId: created.id });
 }
 
-export async function createBenchmarkPlaybookStudy(input: { workspaceId: string; benchmarkAccountId: string; userId: string; sampleIds: string[] }) {
+export async function createBenchmarkPlaybookStudy(input: { workspaceId: string; benchmarkAccountId: string; userId: string; sampleIds: string[]; collectionRunId?: string }) {
   await assertStudyWriter(input.workspaceId, input.userId);
   const parsed = createBenchmarkPlaybookStudySchema.safeParse({ sampleIds: input.sampleIds });
   if (!parsed.success) throw new BenchmarkStudyError("BENCHMARK_INVALID_SAMPLES", "请选择 3–10 条不重复的代表内容。");
@@ -313,6 +333,7 @@ export async function createBenchmarkPlaybookStudy(input: { workspaceId: string;
       if (processing) throw new BenchmarkStudyError("BENCHMARK_STUDY_IN_PROGRESS", "这个账号已有一项研究正在进行，请稍候。");
       const snapshots = await tx.benchmarkContentSnapshot.findMany({ where: { id: { in: parsed.data.sampleIds }, workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id }, select: { id: true, platform: true, externalId: true } });
       if (snapshots.length !== parsed.data.sampleIds.length) throw new BenchmarkStudyError("BENCHMARK_INVALID_SAMPLES", "代表内容已变化，请刷新后重新选择。");
+      const collectionRunId = await validateStudyCollectionRun(tx, { ...input, benchmarkAccountId: benchmark.id }, snapshots.map(({ id }) => id));
       const sourceItems = await tx.sourceItem.findMany({ where: { workspaceId: input.workspaceId, OR: snapshots.map((snapshot) => ({ sourcePlatform: snapshot.platform, externalId: snapshot.externalId })) }, select: { id: true, sourcePlatform: true, externalId: true, transcript: { select: { fullText: true } } } });
       const sourceMap = new Map(sourceItems.map((source) => [key(source.sourcePlatform, source.externalId ?? ""), source]));
       const candidates = snapshots.map((snapshot) => ({ snapshot, source: sourceMap.get(key(snapshot.platform, snapshot.externalId)) })).filter((item): item is { snapshot: typeof snapshots[number]; source: typeof sourceItems[number] } => Boolean(item.source));
@@ -335,7 +356,7 @@ export async function createBenchmarkPlaybookStudy(input: { workspaceId: string;
         return !distillation;
       })) throw new BenchmarkStudyError("BENCHMARK_DISTILLATION_NOT_READY", "有代表内容还没有完成精华提炼，请先提炼后再看组合打法。");
       const previous = await tx.benchmarkStudy.findFirst({ where: { benchmarkAccountId: benchmark.id }, orderBy: { version: "desc" }, select: { version: true } });
-      const study = await tx.benchmarkStudy.create({ data: { workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id, createdById: input.userId, version: (previous?.version ?? 0) + 1, status: "PROCESSING", sampleCount: candidates.length, insufficientSamples: false } });
+      const study = await tx.benchmarkStudy.create({ data: { workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id, collectionRunId, createdById: input.userId, version: (previous?.version ?? 0) + 1, status: "PROCESSING", sampleCount: candidates.length, insufficientSamples: false } });
       const samples = [];
       for (const candidate of candidates) {
         samples.push(await tx.benchmarkStudySample.create({ data: { studyId: study.id, sourceItemId: candidate.source.id, materialAnalysisId: latestAnalysis.get(candidate.source.id)?.id ?? null, snapshotId: candidate.snapshot.id } }));
@@ -363,7 +384,7 @@ export async function createBenchmarkPlaybookStudy(input: { workspaceId: string;
   return getBenchmarkStudy({ workspaceId: input.workspaceId, benchmarkAccountId: input.benchmarkAccountId, studyId: created.id });
 }
 
-export async function createBenchmarkCreatorProfileStudy(input: { workspaceId: string; benchmarkAccountId: string; userId: string; sampleIds: string[] }) {
+export async function createBenchmarkCreatorProfileStudy(input: { workspaceId: string; benchmarkAccountId: string; userId: string; sampleIds: string[]; collectionRunId?: string }) {
   await assertStudyWriter(input.workspaceId, input.userId);
   const parsed = createBenchmarkCreatorProfileStudySchema.safeParse({ sampleIds: input.sampleIds });
   if (!parsed.success) throw new BenchmarkStudyError("BENCHMARK_INVALID_SAMPLES", "请选择 5–10 条不重复的代表内容。");
@@ -375,6 +396,7 @@ export async function createBenchmarkCreatorProfileStudy(input: { workspaceId: s
       if (processing) throw new BenchmarkStudyError("BENCHMARK_STUDY_IN_PROGRESS", "这个账号已有一项研究正在进行，请稍候。");
       const snapshots = await tx.benchmarkContentSnapshot.findMany({ where: { id: { in: parsed.data.sampleIds }, workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id }, select: { id: true, platform: true, externalId: true, title: true } });
       if (snapshots.length !== parsed.data.sampleIds.length) throw new BenchmarkStudyError("BENCHMARK_INVALID_SAMPLES", "代表内容已变化，请刷新后重新选择。");
+      const collectionRunId = await validateStudyCollectionRun(tx, { ...input, benchmarkAccountId: benchmark.id }, snapshots.map(({ id }) => id));
       const sourceItems = await tx.sourceItem.findMany({ where: { workspaceId: input.workspaceId, OR: snapshots.map((snapshot) => ({ sourcePlatform: snapshot.platform, externalId: snapshot.externalId })) }, select: { id: true, sourcePlatform: true, externalId: true, transcript: { select: { fullText: true, updatedAt: true } } } });
       const sourceMap = new Map(sourceItems.map((source) => [key(source.sourcePlatform, source.externalId ?? ""), source]));
       const candidates = snapshots.map((snapshot) => ({ snapshot, source: sourceMap.get(key(snapshot.platform, snapshot.externalId)) })).filter((item): item is { snapshot: typeof snapshots[number]; source: typeof sourceItems[number] } => Boolean(item.source));
@@ -400,7 +422,7 @@ export async function createBenchmarkCreatorProfileStudy(input: { workspaceId: s
       const accountResearch = completedStudies.find(({ output }) => benchmarkAnalysisOutputSchema.safeParse(output).success) ?? null;
       const previousProfileStudy = completedStudies.find(({ output }) => benchmarkCreatorProfileOutputV4Schema.safeParse(output).success || benchmarkCreatorProfileOutputV3Schema.safeParse(output).success || benchmarkCreatorProfileOutputV2Schema.safeParse(output).success || benchmarkCreatorProfileOutputSchema.safeParse(output).success) ?? null;
       const previous = await tx.benchmarkStudy.findFirst({ where: { benchmarkAccountId: benchmark.id }, orderBy: { version: "desc" }, select: { version: true } });
-      const study = await tx.benchmarkStudy.create({ data: { workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id, createdById: input.userId, version: (previous?.version ?? 0) + 1, status: "PROCESSING", sampleCount: candidates.length, insufficientSamples: false } });
+      const study = await tx.benchmarkStudy.create({ data: { workspaceId: input.workspaceId, benchmarkAccountId: benchmark.id, collectionRunId, createdById: input.userId, version: (previous?.version ?? 0) + 1, status: "PROCESSING", sampleCount: candidates.length, insufficientSamples: false } });
       const samples = [];
       for (const candidate of candidates) samples.push(await tx.benchmarkStudySample.create({ data: { studyId: study.id, sourceItemId: candidate.source.id, materialAnalysisId: latestAnalysis.get(candidate.source.id)?.id ?? null, snapshotId: candidate.snapshot.id } }));
       const manifest = benchmarkCreatorProfileInputV4Schema.parse({

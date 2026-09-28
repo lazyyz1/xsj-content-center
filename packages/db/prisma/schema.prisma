@@ -20,6 +20,7 @@ enum SystemRole {
 }
 
 enum IntegrationProvider {
+  WEB_SEARCH
   REDFOX
   DOUBAO_ASR
   TRANSCRIPTION
@@ -473,6 +474,7 @@ model User {
 }
 
 model Session {
+  activeWorkspaceId String?
   id        String   @id @default(cuid())
   expiresAt DateTime
   token     String   @unique
@@ -519,6 +521,7 @@ model Verification {
 }
 
 model Workspace {
+  disabledAt DateTime?
   researchSessions ResearchSession[]
   researchRuns ResearchRun[]
   researchObjectPreferences ResearchObjectPreference[]
@@ -580,6 +583,7 @@ model Workspace {
 }
 
 model WorkspaceMember {
+  disabledAt DateTime?
   id          String        @id @default(cuid())
   workspaceId String
   userId      String
@@ -850,6 +854,9 @@ model ContentProject {
   id                  String               @id @default(cuid())
   workspaceId         String
   createdById         String
+  clientRequestId          String?
+  creationModel            Json?
+  creationRequestHash      String?
   creatorProfileId    String?
   title               String
   description         String?
@@ -890,6 +897,7 @@ model ContentProject {
   canvasGenerateRuns     CanvasGenerateRun[]
 
   @@index([workspaceId, createdAt])
+  @@unique([workspaceId, createdById, clientRequestId])
   @@index([workspaceId, status])
   @@index([createdById])
   @@index([creatorProfileId])

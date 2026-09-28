@@ -1,3 +1,4 @@
+import { providerFetch } from "../provider-fetch";
 import { RedFoxError } from "./errors";
 import { RedFoxApiResponseSchema, RedFoxParseDataSchema, type RedFoxParseData } from "./schemas";
 
@@ -33,6 +34,7 @@ function apiError(
   if (code === "3106" || code === "3107" || code === "401" || code === "4001" || httpStatus === 401 || httpStatus === 403) {
     return new RedFoxError("REDFOX_AUTH_FAILED", "RedFox API Key 无效、缺失或已失效。", false, httpStatus, code, providerRequestId);
   }
+  if (code === "3201") return new RedFoxError("REDFOX_QUOTA_EXCEEDED", "RedFox 积分余额不足，请充值或在设置中更换有余额的 API Key。", false, 402, code, providerRequestId);
   if (code === "429" || httpStatus === 429) {
     return new RedFoxError("REDFOX_RATE_LIMITED", "RedFox 请求频率已达上限，请稍后重试。", true, 429, code, providerRequestId);
   }
@@ -68,7 +70,7 @@ export class RedFoxClient {
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? REDFOX_DEFAULT_TIMEOUT_MS);
     let response: Response;
     try {
-      response = await (this.config.fetch ?? fetch)(
+      response = await (this.config.fetch ?? providerFetch)(
         (() => {
           const url = new URL(input.path, this.config.baseUrl ?? REDFOX_DEFAULT_BASE_URL);
           if (input.method === "GET") {

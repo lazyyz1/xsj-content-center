@@ -1,3 +1,4 @@
+import { providerFetch } from "../provider-fetch";
 import { z, type ZodIssue, type ZodType } from "zod";
 import type { LLMProvider } from "../contracts";
 import type { LLMContentBlock, LLMGenerateInput, LLMStreamOptions, LLMTextResult, ProviderResult } from "../types";
@@ -138,7 +139,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
 
   constructor(config: OpenAICompatibleConfig, options: OpenAICompatibleOptions = {}) {
     this.config = openAICompatibleConfigSchema.parse(config);
-    this.fetcher = options.fetch ?? fetch;
+    this.fetcher = options.fetch ?? providerFetch;
     this.timeoutMs = options.timeoutMs ?? resolveRequestCapabilities(this.config).timeoutMs;
     this.maxRetries = options.maxRetries ?? 1;
   }

@@ -1,3 +1,4 @@
+import { reserveExperienceUsage } from "./experience-limits";
 import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -222,6 +223,7 @@ export async function requestSourceTranscription(input: {
       orderBy: { createdAt: "desc" },
     });
     if (active) throw new TranscriptionAlreadyRunningError(active.id);
+    await reserveExperienceUsage({ workspaceId: input.workspaceId, userId: input.requestedById, operation: "TRANSCRIBE" });
     const created = await tx.ingestJob.create({
       data: {
         workspaceId: input.workspaceId,

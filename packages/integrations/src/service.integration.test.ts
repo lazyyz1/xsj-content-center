@@ -133,12 +133,13 @@ describe("IntegrationService integration", () => {
     });
   });
 
-  it("preserves the RedFox secret when only Base URL changes", async () => {
+  it("requires an explicit key when the RedFox destination changes", async () => {
+    await expect(service.saveIntegrationConfig({ workspaceId, userId, provider: "REDFOX", config: { baseUrl: "https://changed.example.invalid" } })).rejects.toMatchObject({ code: "INTEGRATION_SECRET_REQUIRED" });
     const result = await service.saveIntegrationConfig({
       workspaceId,
       userId,
       provider: "REDFOX",
-      config: { baseUrl: "https://changed.example.invalid" },
+      config: { baseUrl: "https://changed.example.invalid", apiKey: plaintext },
     });
     expect(result).toMatchObject({ publicConfig: { baseUrl: "https://changed.example.invalid" }, lastFour: plaintext.slice(-4) });
     await expect(service.getDecryptedIntegrationConfig(workspaceId, "REDFOX")).resolves.toEqual({

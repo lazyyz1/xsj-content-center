@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./experience-limits": "./src/experience-limits.ts",
     "./queue": "./src/queue.ts",
     "./integrations": "./src/integrations.ts",
     "./transcription": "./src/transcription.ts",

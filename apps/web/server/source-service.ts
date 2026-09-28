@@ -1,3 +1,4 @@
+import { reserveExperienceUsage } from "@content-center/worker/experience-limits";
 import "server-only";
 
 import { detectSourcePlatform, normalizeSourceUrl } from "@content-center/core";
@@ -40,6 +41,7 @@ export async function createSourceAndJob(input: {
   workspaceId: string;
   userId: string;
   source: CreateSourceInput;
+  autoTranscribe?: boolean;
 }) {
   const redFoxSource = input.source.kind === "DOUYIN" || input.source.kind === "REDFOX";
   if (redFoxSource) {
@@ -78,6 +80,7 @@ export async function createSourceAndJob(input: {
       ? input.source.description?.trim() || null
       : null;
 
+  if (redFoxSource) { const release = await reserveExperienceUsage({ ...input, operation: "SEARCH" }); await release(); }
   const created = await db.$transaction(async (tx) => {
     const sourceItem = await tx.sourceItem.create({
       data: {
@@ -110,6 +113,7 @@ export async function createSourceAndJob(input: {
         providerMode,
         status: "QUEUED",
         maxAttempts: 3,
+        metadata: input.autoTranscribe ? { autoTranscribe: true } : undefined,
       },
     });
     await tx.auditLog.create({

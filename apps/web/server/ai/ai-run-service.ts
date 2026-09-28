@@ -1,3 +1,4 @@
+import { reserveExperienceUsage, ExperienceLimitError } from "@content-center/worker/experience-limits";
 import "server-only";
 
 import { db, type Prisma } from "@content-center/db";
@@ -29,6 +30,7 @@ function publicError(error: unknown, runtime: LLMRuntime) {
       return new LLMError("KIMI_MODEL_UNAVAILABLE", "当前 Kimi 2.6 模型配置不可用，请检查 Model ID。", false, error.details);
     }
   }
+  if (error instanceof ExperienceLimitError) return new LLMError("LLM_RATE_LIMITED", error.message, true);
   return error instanceof LLMError ? error : new LLMError("LLM_GENERATION_FAILED", "AI 生成失败，请重试。", false);
 }
 
@@ -100,7 +102,8 @@ export async function executeStructuredAIRun<T>(input: {
   const requestStartedAt = Date.now();
   try {
     await input.onRunCreated?.(run.id);
-    const result = await input.generate(runtime.provider);
+    const release = await reserveExperienceUsage({ ...input, operation: "AI" });
+    const result = await (async () => { try { return await input.generate(runtime.provider); } finally { await release(); } })();
     const usage = result.data.usage;
     const latencyMs = Date.now() - requestStartedAt;
     await db.$transaction([

@@ -1,3 +1,4 @@
+import { db } from "@content-center/db";
 import { createServer } from "node:http";
 import { createContentIngestWorker, createHealthWorker, createTranscribeSourceWorker } from "./queue";
 import { cleanupExpiredAsrAudio } from "./transcription";
@@ -23,6 +24,18 @@ healthServer.listen(healthPort, "127.0.0.1");
 const worker = createHealthWorker();
 const ingestWorker = createContentIngestWorker();
 const transcriptionWorker = createTranscribeSourceWorker();
+// Reflect terminal queue failures (including lost/stalled workers) in the persisted UI state.
+for (const processor of [ingestWorker, transcriptionWorker]) processor.on("failed", (job, error) => {
+  if (!job || !("jobId" in job.data)) return;
+  const terminal = job.attemptsMade >= (job.opts.attempts || 1) || /stalled|unrecoverable/iu.test(error.message) || error.name === "UnrecoverableError";
+  if (!terminal) return;
+  const data = job.data;
+  void db.$transaction(async tx => {
+    const changed = await tx.ingestJob.updateMany({ where: { id: data.jobId, workspaceId: data.workspaceId, status: { in: ["QUEUED","RUNNING"] } }, data: { status: "FAILED", errorCode: "WORKER_INTERRUPTED", errorMessage: "后台任务中断，请重试。已保存资料不会丢失。", finishedAt: new Date() } });
+    if (changed.count && job.name === "CONTENT_INGEST") await tx.sourceItem.updateMany({where:{id:data.sourceItemId,workspaceId:data.workspaceId,status:{in:["PENDING","PROCESSING"]}},data:{status:"FAILED"}});
+    if (changed.count) await tx.sourceAsset.updateMany({where:{sourceItemId:data.sourceItemId,workspaceId:data.workspaceId,status:"DOWNLOADING"},data:{status:"FAILED"}});
+  }).catch(() => console.warn("JOB_FAILURE_STATE_UPDATE_FAILED"));
+});
 await Promise.all([worker.waitUntilReady(), ingestWorker.waitUntilReady(), transcriptionWorker.waitUntilReady()]);
 ready = true;
 console.info("WORKER_CONNECTED");

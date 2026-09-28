@@ -32,7 +32,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const context = await getApiWorkspaceContext();
   if (!context) return apiError("UNAUTHORIZED", 401);
   if (context.role === "VIEWER") return apiError("FORBIDDEN", 403, "当前权限不能发起账号研究。");
-  const body = await request.json().catch(() => null) as { kind?: unknown; sampleIds?: unknown; snapshotIds?: unknown; contentSnapshotIds?: unknown } | null;
+  const body = await request.json().catch(() => null) as { kind?: unknown; sampleIds?: unknown; snapshotIds?: unknown; contentSnapshotIds?: unknown; collectionRunId?: unknown } | null;
+  if (body?.collectionRunId !== undefined && typeof body.collectionRunId !== "string") return apiError("BENCHMARK_INVALID_SAMPLES", 400, "采集批次无效。");
   const creatorProfile = body?.kind === "CREATOR_PROFILE";
   const playbooks = body?.kind === "PLAYBOOKS";
   const schema = creatorProfile ? createBenchmarkCreatorProfileStudySchema : playbooks ? createBenchmarkPlaybookStudySchema : createBenchmarkStudySchema;
@@ -41,10 +42,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     const { id } = await params;
     const study = creatorProfile
-      ? await createBenchmarkCreatorProfileStudy({ workspaceId: context.workspace.id, benchmarkAccountId: id, userId: context.session.user.id, sampleIds: parsed.data.sampleIds })
+      ? await createBenchmarkCreatorProfileStudy({ workspaceId: context.workspace.id, benchmarkAccountId: id, userId: context.session.user.id, sampleIds: parsed.data.sampleIds, collectionRunId: body?.collectionRunId as string | undefined })
       : playbooks
-      ? await createBenchmarkPlaybookStudy({ workspaceId: context.workspace.id, benchmarkAccountId: id, userId: context.session.user.id, sampleIds: parsed.data.sampleIds })
-      : await createBenchmarkStudy({ workspaceId: context.workspace.id, benchmarkAccountId: id, userId: context.session.user.id, sampleIds: parsed.data.sampleIds });
+      ? await createBenchmarkPlaybookStudy({ workspaceId: context.workspace.id, benchmarkAccountId: id, userId: context.session.user.id, sampleIds: parsed.data.sampleIds, collectionRunId: body?.collectionRunId as string | undefined })
+      : await createBenchmarkStudy({ workspaceId: context.workspace.id, benchmarkAccountId: id, userId: context.session.user.id, sampleIds: parsed.data.sampleIds, collectionRunId: body?.collectionRunId as string | undefined });
     return NextResponse.json(study, { status: 202 });
   } catch (error) {
     return studyApiError(error) ?? apiError("BENCHMARK_STUDY_CREATE_FAILED", 500, "账号研究暂时无法开始。");

@@ -35,10 +35,11 @@ export function findWorkspaceForUser(
   return prisma.workspace.findFirst({
     where: {
       id: input.workspaceId,
-      members: { some: { userId: input.userId } },
+      disabledAt: null,
+      members: { some: { userId: input.userId, disabledAt: null, user: { disabledAt: null } } },
     },
     include: {
-      members: { where: { userId: input.userId }, take: 1 },
+      members: { where: { userId: input.userId, disabledAt: null }, take: 1 },
     },
   });
 }

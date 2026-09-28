@@ -183,7 +183,7 @@ export async function getSourceWorkspaceModel(input: { workspaceId: string; user
   return {
     detail: {
       header: { id: source.id, title, author, publishTime: external?.publishedAt ?? null, typeLabel: typeLabels[source.sourceType], platformLabel: sourcePlatformLabel, durationLabel: durationLabel(durationMs), sourceLabel: sourcePlatformLabel, originalUrl },
-      preview: { type: source.sourceType, playable, mediaUrl: primaryAsset?.url ?? null, coverUrl: cover, documentUrl: primaryAsset?.url ?? null, rawTextPreview: text?.slice(0, 800) ?? null, unavailableReason: source.status === "FAILED" ? "资料读取失败，可以从更多操作中重试。" : playable || cover || text ? null : "原始资料暂时没有可用的预览资源。" },
+      preview: { type: source.sourceType, playable, mediaUrl: primaryAsset?.url ?? null, coverUrl: cover, documentUrl: primaryAsset?.url ?? null, rawTextPreview: text?.slice(0, 800) ?? null, unavailableReason: source.status === "FAILED" ? "视频或原件下载失败，尚不能播放。请查看资料信息中的失败原因并重试。" : mediaSource && !primaryAsset?.url && !busy ? (text ? "已保存文字内容，但没有保存原音视频文件。可阅读文字，或打开原始来源查看。" : "这条资料尚未保存原音视频文件，当前没有可播放的内容。") : playable || cover || text ? null : "原始资料暂时没有可用的预览资源。" },
       transcript: { state: transcriptionState, text, segments: segments(source.transcript?.segments) },
       tags: source.tags.map(({ tag }) => ({ id: tag.id, name: tag.name })),
     },

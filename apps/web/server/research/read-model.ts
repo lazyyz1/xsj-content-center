@@ -3,6 +3,8 @@ import { db } from "@content-center/db";
 import type { ResearchBlock, ResearchCoverage } from "@content-center/core";
 import { personalSessionWhere, researchMember, ResearchError, type ResearchActor } from "./access";
 import { researchBlocksSchema, researchScopeSchema } from "./contracts";
+import { parseAccountResearchState } from "./account-research-contract";
+import { buildResearchSharePreview } from "./sharing";
 import type { ResearchSessionView } from "./service";
 
 export function researchSessionView(session: ResearchSessionView) {
@@ -28,15 +30,36 @@ export async function researchResultLibrary(actor: ResearchActor, input: { q?: s
   const before = date && !Number.isNaN(date.getTime()) ? date : undefined;
   if (input.library === "workspace") {
     const where = { workspaceId: actor.workspaceId, status: "COMPLETED" as const, ...(input.accountId ? { benchmarkAccountId: input.accountId } : {}), ...(query ? { benchmarkAccount: { name: { contains: query, mode: "insensitive" as const } } } : {}), ...(before ? { createdAt: { lte: before } } : {}) };
-    const [rows, count] = await Promise.all([db.benchmarkStudy.findMany({ where, select: { id: true, version: true, createdAt: true, sampleCount: true, benchmarkAccount: { select: { id: true, name: true } } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: (page - 1) * take, take }), db.benchmarkStudy.count({ where })]);
-    return { items: rows.map(row => ({ id: row.id, kind: "study", title: `${row.benchmarkAccount.name} · 历史研究 ${row.version}`, date: row.createdAt, label: "工作空间历史", context: `${row.sampleCount} 条保存样本 · ${row.benchmarkAccount.name}` })), count, page, pages: Math.max(1, Math.ceil(count / take)) };
+    const [rows, count] = await Promise.all([db.benchmarkStudy.findMany({ where, select: { id: true, version: true, createdAt: true, sampleCount: true, _count: { select: { sharedArtifacts: true } }, benchmarkAccount: { select: { id: true, name: true } } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: (page - 1) * take, take }), db.benchmarkStudy.count({ where })]);
+    return { items: rows.map(row => ({ id: row.id, kind: "study", title: `${row.benchmarkAccount.name} · 历史研究 ${row.version}`, date: row.createdAt, label: "工作空间历史", context: `${row.sampleCount} 条保存样本 · ${row.benchmarkAccount.name}`, summary: null, sourceCount: null, sampleCount: row.sampleCount, sharedCount: row._count.sharedArtifacts })), count, page, pages: Math.max(1, Math.ceil(count / take)) };
   }
   const scopeFilters = [...(input.accountId ? [{ inputScope: { path: ["benchmarkAccountIds"], array_contains: [input.accountId] } }] : []), ...(input.trendKey ? [{ inputScope: { path: ["trendKeys"], array_contains: [input.trendKey] } }] : [])];
   const where = { workspaceId: actor.workspaceId, requestedById: actor.userId, session: { ...personalSessionWhere(actor), ...(input.projectId ? { projectId: input.projectId } : {}), ...(["DIRECT", "BREAKDOWN", "OPPORTUNITY", "BENCHMARK"].includes(input.type ?? "") ? { entryTemplate: input.type } : {}) }, status: "COMPLETED" as const, savedAt: { not: null, ...(before ? { lte: before } : {}) }, ...(scopeFilters.length ? { AND: scopeFilters } : {}), ...(query ? { OR: [{ question: { contains: query, mode: "insensitive" as const } }, { resultTitle: { contains: query, mode: "insensitive" as const } }] } : {}) };
-  const [rows, count] = await Promise.all([db.researchRun.findMany({ where, select: { id: true, question: true, resultTitle: true, savedAt: true, version: true, session: { select: { entryTemplate: true, project: { select: { title: true } } } } }, orderBy: [{ savedAt: "desc" }, { id: "desc" }], skip: (page - 1) * take, take }), db.researchRun.count({ where })]);
-  return { items: rows.map(row => ({ id: row.id, kind: "run", title: row.resultTitle || row.question, date: row.savedAt!, label: "私人研究", context: `第 ${row.version} 次研究${row.session.project ? ` · 项目背景：${row.session.project.title}` : ""}` })), count, page, pages: Math.max(1, Math.ceil(count / take)) };
+  const [rows, count] = await Promise.all([db.researchRun.findMany({ where, select: { id: true, question: true, resultTitle: true, savedAt: true, version: true, blocks: true, sourceRefs: true, coverage: true, _count: { select: { sharedArtifacts: true } }, session: { select: { entryTemplate: true, project: { select: { title: true } } } } }, orderBy: [{ savedAt: "desc" }, { id: "desc" }], skip: (page - 1) * take, take }), db.researchRun.count({ where })]);
+  return { items: rows.map(row => {
+    const parsed = researchBlocksSchema.safeParse(row.blocks);
+    const conclusion = parsed.success ? parsed.data.find(block => block.type === "text" && block.provenance === "AI_INTERPRETATION") : undefined;
+    const sources = Array.isArray(row.sourceRefs) ? row.sourceRefs : [];
+    const externalSources = sources.filter(source => source && typeof source === "object" && "kind" in source && ["MATERIAL", "BENCHMARK_ACCOUNT", "BENCHMARK_WORK", "TREND"].includes(String(source.kind)));
+    const coverage = row.coverage && typeof row.coverage === "object" && !Array.isArray(row.coverage) ? row.coverage : {};
+    return { id: row.id, kind: "run", title: row.resultTitle || row.question, date: row.savedAt!, label: "私人研究", context: `${row.session.project ? `项目背景：${row.session.project.title}` : "个人研究"} · 第 ${row.version} 次提问`, summary: conclusion?.type === "text" ? conclusion.text.replace(/\s+/g, " ").slice(0, 160) : null, sourceCount: externalSources.length, sampleCount: typeof coverage.aiSampleCount === "number" ? coverage.aiSampleCount : null, sharedCount: row._count.sharedArtifacts };
+  }), count, page, pages: Math.max(1, Math.ceil(count / take)) };
 }
 export async function researchProjectOptions(actor: ResearchActor) {
   await researchMember(actor);
   return db.contentProject.findMany({ where: { workspaceId: actor.workspaceId, status: { not: "ARCHIVED" } }, select: { id: true, title: true }, orderBy: { updatedAt: "desc" }, take: 100 });
+}
+
+/** Stable, owner-scoped saved result input for future consumers. Project sharing remains explicit. */
+export async function getResearchReadableContent(actor: ResearchActor, runId: string) {
+  const result = await getResearchResult(actor, runId);
+  const state = parseAccountResearchState(result.coverage);
+  const title = result.resultTitle || result.question;
+  const content = buildResearchSharePreview(title, result.blocks);
+  return { id: result.id, sessionId: result.sessionId, title, version: result.version,
+    savedAt: result.savedAt!.toISOString(), text: content.body, blocks: result.blocks,
+    sources: result.blocks.flatMap(block => block.type === "sources" ? block.refs : []),
+    evidenceFingerprint: state?.evidence.fingerprint ?? null,
+    evidenceCapturedAt: state?.evidence.capturedAt ?? null,
+    contentOrigin: "AI_RESEARCH" as const, href: `/research/results/run/${result.id}` };
 }

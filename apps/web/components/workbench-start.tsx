@@ -1,71 +1,111 @@
 "use client";
 
-import { ArrowRight, Clock3, FolderOpen, Layers3, Lightbulb, Loader2, Send, Sparkles } from "lucide-react";
+import { ArrowRight, RefreshCw, Search, Zap } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import "./home-reference.css";
+import { HomeComposer, type ComposerSelection } from "./home-composer";
 
-type RecentProject = { id: string; title: string; updatedAt: string };
+import { creationPrompts, creationPromptText } from "@/lib/creation-prompts";
+const categories = ["推荐", "抖音", "视频号", "朋友圈", "小红书"];
+type SkillCard = { id: string; title: string; summary: string; scenarios: string[]; enabled: boolean };
 
-export function WorkbenchStart({ projects, canCreate }: { projects: RecentProject[]; canCreate: boolean }) {
-  const router = useRouter();
+export function WorkbenchStart({ canCreate, draftKey, initialSkillId }: { canCreate: boolean; draftKey: string; initialSkillId?: string }) {
+  const homeRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const inFlight = useRef(false);
   const [idea, setIdea] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-
-  async function start() {
-    const value = idea.trim();
-    if (!value || !canCreate || inFlight.current) {
-      inputRef.current?.focus();
-      return;
-    }
-    inFlight.current = true;
-    setBusy(true);
-    setError("");
+  const [tab, setTab] = useState<"inspiration" | "skills">("inspiration");
+  const [category, setCategory] = useState("推荐");
+  const [offset, setOffset] = useState(0);
+  const [previousIdea, setPreviousIdea] = useState<string | null>(null);
+  const [appliedPrompt, setAppliedPrompt] = useState("");
+  const [skills, setSkills] = useState<SkillCard[]>([]);
+  const [skillState, setSkillState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [skillSearch, setSkillSearch] = useState("");
+  const [reload, setReload] = useState(0);
+  const creationRequestId = useRef<string | null>(null);
+  const creationPayload = useRef("");
+  useEffect(() => {
+    if (tab !== "skills") return;
+    let active = true;
+    setSkillState("loading");
+    void fetch("/api/methods").then(async (response) => {
+      if (!response.ok) throw new Error("读取失败");
+      return response.json();
+    }).then((data) => {
+      if (!active) return;
+      const rows = Array.isArray(data) ? data : data.items ?? data.methods ?? [];
+      setSkills(rows.map((item: { id: string; status: string; current: { title: string; steps: string[]; applicableScenarios: string[] } }) => ({
+        id: item.id, title: item.current.title, summary: item.current.steps[0] || "查看使用说明",
+        scenarios: item.current.applicableScenarios, enabled: item.status !== "DISABLED",
+      })));
+      setSkillState("ready");
+    }).catch(() => { if (active) setSkillState("error"); });
+    return () => { active = false; };
+  }, [tab, reload]);
+  useEffect(() => {
     try {
-      const response = await fetch("/api/projects", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: value.slice(0, 200), description: value }),
-      });
+      setIdea(sessionStorage.getItem(draftKey) || "");
+    } catch { /* Storage may be disabled. */ }
+  }, [draftKey]);
+  function changeIdea(value: string) {
+    setIdea(value);
+    creationRequestId.current = null;
+    try { sessionStorage.setItem(draftKey, value); } catch { /* The in-memory draft remains usable. */ }
+  }
+  function usePrompt(value: string) {
+    setPreviousIdea(idea);
+    changeIdea(value);
+    requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true }));
+    window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }
+  async function start(selection: ComposerSelection) {
+    const value = idea.trim();
+    if (!value || !canCreate || inFlight.current) { inputRef.current?.focus(); return; }
+    inFlight.current = true; setBusy(true); setError("");
+    try {
+      const explicitTopic = value.match(/主题(?:是|为)\s*([^，。！？!?\n]{2,36})/u)?.[1]?.trim();
+      const title = explicitTopic && /口播|短视频|脚本/u.test(value) ? `${explicitTopic}口播`.slice(0, 40) : /口播|短视频|脚本/u.test(value) ? "口播稿创作" : value.replace(/^(?:我想|我要|帮我|请帮我)\s*/u, "").replace(/[。！？!?].*$/u, "").slice(0, 40) || "未命名工作";
+      const payloadKey = JSON.stringify({ title, description: value, ...selection });
+      if (creationPayload.current !== payloadKey) { creationPayload.current = payloadKey; creationRequestId.current = null; }
+      creationRequestId.current ??= crypto.randomUUID();
+      const response = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title, description: value, ...selection, clientRequestId: creationRequestId.current }) });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.message || result.error || "无法开始这项创作。");
-      router.push(`/dashboard?project=${result.id}`);
+      if (!response.ok) throw new Error(result.message || "无法开始这项创作，请重试。");
+      try { sessionStorage.removeItem(draftKey); sessionStorage.removeItem(`${draftKey}:sources`); sessionStorage.removeItem(`${draftKey}:composer-v2`); } catch { /* Storage may be disabled. */ }
+      window.location.assign(`/dashboard?project=${result.id}&start=1`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "无法开始这项创作。");
-      inFlight.current = false;
-      setBusy(false);
+      setError(cause instanceof Error ? cause.message : "无法开始这项创作，请重试。");
+      inFlight.current = false; setBusy(false);
     }
   }
-
-  const starts = [
-    { title: "从研究开始", description: "从真实内容里找到新的方向", href: "/discovery", icon: Lightbulb, tone: "research" },
-    { title: "从资料开始", description: "使用已有资料快速开始创作", href: "/library", icon: Layers3, tone: "assets" },
-    { title: "继续最近创作", description: "回到上一次的创作现场", href: projects.length ? "#recent-work" : "/projects", icon: Clock3, tone: "recent" },
-  ] as const;
-
-  return <div className="workbench-start">
-    <section className="workbench-start-hero" aria-labelledby="workbench-start-title">
-      <p className="workbench-start-eyebrow">用好内容，创造更大的世界</p>
-      <h1 id="workbench-start-title">今天想做什么内容？</h1>
-      <form className="workbench-start-composer" onSubmit={(event) => { event.preventDefault(); void start(); }}>
-        <label className="sr-only" htmlFor="workbench-idea">描述这次想创作的内容</label>
-        <textarea ref={inputRef} id="workbench-idea" value={idea} onChange={(event) => setIdea(event.target.value)} disabled={!canCreate || busy} maxLength={2000} rows={3} placeholder={canCreate ? "描述你的想法，比如：我想讲教培老板为什么必须真正学会 AI" : "当前权限可以查看和继续已有工作"} />
-        <footer><span>{canCreate ? "输入想法后，会开始一项创作任务" : "当前为只读权限"}</span><button type="submit" aria-label="开始创作" disabled={!canCreate || busy || !idea.trim()}>{busy ? <Loader2 size={19} className="animate-spin" /> : <Send size={18} />}</button></footer>
-        {error ? <p role="alert">{error}</p> : null}
-      </form>
+  const filtered = creationPrompts.filter(item => category === "推荐" || item.platform === category);
+  const cards = [...filtered.slice(offset % filtered.length), ...filtered.slice(0, offset % filtered.length)].slice(0, category === "推荐" ? 8 : 12);
+  return <div ref={homeRef} className="xsj-home" data-testid="reference-home">
+    <section className="xsj-hero" aria-labelledby="xsj-home-title">
+      <div className="xsj-hero-status"><i />开启你的 AI 创作之旅<ArrowRight size={14} /></div>
+      <div className="xsj-morph-layer">
+        <div className="xsj-hero-brand"><img src="/home-reference/brand-mark.png" alt="" /><div><h1 id="xsj-home-title">鑫世界工作台</h1><p>属于你的内容生成中心</p></div></div>
+        <HomeComposer initialSkillId={initialSkillId} idea={idea} onIdeaChange={changeIdea} inputRef={inputRef} canCreate={canCreate} busy={busy} draftKey={draftKey} error={error} onSubmit={(selection) => void start(selection)} />
+        {appliedPrompt ? <div className="xsj-prompt-applied" role="status">已套用「{appliedPrompt}」{previousIdea !== null ? <button type="button" disabled={busy} onClick={() => { changeIdea(previousIdea); setPreviousIdea(null); setAppliedPrompt(""); }}>撤销套用</button> : null}</div> : null}
+      </div>
+    </section>
+    <section className="xsj-explore" id="xsj-explore" aria-label="创作模板与 Skill">
+      <div className="xsj-tabs" role="tablist" aria-label="探索内容"><button role="tab" aria-selected={tab === "inspiration"} aria-controls="inspiration-panel" id="inspiration-tab" onClick={() => setTab("inspiration")}>创作模板</button><button role="tab" aria-selected={tab === "skills"} aria-controls="skills-panel" id="skills-tab" onClick={() => setTab("skills")}>Skill</button></div>
+      {tab === "inspiration" ? <div role="tabpanel" id="inspiration-panel" aria-labelledby="inspiration-tab">
+        <div className="xsj-prompt-heading"><div><h2>从你想做的内容开始</h2><p>选一个模板，提示词会填入上方输入框。补一句主题，就能开始。</p></div></div>
+        <div className="xsj-filter-row"><div className="xsj-categories">{categories.map(label => <button key={label} aria-pressed={category === label} onClick={() => { setCategory(label); setOffset(0); }}>{label}</button>)}</div>{filtered.length > 8 ? <button className="xsj-refresh" onClick={() => setOffset(value => value + 8)}><RefreshCw size={15}/>换一批</button> : null}</div>
+        <div className="xsj-prompt-grid">{cards.map(item => <button type="button" className="xsj-prompt-card" data-platform={item.platform} key={item.title} disabled={!canCreate || busy} aria-label={`使用：${item.title}`} onClick={() => { usePrompt(creationPromptText(item)); setAppliedPrompt(item.title); }}><div className="xsj-prompt-meta"><span>{item.platform}</span><small>{item.kind}</small></div><h3>{item.title}</h3><p>{item.description}</p><small className="xsj-prompt-outputs">{item.outputs}</small><span className="xsj-prompt-apply">套用提示词<ArrowRight size={15}/></span></button>)}</div>
+        <p className="xsj-reference-caption">点击只填入提示词，发送后才开始生成。可同时添加资料、选择 Skill。</p>
+      </div> : <div role="tabpanel" id="skills-panel" aria-labelledby="skills-tab">
+        <div className="xsj-skill-toolbar"><label><Search size={16} /><input aria-label="搜索 Skill" placeholder="搜索你的 Skill" value={skillSearch} onChange={(event) => setSkillSearch(event.target.value)} /></label><Link href="/library/methods">管理与导入 Skill<ArrowRight size={15} /></Link></div>
+        {skillState === "loading" ? <p className="xsj-empty" role="status">正在读取 Skill…</p> : skillState === "error" ? <div className="xsj-empty" role="alert">暂时无法读取 Skill。<button onClick={() => setReload((value) => value + 1)}>重试</button></div> : <div className="xsj-inspiration-grid">{skills.filter((skill) => [skill.title, skill.summary, ...skill.scenarios].join(" ").includes(skillSearch.trim())).map((skill) => <Link className="xsj-skill-card" href={`/library/methods/${skill.id}`} key={skill.id}><Zap /><span>{skill.enabled ? "可使用" : "已停用"}</span><h2>{skill.title}</h2><p>{skill.summary}</p><small>{skill.scenarios.slice(0, 2).join(" · ")}</small></Link>)}</div>}
+        {skillState === "ready" && !skills.length ? <div className="xsj-empty"><Zap /><h2>从第一个 Skill 开始</h2><p>把常用Skill保存下来，需要时再加入工作。</p><Link href="/library/methods">导入 Skill<ArrowRight size={15} /></Link></div> : null}
+      </div>}
     </section>
 
-    <nav className="workbench-start-actions" aria-label="开始创作的方式">
-      <button type="button" data-tone="idea" disabled={!canCreate} onClick={() => inputRef.current?.focus()}><span><Sparkles size={22} /></span><div><strong>从一个想法开始</strong><small>把灵感变成一项完整内容工作</small></div><ArrowRight size={17} /></button>
-      {starts.map(({ title, description, href, icon: Icon, tone }) => <Link key={title} href={href} data-tone={tone}><span><Icon size={22} /></span><div><strong>{title}</strong><small>{description}</small></div><ArrowRight size={17} /></Link>)}
-    </nav>
-
-    <section className="workbench-recent" id="recent-work" aria-labelledby="workbench-recent-title">
-      <header><h2 id="workbench-recent-title">最近创作</h2><Link href="/projects">查看全部 <ArrowRight size={15} /></Link></header>
-      {projects.length ? <div>{projects.slice(0, 3).map((project) => <article key={project.id}><span><FolderOpen size={20} /></span><div><h3>{project.title}</h3><p>最近更新 {project.updatedAt}</p></div><Link href={`/dashboard?project=${project.id}`}>继续创作 <ArrowRight size={14} /></Link></article>)}</div> : <div className="workbench-recent-empty"><p>还没有最近创作。输入一个想法，开始第一项创作。</p></div>}
-    </section>
   </div>;
 }

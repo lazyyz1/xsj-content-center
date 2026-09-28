@@ -1,10 +1,9 @@
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
-import { request as httpRequest } from "node:http";
-import { request as httpsRequest } from "node:https";
+import { Agent, fetch as fetchMedia } from "undici";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Transform } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { LookupFunction } from "node:net";
 import {
@@ -31,41 +30,20 @@ export type MediaFetcherOptions = {
 
 type OpenedResponse = {
   status: number;
-  headers: { location?: string; contentType?: string; contentLength?: string };
+  headers: { location?: string; contentType?: string; contentLength?: string; contentRange?: string };
   response: NodeJS.ReadableStream & { resume(): void; destroy(error?: Error): void };
 };
 
-function openResponse(url: URL, address: ResolvedAddress, timeoutMs: number): Promise<OpenedResponse> {
-  return new Promise((resolve, reject) => {
-    const requester = url.protocol === "https:" ? httpsRequest : httpRequest;
-    const lookup: LookupFunction = (_hostname, options, callback) => callback(
-      null,
-      options.all ? [{ address: address.address, family: address.family }] : address.address,
-      options.all ? undefined : address.family,
-    );
-    const request = requester(
-      url,
-      {
-        method: "GET",
-        headers: { accept: "video/*,image/*;q=0.9", "user-agent": "ContentCenterBot/0.1 (+media-ingest)" },
-        lookup,
-      },
-      (response) => {
-        resolve({
-          status: response.statusCode ?? 0,
-          headers: {
-            location: response.headers.location,
-            contentType: response.headers["content-type"],
-            contentLength: response.headers["content-length"],
-          },
-          response,
-        });
-      },
-    );
-    request.setTimeout(timeoutMs, () => request.destroy(new IngestProviderError("TIMEOUT", "媒体下载超时。", true)));
-    request.on("error", reject);
-    request.end();
-  });
+async function openResponse(url: URL, address: ResolvedAddress, timeoutMs: number): Promise<OpenedResponse> {
+  const lookup: LookupFunction = (_hostname, options, callback) => callback(null, options.all ? [{address:address.address,family:address.family}] : address.address, options.all ? undefined : address.family);
+  const dispatcher = new Agent({connect:{lookup,timeout:Math.min(timeoutMs,15000)}});
+  try {
+    const result = await fetchMedia(url, {dispatcher, method:"GET", redirect:"manual", headers:{accept:"*/*","user-agent":"ContentCenterBot/0.1 (+media-ingest)",range:"bytes=0-"},signal:AbortSignal.timeout(timeoutMs)});
+    const body = result.body ? Readable.fromWeb(result.body as Parameters<typeof Readable.fromWeb>[0]) : Readable.from([]);
+    const cleanup = () => { void dispatcher.close().catch(() => undefined); };
+    body.once("end",cleanup); body.once("close",cleanup); body.once("error",cleanup);
+    return {status:result.status,headers:{location:result.headers.get("location") || undefined,contentType:result.headers.get("content-type") || undefined,contentLength:result.headers.get("content-length") || undefined,contentRange:result.headers.get("content-range") || undefined},response:body};
+  } catch(error) { await dispatcher.destroy().catch(() => undefined); throw error; }
 }
 
 function expectedMime(kind: MediaKind, contentType: string | undefined): string {
@@ -81,6 +59,7 @@ function expectedMime(kind: MediaKind, contentType: string | undefined): string 
 
 function mapMediaError(error: unknown): RedFoxError {
   if (error instanceof RedFoxError) return error;
+  if (error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name)) return new RedFoxError("REDFOX_MEDIA_DOWNLOAD_FAILED", "媒体下载超时。", true, undefined, "TIMEOUT");
   if (error instanceof IngestProviderError) {
     return new RedFoxError(
       "REDFOX_MEDIA_DOWNLOAD_FAILED",
@@ -106,7 +85,8 @@ export class MediaFetcher {
     assetScope?: StorageAssetScope;
     onBeforeStore?: () => void | Promise<void>;
   }) {
-    const maxBytes = input.kind === "VIDEO"
+    const experience = process.env.EXPERIENCE_LIMITS_ENABLED === "true" || process.env.DEMO_MODE === "true";
+    const maxBytes = experience ? 50 * 1024 * 1024 : input.kind === "VIDEO"
       ? (this.options.maxVideoBytes ?? MAX_VIDEO_DOWNLOAD_BYTES)
       : (this.options.maxImageBytes ?? MAX_IMAGE_DOWNLOAD_BYTES);
     const timeoutMs = this.options.timeoutMs ?? MEDIA_DOWNLOAD_TIMEOUT_MS;
@@ -118,9 +98,14 @@ export class MediaFetcher {
       let current = input.remoteUrl;
       for (let redirect = 0; redirect <= maxRedirects; redirect += 1) {
         const { url, addresses } = await resolvePublicAddress(current, this.options.resolver, this.options.allowedTestOrigin);
-        const address = addresses[0];
-        if (!address) throw new IngestProviderError("DNS_TEMPORARY", "域名没有可用地址。", true);
-        const opened = await openResponse(url, address, timeoutMs);
+        if (!addresses.length) throw new IngestProviderError("DNS_TEMPORARY", "域名没有可用地址。", true);
+        let opened: OpenedResponse | undefined;
+        let connectionError: unknown;
+        for (const address of addresses.slice(0, 4)) {
+          try { opened = await openResponse(url, address, timeoutMs); break; }
+          catch (error) { connectionError = error; }
+        }
+        if (!opened) throw connectionError || new IngestProviderError("TIMEOUT", "媒体连接失败。", true);
         if (opened.status >= 300 && opened.status < 400) {
           opened.response.resume();
           if (!opened.headers.location) throw new IngestProviderError("INVALID_REDIRECT", "媒体重定向缺少目标地址。", false);
@@ -149,7 +134,11 @@ export class MediaFetcher {
             callback(sizeBytes > maxBytes ? new IngestProviderError("RESPONSE_TOO_LARGE", "媒体文件超过大小限制。", false) : null, chunk);
           },
         });
-        await pipeline(opened.response, limiter, createWriteStream(tempFile));
+        await pipeline(opened.response, limiter, createWriteStream(tempFile), { signal: AbortSignal.timeout(timeoutMs) });
+        if (opened.status === 206) {
+          const range = opened.headers.contentRange?.match(/^bytes 0-(\d+)\/(\d+)$/);
+          if (!range || Number(range[1]) + 1 !== Number(range[2]) || sizeBytes !== Number(range[2])) throw new IngestProviderError("PARTIAL_MEDIA", "媒体下载不完整。", true);
+        }
         if (sizeBytes === 0) throw new IngestProviderError("EMPTY_MEDIA", "媒体文件为空。", false);
         await input.onBeforeStore?.();
         const storageKey = typeof input.storageKey === "function" ? input.storageKey({ mimeType }) : input.storageKey;

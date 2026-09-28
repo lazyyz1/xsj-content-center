@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "@/components/product-v3.css";
 
 export const metadata: Metadata = {
   title: "鑫世界 Studio",

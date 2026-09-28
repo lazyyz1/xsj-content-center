@@ -6,7 +6,7 @@ import { benchmarkAnalysisOutputSchema, type BenchmarkCommonMethod } from "@cont
 import { materialDistillationGenerationSchema, type MaterialDistillationHighlight } from "@content-center/providers";
 import { z } from "zod";
 import { isDefaultContentMethodPayload } from "../default-content-method/schemas";
-import { parseWorkflowSkill, workflowSkillPreview, type WorkflowSkillContract } from "../workflow-skill/contract";
+import { parseImportedSkill, workflowSkillPreview, type WorkflowSkillContract } from "../workflow-skill/contract";
 
 const requiredText = (maximum: number) => z.string().trim().min(1).max(maximum);
 
@@ -31,7 +31,7 @@ const createMethodFromDistillationSchema = methodContentSchema.partial().extend(
 }).strict();
 export const createMethodSchema = z.union([createMethodFromAnalysisSchema, createMethodFromBenchmarkSchema, createMethodFromDistillationSchema]);
 
-export const updateMethodSchema = methodContentSchema.extend({ expectedVersion: z.number().int().min(1) }).strict();
+export const updateMethodSchema = methodContentSchema.extend({ expectedVersion: z.number().int().min(1), markdown: z.string().min(1).max(100_000).optional() }).strict();
 export const methodStatusSchema = z.enum(["SAVED", "TRIAL", "CORE", "DISABLED"]);
 
 export class MethodError extends Error {
@@ -215,12 +215,12 @@ export async function listMethods(input: { workspaceId: string; ownerUserId: str
 }
 
 export function previewWorkflowSkill(markdown: string) {
-  return workflowSkillPreview(parseWorkflowSkill(markdown));
+  return workflowSkillPreview(parseImportedSkill(markdown));
 }
 
 export async function importWorkflowSkill(input: { workspaceId: string; ownerUserId: string; markdown: string }) {
   await assertMethodEditor({ workspaceId: input.workspaceId, userId: input.ownerUserId });
-  const contract = parseWorkflowSkill(input.markdown);
+  const contract = parseImportedSkill(input.markdown);
   const asset = await db.$transaction(async (tx) => {
     const created = await tx.methodAsset.create({ data: { workspaceId: input.workspaceId, ownerUserId: input.ownerUserId, status: "SAVED", statusUpdatedAt: new Date() } });
     await tx.methodVersion.create({
@@ -420,6 +420,7 @@ export async function updateMethodContent(input: {
   ownerUserId: string;
   methodId: string;
   expectedVersion: number;
+  markdown?: string;
   title: string;
   steps: string[];
   applicableScenarios: string[];
@@ -435,7 +436,7 @@ export async function updateMethodContent(input: {
       if (!asset || !current) throw new MethodError("METHOD_NOT_FOUND", "方法不存在。");
       if (isDefaultContentMethodPayload(current.steps)) throw new MethodError("METHOD_INVALID", "默认创作方法请使用公司方法管理入口。");
       if (current.version !== input.expectedVersion) throw new MethodError("METHOD_VERSION_CONFLICT", "这个方法刚刚有新的修改，请刷新后再保存。");
-      await tx.methodVersion.create({ data: { assetId: asset.id, version: current.version + 1, title: content.data.title, steps: json(content.data.steps), applicableScenarios: json(content.data.applicableScenarios), boundaries: json(content.data.boundaries), sourceItemId: current.sourceItemId, sourceMaterialAnalysisId: current.sourceMaterialAnalysisId, sourceTranscriptId: current.sourceTranscriptId, sourceTranscriptUpdatedAt: current.sourceTranscriptUpdatedAt, sourceBenchmarkStudyId: current.sourceBenchmarkStudyId, sourceMaterialDistillationId: current.sourceMaterialDistillationId, workflowContract: current.workflowContract ?? undefined, evidence: json(current.evidence ?? []), editedById: input.ownerUserId } });
+      await tx.methodVersion.create({ data: { assetId: asset.id, version: current.version + 1, title: content.data.title, steps: json(content.data.steps), applicableScenarios: json(content.data.applicableScenarios), boundaries: json(content.data.boundaries), sourceItemId: current.sourceItemId, sourceMaterialAnalysisId: current.sourceMaterialAnalysisId, sourceTranscriptId: current.sourceTranscriptId, sourceTranscriptUpdatedAt: current.sourceTranscriptUpdatedAt, sourceBenchmarkStudyId: current.sourceBenchmarkStudyId, sourceMaterialDistillationId: current.sourceMaterialDistillationId, workflowContract: input.markdown !== undefined ? json({ ...parseImportedSkill(input.markdown), name: content.data.title }) : current.workflowContract ?? undefined, evidence: json(current.evidence ?? []), editedById: input.ownerUserId } });
       await tx.methodAsset.update({ where: { id: asset.id }, data: { updatedAt: new Date() } });
       await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.ownerUserId, action: "method.version_created", resourceType: "method_asset", resourceId: asset.id, metadata: { version: current.version + 1 } } });
     }, { isolationLevel: "Serializable" });
@@ -463,4 +464,15 @@ export async function updateMethodStatus(input: { workspaceId: string; ownerUser
   const result = await getMethod({ workspaceId: input.workspaceId, ownerUserId: input.ownerUserId, methodId: input.methodId });
   if (!result) throw new MethodError("METHOD_NOT_FOUND", "方法不存在。");
   return result;
+}
+
+export async function deleteMethod(input: { workspaceId: string; ownerUserId: string; methodId: string }) {
+  await assertMethodEditor({ workspaceId: input.workspaceId, userId: input.ownerUserId });
+  await db.$transaction(async tx => {
+    const asset = await tx.methodAsset.findFirst({ where: { id: input.methodId, workspaceId: input.workspaceId, ownerUserId: input.ownerUserId }, include: { versions: true } });
+    if (!asset) throw new MethodError("METHOD_NOT_FOUND", "Skill 不存在。");
+    if (isDefaultMethodAsset(asset)) throw new MethodError("METHOD_INVALID", "默认方法不能从这里删除。");
+    await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.ownerUserId, action: "method.deleted", resourceType: "method_asset", resourceId: asset.id, metadata: { title: asset.versions.at(-1)?.title, versions: asset.versions.length } } });
+    await tx.methodAsset.delete({ where: { id: asset.id } });
+  }, { isolationLevel: "Serializable" });
 }

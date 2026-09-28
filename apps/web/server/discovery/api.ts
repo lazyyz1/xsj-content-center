@@ -10,8 +10,8 @@ export function discoveryApiError(error: unknown) {
     return NextResponse.json({ error: error.code, message: error.message }, { status });
   }
   if (error instanceof RedFoxError) {
-    const status = error.code === "REDFOX_RATE_LIMITED" ? 429 : error.code === "REDFOX_AUTH_FAILED" ? 503 : error.httpStatus && error.httpStatus >= 500 ? 502 : 400;
-    const message = error.code === "REDFOX_RATE_LIMITED"
+    const status = error.code === "REDFOX_QUOTA_EXCEEDED" ? 402 : error.code === "REDFOX_RATE_LIMITED" ? 429 : error.code === "REDFOX_AUTH_FAILED" ? 503 : error.httpStatus && error.httpStatus >= 500 ? 502 : 400;
+    const message = error.code === "REDFOX_QUOTA_EXCEEDED" ? "RedFox 积分余额不足，请充值或在设置中更换有余额的 API Key。" : error.code === "REDFOX_RATE_LIMITED"
       ? "内容数据服务当前请求较多，请稍后重试。"
       : error.code === "REDFOX_AUTH_FAILED"
         ? "内容数据服务配置已失效，请联系管理员。"

@@ -1,0 +1,36 @@
+.reference-project-library.v3-projects-page { min-height: calc(100dvh - 32px); padding: 48px; background: #fafafa; }
+.reference-project-library .project-library-header { min-height: 112px; margin-bottom: 24px; padding: 0 0 28px; border-bottom: 1px solid #ebebee; }
+.reference-project-library .project-library-header h1 { font-size: 28px; font-weight: 650; color: #303034; }
+.reference-project-library .project-library-header p { font-size: 13px; color: #96969e; }
+.reference-project-library .project-library-header > a { border: 0; background: #303034; color: #fff; border-radius: 8px; font-size: 12px; }
+.reference-project-library .project-library-commandbar { margin-bottom: 24px; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.reference-project-library .project-library-commandbar nav a { color: #96969e; font-size: 12px; }
+.reference-project-library .project-library-commandbar nav a[aria-current="page"] { color: #303034; background: #ededf0; box-shadow: none; }
+.reference-project-library .project-library-commandbar form label { min-height: 34px; background: #fff; border-color: #e7e7eb; border-radius: 8px; }
+.reference-project-library .project-library-commandbar input { font-size: 12px; }
+.reference-project-library .project-library-section > header { margin-bottom: 18px; }
+.reference-project-library .project-library-section > header h2 { font-size: 12px; color: #83838d; font-weight: 500; }
+.reference-project-library .project-library-section > header span { font-size: 11px; color: #aaaab0; }
+.reference-project-library .project-library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(195px, 230px)); gap: 24px; }
+.reference-project-library .project-library-card { min-height: 0; border: 1px solid #e7e7eb; border-radius: 18px; background: #f0f0f2; box-shadow: none; overflow: visible; }
+.reference-project-library .project-library-card:hover { border-color: #cdccd5; transform: none; box-shadow: 0 8px 22px -12px #22222830; }
+.reference-project-library .project-card-cover-wrap { display: block; overflow: hidden; border-radius: 18px 18px 0 0; }
+.reference-project-library .project-library-cover { height: 145px; min-height: 0; margin: 0; border-radius: 0; background: #ededf0; }
+.reference-project-library .project-library-cover img { position: absolute; inset: 18px 18px auto; width: calc(100% - 36px); height: 140px; border: 5px solid #fff; border-radius: 12px; object-fit: cover; opacity: .85; }
+.reference-project-library .project-library-cover > strong, .reference-project-library .project-library-cover > i, .reference-project-library .project-cover-sheet { display: none; }
+.reference-project-library .project-library-cover > em { top: 10px; right: 10px; bottom: auto; background: #ffffffe6; color: #81818b; font-size: 10px; font-style: normal; }
+.reference-project-library .project-library-card-body { min-height: 0; padding: 14px 15px; border-top: 1px solid #e9e9ed; }
+.reference-project-library .project-folder-paper { position: absolute; inset: 20px 18px -15px; display: grid; place-items: center; border: 1px solid #e0dfea; border-radius: 12px 12px 0 0; background: linear-gradient(#faf9ff, #eae7fa); color: #b0a5d7; box-shadow: 0 -8px 0 -2px #fff, 0 -15px 0 -6px #f9f9fa; }
+.reference-project-library .project-folder-paper img { position: static; width: 100%; height: 100%; border: 4px solid #fff; border-radius: 12px 12px 0 0; opacity: 1; }
+.reference-project-library .project-folder-paper .asset-thumbnail-fallback { display: grid; width: 100%; height: 100%; place-items: center; color: #aaa1c9; }
+.reference-project-library .project-library-card h3 { font-size: 13px; line-height: 1.5; -webkit-line-clamp: 1; min-height: 0; }
+.reference-project-library .project-library-card h3 a::after { display: none; }
+.reference-project-library .project-library-card-body > p { min-height: 0; margin: 5px 0 10px; color: #97979f; font-size: 11px; -webkit-line-clamp: 1; }
+.reference-project-library .project-card-facts { display: none; }
+.reference-project-library .project-library-card footer { min-height: 24px; margin: 0; padding: 0; border: 0; }
+.reference-project-library .project-library-card time { font-size: 10px; color: #92929c; }
+.project-card-menu-trigger { display: grid; flex-shrink: 0; place-items: center; width: 29px; height: 29px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: #777780; padding: 0; }
+.project-card-menu-trigger:hover, .project-card-menu-trigger[aria-expanded="true"] { border-color: #e0e0e6; background: #fff; color: #303038; }
+.project-create-button { display: flex; align-items: center; gap: 7px; border: 0; border-radius: 8px; padding: 10px 15px; background: #303034; color: #fff; font-size: 12px; }
+@media (max-width: 900px) { .reference-project-library.v3-projects-page { padding: 28px 24px; } .reference-project-library .project-library-grid { grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); gap: 16px; } }
+@media (max-width: 600px) { .reference-project-library.v3-projects-page { padding: 24px 14px; } .reference-project-library .project-library-commandbar { flex-direction: column; align-items: stretch; gap: 12px; } .reference-project-library .project-library-commandbar form { flex-wrap: wrap; } .reference-project-library .project-library-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; } }

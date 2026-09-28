@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { db } from "@content-center/db";
-import { createMethodFromAnalysis, createMethodSchema, getMethod, updateMethodContent, updateMethodSchema, updateMethodStatus } from "../server/methods/service";
+import { importWorkflowSkill, deleteMethod, createMethodFromAnalysis, createMethodSchema, getMethod, updateMethodContent, updateMethodSchema, updateMethodStatus } from "../server/methods/service";
 
 describe("my methods", () => {
   const suffix = randomUUID();
@@ -33,6 +33,18 @@ describe("my methods", () => {
     doNotCopy: [],
     uncertain: [],
   };
+
+  it("imports, versions and deletes raw Markdown with workspace and owner isolation", async () => {
+    const raw = "# 自由 Skill\n\n先判断任务，再写一段短文。";
+    const method = await importWorkflowSkill({ workspaceId: workspaceAId, ownerUserId: userAId, markdown: raw });
+    expect(method.current.workflowContract?.rawMarkdown).toBe(raw);
+    await expect(deleteMethod({ workspaceId: workspaceBId, ownerUserId: userBId, methodId: method.id })).rejects.toMatchObject({ code: "METHOD_NOT_FOUND" });
+    const changed = await updateMethodContent({ workspaceId: workspaceAId, ownerUserId: userAId, methodId: method.id, expectedVersion: 1, title: "新名称", steps: method.current.steps, applicableScenarios: method.current.applicableScenarios, boundaries: method.current.boundaries, markdown: raw + "\n不要虚构。" });
+    expect(changed.current.workflowContract?.rawMarkdown).toContain("不要虚构。");
+    expect(changed.history.find(v => v.version === 1)?.workflowContract?.rawMarkdown).toBe(raw);
+    await deleteMethod({ workspaceId: workspaceAId, ownerUserId: userAId, methodId: method.id });
+    expect(await getMethod({ workspaceId: workspaceAId, ownerUserId: userAId, methodId: method.id })).toBeNull();
+  });
 
   beforeAll(async () => {
     await db.user.createMany({ data: [{ id: userAId, name: "Methods A", email: `${userAId}@example.test` }, { id: userBId, name: "Methods B", email: `${userBId}@example.test` }] });

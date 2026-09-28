@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["jsdom"],
+  distDir: process.env.NEXT_BUILD_CHECK === "1" ? ".next-release-check" : ".next",
+  serverExternalPackages: ["jsdom", "pdf-parse", "@napi-rs/canvas", "bullmq"],
   turbopack: {},
   experimental: {
     cpus: 2,

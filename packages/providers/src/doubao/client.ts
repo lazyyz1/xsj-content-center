@@ -1,3 +1,4 @@
+import { providerFetch } from "../provider-fetch";
 import { randomUUID } from "node:crypto";
 import { DOUBAO_FLASH_TIMEOUT_MS, MAX_ASR_BINARY_DATA_BYTES, MAX_ASR_FLASH_BYTES } from "@content-center/config";
 import { DoubaoError } from "./errors";
@@ -46,7 +47,7 @@ export class DoubaoClient {
     private readonly config: DoubaoRuntimeConfig,
     options: DoubaoClientOptions = {},
   ) {
-    this.fetcher = options.fetch ?? fetch;
+    this.fetcher = options.fetch ?? providerFetch;
     this.timeoutMs = options.timeoutMs ?? DOUBAO_FLASH_TIMEOUT_MS;
   }
 

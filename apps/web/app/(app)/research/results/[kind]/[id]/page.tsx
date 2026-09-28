@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import type { ReactNode } from "react";
+import type { ResearchBlock } from "@content-center/core";
 import { requireWorkspace } from "@/server/access";
 import { getResearchResult, researchProjectOptions } from "@/server/research/read-model";
 import { ResearchError } from "@/server/research/access";
@@ -8,10 +10,32 @@ import { getLegacyResearchResult } from "@/server/research/legacy";
 import { buildResearchSharePreview } from "@/server/research/sharing";
 import { ResearchShare } from "@/components/research/research-share";
 import { ResearchCoverageSummary } from "@/components/research/research-coverage";
+
+function ReadingPage({ id, kind, title, date, blocks, projects, canWrite, continueHref, coverage }: { id: string; kind: "run" | "study"; title: string; date: Date; blocks: ResearchBlock[]; projects: Array<{ id: string; title: string }>; canWrite: boolean; continueHref: string; coverage: ReactNode }) {
+  const preview = buildResearchSharePreview(title, blocks);
+  return <article className="research-result-page">
+    <nav className="research-breadcrumb" aria-label="面包屑"><Link href="/research">研究</Link><span>/</span><Link href={`/research/results${kind === "study" ? "?library=workspace" : ""}`}>保存的结论</Link><span>/</span><span>阅读</span></nav>
+    <header className="research-page-heading"><div><span className="research-eyebrow">{kind === "study" ? "工作空间历史研究" : "已保存 · 私人结论"}</span><h1>{title}</h1><p>{date.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "long", day: "numeric" })} · {kind === "study" ? "按当时记录阅读，未重新采集" : "后续追问不会覆盖这份结果"}</p></div></header>
+    <div className="research-result-actions"><Link className="research-button research-primary" href="#share-result">加入项目 →</Link><Link className="research-button" href={continueHref}>{kind === "run" ? "继续研究" : "查看对标账号"}</Link><span className="research-caption">先读结论，需要时点开依据</span></div>
+    <ResearchBlocks blocks={blocks} prefix={id} afterLead={coverage} />
+    <ResearchShare kind={kind} resultId={id} projects={projects} preview={preview} canWrite={canWrite} />
+  </article>;
+}
+
 export default async function ResultPage({ params }: { params: Promise<{ kind: string; id: string }> }) {
-  const { kind, id } = await params; if (kind !== "run" && kind !== "study") notFound(); const { workspace, session, role } = await requireWorkspace();
-  if (kind === "study") {
-    try { const actor = { workspaceId: workspace.id, userId: session.user.id }; const [result, projects] = await Promise.all([getLegacyResearchResult(actor, id), researchProjectOptions(actor)]); const preview = buildResearchSharePreview(result.title, result.blocks); return <article className="research-result-page"><header className="research-page-heading"><div><span className="research-eyebrow">工作空间历史研究</span><h1>{result.title}</h1><p>记录于 {result.createdAt.toLocaleString("zh-CN")} · 本页只读已保存的结果，不会重新调用 AI。</p></div></header><div className="research-result-actions"><Link href={`/research/benchmarks/${result.accountId}`}>查看对标账号</Link><Link href="/research/results?library=workspace">返回历史成果</Link><Link href="#share-result">加入 Project</Link></div><section className="research-section research-coverage-summary"><header><h2>历史样本范围</h2><span>按保存时记录</span></header><p>保存样本 {result.sampleCount} 条；仍可追溯资料关系 {result.traceableCount} 条。没有重新采集，不把这些样本扩大解释为账号全量。</p></section><ResearchBlocks blocks={result.blocks} prefix={result.id} /><ResearchShare kind="study" resultId={result.id} projects={projects} preview={preview} canWrite={role !== "VIEWER"} /></article>; } catch (error) { if (error instanceof ResearchError && error.status === 404) notFound(); throw error; }
+  const { kind, id } = await params;
+  if (kind !== "run" && kind !== "study") notFound();
+  const { workspace, session, role } = await requireWorkspace();
+  const actor = { workspaceId: workspace.id, userId: session.user.id };
+  try {
+    if (kind === "study") {
+      const [result, projects] = await Promise.all([getLegacyResearchResult(actor, id), researchProjectOptions(actor)]);
+      return <ReadingPage id={id} kind={kind} title={result.title} date={result.createdAt} blocks={result.blocks} projects={projects} canWrite={role !== "VIEWER"} continueHref={`/research/benchmarks/${result.accountId}`} coverage={<section className="research-coverage-summary"><header><h2>历史样本范围</h2><span>保存时记录</span></header><p><strong>{result.sampleCount}</strong> 条保存样本 · <strong>{result.traceableCount}</strong> 条仍可追溯资料；不代表账号全量。</p></section>} />;
+    }
+    const [result, projects] = await Promise.all([getResearchResult(actor, id), researchProjectOptions(actor)]);
+    return <ReadingPage id={id} kind={kind} title={result.resultTitle || result.question} date={result.savedAt!} blocks={result.blocks} projects={projects} canWrite={role !== "VIEWER"} continueHref={`/research/session/${result.sessionId}`} coverage={<ResearchCoverageSummary value={result.coverage} />} />;
+  } catch (error) {
+    if (error instanceof ResearchError && error.status === 404) notFound();
+    throw error;
   }
-  try { const actor = { workspaceId: workspace.id, userId: session.user.id }; const [result, projects] = await Promise.all([getResearchResult(actor, id), researchProjectOptions(actor)]); const preview = buildResearchSharePreview(result.resultTitle || result.question, result.blocks); return <article className="research-result-page"><header className="research-page-heading"><div><span className="research-eyebrow">已保存的私人研究成果</span><h1>{result.resultTitle || result.question}</h1><p>第 {result.version} 次研究 · 保存于 {result.savedAt?.toLocaleString("zh-CN")} · 此结果不会被后续追问覆盖。</p></div></header><div className="research-result-actions"><Link href={`/research/session/${result.sessionId}`}>继续研究</Link><Link href="/research/results">返回成果库</Link><Link href="#share-result">加入 Project</Link></div><ResearchCoverageSummary value={result.coverage} /><ResearchBlocks blocks={result.blocks} prefix={result.id} /><ResearchShare kind="run" resultId={result.id} projects={projects} preview={preview} canWrite={role !== "VIEWER"} /></article>; } catch (error) { if (error instanceof ResearchError && error.status === 404) notFound(); throw error; }
 }

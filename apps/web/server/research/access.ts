@@ -5,7 +5,7 @@ export class ResearchError extends Error {
   constructor(readonly code: string, message: string, readonly status = 409) { super(message); this.name = "ResearchError"; }
 }
 export async function researchMember(input: ResearchActor, write = false) {
-  const member = await db.workspaceMember.findFirst({ where: { workspaceId: input.workspaceId, userId: input.userId, user: { disabledAt: null } }, select: { role: true } });
+  const member = await db.workspaceMember.findFirst({ where: { workspaceId: input.workspaceId, userId: input.userId, disabledAt: null, workspace: { disabledAt: null }, user: { disabledAt: null } }, select: { role: true } });
   if (!member || (write && member.role === "VIEWER")) throw new ResearchError("FORBIDDEN", "当前账号没有执行此操作的权限。", 403);
   return member;
 }

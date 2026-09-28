@@ -1,3 +1,4 @@
+import { ExperienceLimitError } from "@content-center/worker/experience-limits";
 import "server-only";
 
 import { db } from "@content-center/db";
@@ -10,6 +11,8 @@ import { AIControlError, type AIControlAction, type AIControlTask, type ContextI
 import { FactGateV2 } from "./fact-gate-v2";
 import { ModelRouter } from "./model-router";
 import { ScopeGate } from "./scope-gate";
+import type { ContextReference } from "../../assistant/references";
+import type { LLMModelSelection } from "../llm-runtime";
 
 type ControlExecutionInput<T> = {
   workspaceId: string;
@@ -21,6 +24,10 @@ type ControlExecutionInput<T> = {
   selectedObjects?: SelectedContextObject[];
   resolvedContextItems?: ContextItem[];
   conversationHistory?: ConversationContextMessage[];
+  references?: ContextReference[];
+  skillVersionId?: string | null;
+  modelSelection?: LLMModelSelection | null;
+  historySummary?: string;
   preparedContext?: ContextBuilderV2Result;
   action: Parameters<ProjectContextBuilder["build"]>[0]["action"];
   studioAction?: Parameters<ProjectContextBuilder["build"]>[0]["studioAction"];
@@ -46,13 +53,14 @@ type ControlDependencies = {
 };
 
 function normalizeProviderError(error: unknown) {
+  if (error instanceof ExperienceLimitError) return new AIControlError("RATE_LIMITED", error.message, true);
   if (error instanceof AIControlError) return error;
   if (!(error instanceof LLMError)) return new AIControlError("UNKNOWN", undefined, true);
   if (["KIMI_NOT_CONFIGURED", "KIMI_AUTH_FAILED", "LLM_NOT_CONFIGURED", "LLM_DISABLED", "LLM_AUTH_FAILED", "LLM_SERVER_ERROR", "LLM_GENERATION_FAILED"].includes(error.code)) return new AIControlError("PROVIDER_UNAVAILABLE", undefined, error.retryable);
   if (["KIMI_MODEL_ID_MISSING", "KIMI_MODEL_UNAVAILABLE", "LLM_UNSUPPORTED_INPUT"].includes(error.code)) return new AIControlError("MODEL_UNAVAILABLE", undefined, error.retryable);
   if (error.code === "LLM_CONTEXT_TOO_LARGE") return new AIControlError("NO_CONTEXT");
   if (error.code === "LLM_TIMEOUT") return new AIControlError("TIMEOUT", undefined, true);
-  if (error.code === "LLM_RATE_LIMITED") return new AIControlError("RATE_LIMITED", undefined, true);
+  if (error.code === "LLM_RATE_LIMITED") return new AIControlError("RATE_LIMITED", error.message, true);
   if (error.code === "LLM_INVALID_RESPONSE") return new AIControlError("INVALID_OUTPUT", undefined, error.retryable);
   return new AIControlError("UNKNOWN", undefined, error.retryable);
 }
@@ -72,7 +80,7 @@ export class AIControlService {
     this.permissionPolicy = dependencies.permissionPolicy ?? new ActionPermissionPolicy();
     this.modelRouter = dependencies.modelRouter ?? new ModelRouter();
     this.roleLoader = dependencies.roleLoader ?? (async (workspaceId, userId) => {
-      const member = await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId, userId } }, select: { role: true } });
+      const member = await db.workspaceMember.findFirst({ where: { workspaceId, userId, disabledAt: null, workspace: { disabledAt: null }, user: { disabledAt: null } }, select: { role: true } });
       return member?.role ?? null;
     });
   }
@@ -82,14 +90,14 @@ export class AIControlService {
     if (!role) throw new AIControlError("PERMISSION_DENIED");
     const scope = this.scopeGate.evaluate(input);
     if (scope.decision === "OUT_OF_SCOPE") throw new AIControlError("OUT_OF_SCOPE", scope.employeeMessage);
-    const context = input.preparedContext ?? (input.projectId ? await this.contextBuilder.build({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, taskType: input.taskType, action: input.action, studioAction: input.studioAction, selectedObjects: input.selectedObjects, resolvedContextItems: input.resolvedContextItems, conversationHistory: input.conversationHistory }) : null);
+    const context = input.preparedContext ?? (input.projectId ? await this.contextBuilder.build({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, taskType: input.taskType, action: input.action, studioAction: input.studioAction, selectedObjects: input.selectedObjects, resolvedContextItems: input.resolvedContextItems, conversationHistory: input.conversationHistory, references: input.references, skillVersionId: input.skillVersionId, userInput: input.userInput, historySummary: input.historySummary }) : null);
     if (!context) throw new AIControlError("NO_CONTEXT");
     input.onContext?.(context);
     const fact = this.factGate.evaluate({ items: context.manifest.items, ownFacts: context.ownFacts.map(({ text }) => text), instruction: input.userInput });
     if (fact.decision === "BLOCK") throw new AIControlError("FACT_BLOCKED");
     const permission = this.permissionPolicy.evaluate({ role, action: input.requestedAction, userConfirmed: input.userConfirmed });
     if (permission.decision !== "ALLOW") throw new AIControlError("PERMISSION_DENIED", permission.decision === "REQUIRE_CONFIRMATION" ? "这个操作需要你明确确认后才能继续。" : undefined);
-    const route = await this.modelRouter.route(input.workspaceId, { taskType: input.taskType, structuredOutput: true, ...input.modelRequest });
+    const route = await this.modelRouter.route(input.workspaceId, { taskType: input.taskType, structuredOutput: true, ...input.modelRequest }, input.modelSelection);
     const warningSummary = fact.warnings.join("；");
     const controlMetadata = {
       aiControlVersion: "ai-control-v1",

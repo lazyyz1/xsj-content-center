@@ -41,7 +41,7 @@ afterAll(async () => {
 });
 
 function provider() {
-  return new RedFoxDiscoveryProvider(new RedFoxClient({ apiKey: "ak_discovery_test", baseUrl }));
+  return new RedFoxDiscoveryProvider(new RedFoxClient({ apiKey: "ak_discovery_test", baseUrl, fetch }));
 }
 
 describe("RedFox discovery adapters", () => {

@@ -7,7 +7,11 @@ const requestSchema = z.object({
   content: z.string().trim().min(1).max(4_000),
   selectedObject: z.object({ objectType: z.literal("CANVAS_OBJECT"), objectId: z.string().min(1).max(200), version: z.number().int().positive().optional(), ownership: z.enum(["OWN_CONFIRMED", "EXTERNAL", "PENDING", "HYPOTHETICAL", "PROHIBITED", "METHOD_GUIDANCE"]).optional(), whySelected: z.string().max(200).optional() }).strict().optional(),
   sourceItemIds: z.array(z.string().min(1).max(200)).max(8).transform((ids) => [...new Set(ids)]).optional(),
+  retryUserMessageId: z.string().min(1).max(200).optional(),
   targetArtifactId: z.string().min(1).max(200).optional(),
+  references: z.array(z.object({ sourceType: z.enum(["MATERIAL", "RESEARCH", "ARTIFACT", "BENCHMARK", "TREND", "KNOWLEDGE"]), sourceId: z.string().min(1).max(200) }).strict()).max(8).optional(),
+  skillVersionId: z.string().min(1).max(200).nullable().optional(),
+  modelSelection: z.object({ provider: z.enum(["KIMI", "DEEPSEEK", "CUSTOM"]), modelId: z.string().min(1).max(200) }).strict().nullable().optional(),
 }).strict();
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -29,6 +33,7 @@ export async function POST(request: Request, route: RouteContext) {
   const encoder = new TextEncoder();
   const aborter = new AbortController();
   request.signal.addEventListener("abort", () => aborter.abort(), { once: true });
+  if (request.signal.aborted) aborter.abort();
   let closed = false;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {

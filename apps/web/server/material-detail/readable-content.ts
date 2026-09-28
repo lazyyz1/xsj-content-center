@@ -9,7 +9,7 @@ export async function getMaterialReadableContent(input: { workspaceId: string; u
     where: {
       id: input.sourceItemId,
       workspaceId: input.workspaceId,
-      workspace: { members: { some: { userId: input.userId, user: { disabledAt: null } } } },
+      workspace: { disabledAt: null, members: { some: { userId: input.userId, disabledAt: null, user: { disabledAt: null } } } },
     },
     select: {
       id: true, title: true, sourceType: true, rawText: true, updatedAt: true,

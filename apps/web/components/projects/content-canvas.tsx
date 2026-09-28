@@ -25,7 +25,6 @@ import {
   Hand,
   ImageIcon,
   LayoutGrid,
-  Lightbulb,
   Link2,
   Map as MapIcon,
   Maximize2,
@@ -578,7 +577,6 @@ function CanvasSurface({
 
   const [viewport, setViewport] = useState<Viewport>(savedLayout.viewport ?? DEFAULT_VIEWPORT);
   const activeTool: CanvasTool = spacePanning ? "pan" : toolMode;
-  const referenceCount = [sources.length > 0, facts.length > 0, methods.length > 0].filter(Boolean).length;
   const hasDraft = Boolean(draft.characters > 0 || draft.body.trim());
   const nodeTypes = useMemo(() => ({ card: CanvasCard, free: CanvasFreeNode }), []);
 
@@ -608,7 +606,6 @@ function CanvasSurface({
   const selectedFreeObject = selectedNode?.type === "free" ? (selectedNode as FreeCanvasNode).data.object : null;
   const selectedAssistantObject = selectedFreeObject ? { objectType: "CANVAS_OBJECT" as const, objectId: selectedFreeObject.id, version: selectedFreeObject.contentVersion, ownership: selectedFreeObject.objectType === "TEXT" ? "PENDING" as const : "EXTERNAL" as const, whySelected: "员工当前在画布中显式选中的对象", label: selectedFreeObject.title || selectedFreeObject.materialReference?.sourceTitleSnapshot || (selectedFreeObject.objectType === "TEXT" ? "未命名文本" : "项目资料") } : null;
   const relationEdges = useMemo<Edge[]>(() => freeObjects.flatMap((target) => target.generatedFrom.flatMap((relation) => freeObjects.some((source) => source.id === relation.sourceObjectId) ? [{ id: `generated:${relation.sourceSnapshotId}:${target.id}`, source: `object:${relation.sourceObjectId}`, target: `object:${target.id}`, type: "smoothstep", className: "canvas-generated-edge", selectable: false, focusable: false } satisfies Edge] : [])), [freeObjects]);
-  const currentFocus = focused ? `稿件｜${draft.title || "未命名稿件"}` : selectedNode?.type === "free" ? selectedFreeObject?.title || "未命名文本" : selectedNode?.type === "card" ? (selectedNode as CanvasNode).data.title : "画布";
 
   useEffect(() => {
     setNodes((current) => {
@@ -1264,17 +1261,10 @@ function CanvasSurface({
 
       <aside className="workbench-assistant" aria-hidden={!assistantOpen} inert={!assistantOpen}>
         <header>
-          <div className="workbench-assistant-title">
-            <span aria-hidden="true"><Lightbulb size={18} /></span>
-            <strong>鑫小助</strong>
-            <i>在线</i>
-            {layoutMode === "assistant-only" ? <button type="button" title="切换工作区布局" aria-label="切换工作区布局" onClick={() => setLayoutMenuOpen((current) => !current)}><LayoutGrid size={17} /></button> : null}
-            <button type="button" aria-label="收起鑫小助" onClick={() => onAssistantOpen(false)}><X size={18} /></button>
-          </div>
-          <div className="workbench-assistant-context">
-            <span title={projectTitle}>当前项目 · {projectTitle}</span>
-            <span title={currentFocus}>当前焦点 · {currentFocus}</span>
-            <span>引用 · {referenceCount}</span>
+          <div className="agent-project-heading">
+            <strong title={projectTitle}>{projectTitle}</strong>
+            <button type="button" title="切换工作区布局" aria-label="切换工作区布局" onClick={() => setLayoutMenuOpen(current => !current)}><LayoutGrid size={17} /></button>
+            {layoutMode !== "assistant-only" ? <button type="button" title="收起对话" aria-label="收起鑫小助" onClick={() => onAssistantOpen(false)}><X size={18} /></button> : null}
           </div>
         </header>
         <div className="workbench-assistant-body">{typeof assistant === "function" ? assistant({ focus: focused ? "draft" : selectedKind, openContext, openDraft: () => setFocused(true), selectedObject: selectedAssistantObject, projectMaterials: sourceOptions, canvasObjects: freeObjects, onObjectCreated: (object) => { upsertObject(object); setSelectedObjectId(object.id); setEditingObjectId(null); pushCommand({ type: "CREATE", objectId: object.id }); setViewRequest({ ids: [`object:${object.id}`], revision: Date.now(), mode: "follow" }); window.requestAnimationFrame(() => setNodes((current) => current.map((node) => ({ ...node, selected: node.id === `object:${object.id}` })))); } }) : assistant}</div>

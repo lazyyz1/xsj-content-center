@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
-import { getMethod, MethodError, methodStatusSchema, updateMethodContent, updateMethodSchema, updateMethodStatus } from "@/server/methods/service";
+import { deleteMethod, getMethod, MethodError, methodStatusSchema, updateMethodContent, updateMethodSchema, updateMethodStatus } from "@/server/methods/service";
 
 function methodApiError(error: unknown) {
   if (!(error instanceof MethodError)) return null;
@@ -44,4 +44,17 @@ export async function PATCH(request: Request, route: { params: Promise<{ id: str
   } catch (error) {
     return methodApiError(error) ?? apiError("METHOD_STATUS_UPDATE_FAILED", 500, "无法更新方法状态。");
   }
+}
+
+export async function DELETE(request: Request, route: { params: Promise<{ id: string }> }) {
+  const context = await getApiWorkspaceContext();
+  if (!context) return apiError("UNAUTHORIZED", 401);
+  if (context.role === "VIEWER") return apiError("FORBIDDEN", 403);
+  const origin = request.headers.get("origin");
+  if (origin && origin !== new URL(request.url).origin) return apiError("FORBIDDEN", 403);
+  const { id } = await route.params;
+  try {
+    await deleteMethod({ workspaceId: context.workspace.id, ownerUserId: context.session.user.id, methodId: id });
+    return NextResponse.json({ deleted: true });
+  } catch (error) { return methodApiError(error) ?? apiError("METHOD_DELETE_FAILED", 500, "暂时无法删除 Skill，请重试。"); }
 }

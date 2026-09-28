@@ -14,6 +14,9 @@ function completion(content: string) {
   return JSON.stringify({ id: "fixture-request", model: "fixture-model", choices: [{ message: { content }, finish_reason: "stop" }], usage: { prompt_tokens: 12, completion_tokens: 7 } });
 }
 
+const priorProviderOrigin = process.env.PROVIDER_TEST_ORIGIN;
+const priorEnvironmentId = process.env.ENVIRONMENT_ID;
+afterAll(() => { if (priorProviderOrigin) process.env.PROVIDER_TEST_ORIGIN = priorProviderOrigin; else delete process.env.PROVIDER_TEST_ORIGIN; if (priorEnvironmentId) process.env.ENVIRONMENT_ID = priorEnvironmentId; else delete process.env.ENVIRONMENT_ID; });
 beforeAll(async () => {
   fixture = createServer((request, response) => {
     let body = "";
@@ -55,6 +58,8 @@ beforeAll(async () => {
   const address = fixture.address();
   if (!address || typeof address === "string") throw new Error("Fixture did not bind");
   origin = `http://127.0.0.1:${address.port}/v1`;
+  process.env.ENVIRONMENT_ID = "LOCAL_TEST";
+  process.env.PROVIDER_TEST_ORIGIN = new URL(origin).origin;
 });
 
 afterAll(async () => new Promise<void>((resolve) => fixture.close(() => resolve())));

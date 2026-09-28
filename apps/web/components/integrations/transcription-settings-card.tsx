@@ -186,7 +186,7 @@ export function TranscriptionSettingsCard({
       </details>
 
       {!canManage ? <p className="mt-5 rounded-xl bg-[var(--surface-elevated)] p-4 text-sm text-[var(--text-secondary)]">当前账户可查看转写状态，配置仅限管理员修改。</p> : null}
-      {canManage ? <div className="mt-5"><Button disabled={busy} onClick={save}>保存转写设置</Button></div> : null}
+      {canManage ? <div className="mt-5 flex flex-wrap gap-3"><Button disabled={busy} onClick={save}>保存转写设置</Button>{source === "LOCAL_FUNASR" ? <Button variant="secondary" disabled={busy} onClick={async () => { setBusy(true); try { const result = await request("/api/integrations/TRANSCRIPTION/test", {}); setMessage(result.message || "检查完成。"); } catch { setMessage("本地服务无法访问，请启动后重试。"); } finally { setBusy(false); } }}>测试本地连接</Button> : null}</div> : null}
       {message ? <p className="mt-3 text-sm text-[var(--text-secondary)]" role="status">{message}</p> : null}
     </Card>
   );

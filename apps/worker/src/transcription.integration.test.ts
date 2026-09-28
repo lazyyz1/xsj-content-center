@@ -73,6 +73,7 @@ describe("TRANSCRIBE_SOURCE integration", () => {
     const address = fixture.address();
     if (!address || typeof address === "string") throw new Error("Fixture did not bind");
     fixtureOrigin = `http://127.0.0.1:${address.port}`;
+    process.env.PROVIDER_TEST_ORIGIN = fixtureOrigin;
 
     await db.user.create({ data: { id: userId, name: "Transcription Test", email: `${userId}@example.test` } });
     const workspace = await db.workspace.create({
@@ -95,6 +96,7 @@ describe("TRANSCRIBE_SOURCE integration", () => {
   });
 
   afterAll(async () => {
+    delete process.env.PROVIDER_TEST_ORIGIN;
     const storage = minioStorageFromEnv();
     if (workspaceId) {
       const assets = await db.sourceAsset.findMany({ where: { workspaceId }, select: { storageKey: true } });

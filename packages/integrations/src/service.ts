@@ -148,7 +148,10 @@ export class IntegrationService {
       && (existingPublicConfig.protocol === "FLASH" || existingPublicConfig.protocol === "RECORDING_FILE_2_0")
       ? { ...parsedPublicConfig, protocol: existingPublicConfig.protocol }
       : parsedPublicConfig;
-    const llmProviderChanged = input.provider === "LLM" && existing && existingPublicConfig.provider !== publicConfig.provider;
+    const llmProviderChanged = Boolean(existing && (
+      (input.provider === "LLM" && existingPublicConfig.provider !== publicConfig.provider)
+      || (existingPublicConfig.baseUrl && existingPublicConfig.baseUrl !== publicConfig.baseUrl)
+    ));
     const secretConfig = { ...(llmProviderChanged ? {} : existingSecrets), ...suppliedSecrets };
     const combinedConfig = { ...publicConfig, ...secretConfig };
     const primarySecret = primarySecretField(input.provider, combinedConfig);

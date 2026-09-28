@@ -240,7 +240,7 @@ export async function getMaterialDetailView(input: { workspaceId: string; userId
   const refreshState = !canRefresh ? "UNAVAILABLE" : completeness.complete ? "COMPLETE" : "PARTIAL";
 
   const storage = source.assets.some((asset) => asset.status === "STORED" && asset.storageKey) ? getStorageProvider() : null;
-  const mediaAssets = await Promise.all(source.assets.filter((asset) => asset.assetType !== "AUDIO").map(async (asset) => {
+  const mediaAssets = await Promise.all(source.assets.map(async (asset) => {
     if (asset.status !== "STORED" || !asset.storageKey) return { id: asset.id, assetType: asset.assetType, url: null, mimeType: asset.mimeType, sizeBytes: asset.sizeBytes?.toString() ?? null, status: asset.status };
     try {
       if (!storage) throw new Error("STORAGE_NOT_CONFIGURED");

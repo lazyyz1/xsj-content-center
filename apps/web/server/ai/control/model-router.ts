@@ -8,7 +8,7 @@ import { AIControlError, type ModelRouteRequest, type WorkspaceAIEngine } from "
 export type ModelRouteReceipt = {
   requestedTask: ModelRouteRequest["taskType"];
   routingMode: "SINGLE_ENGINE";
-  workspaceEngine: Exclude<WorkspaceAIEngine, "AUTO"> | "TEST";
+  workspaceEngine: Exclude<WorkspaceAIEngine, "AUTO"> | "CUSTOM" | "TEST";
   selectedProvider: string;
   selectedModel: string;
   capabilityMatch: Record<AIModelCapability, boolean>;
@@ -41,9 +41,9 @@ export class ModelRouter {
     const required = requirements(request);
     const fixture = runtime.mode === "FIXTURE" || runtime.mode === "MOCK";
     const provider = runtime.providerName.toUpperCase();
-    const workspaceEngine = fixture ? "TEST" : ["KIMI", "DEEPSEEK"].includes(provider) ? provider as Exclude<WorkspaceAIEngine, "AUTO"> : null;
+    const workspaceEngine = fixture ? "TEST" : provider === "CUSTOM" ? "CUSTOM" : ["KIMI", "DEEPSEEK"].includes(provider) ? provider as Exclude<WorkspaceAIEngine, "AUTO"> : null;
     if (!workspaceEngine) throw new AIControlError("PROVIDER_UNAVAILABLE");
-    const model = fixture ? null : getAIModel(workspaceEngine as Exclude<WorkspaceAIEngine, "AUTO">, runtime.requestedModel ?? runtime.model);
+    const model = fixture || workspaceEngine === "CUSTOM" ? null : getAIModel(workspaceEngine as Exclude<WorkspaceAIEngine, "AUTO">, runtime.requestedModel ?? runtime.model);
     const capabilities: AIModelCapabilities | undefined = runtime.capabilities ?? model?.capabilities ?? (fixture ? { text: true, image: true, reasoning: true, structuredOutput: true, jsonObject: true, tools: true, responsesApi: true } : undefined);
     if (!capabilities || required.some((capability) => !capabilities[capability])) throw new AIControlError("MODEL_UNAVAILABLE");
     const capabilityMatch = Object.fromEntries((Object.keys(capabilities) as AIModelCapability[]).map((capability) => [capability, capabilities[capability]])) as Record<AIModelCapability, boolean>;

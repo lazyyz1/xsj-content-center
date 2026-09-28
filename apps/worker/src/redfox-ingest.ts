@@ -26,7 +26,7 @@ function json(value: unknown): Prisma.InputJsonValue {
 }
 
 async function progress(jobId: string, amount: number, stage: ProgressStage) {
-  await db.ingestJob.update({ where: { id: jobId }, data: { progress: amount, metadata: { progressStage: stage } } });
+  await db.$executeRaw`UPDATE "IngestJob" SET "progress" = ${amount}, "metadata" = COALESCE("metadata", '{}'::jsonb) || jsonb_build_object('progressStage', ${stage}::text) WHERE "id" = ${jobId}`;
 }
 
 function publicFailure(error: unknown) {
@@ -94,7 +94,7 @@ export async function processRedFoxIngestJob(
         providerMode: "REAL",
         attempt,
         progress: 5,
-        metadata: { progressStage: "RESOLVING" },
+        metadata: json({ ...(record.metadata && typeof record.metadata === "object" && !Array.isArray(record.metadata) ? record.metadata : {}), progressStage: "RESOLVING" }),
         startedAt,
         finishedAt: null,
         errorCode: null,
@@ -353,7 +353,7 @@ export async function processRedFoxIngestJob(
       }),
       db.ingestJob.update({
         where: { id: record.id },
-        data: { status: "SUCCEEDED", progress: 100, metadata: { progressStage: "DONE" }, finishedAt },
+        data: { status: "SUCCEEDED", progress: 100, metadata: json({ ...(record.metadata && typeof record.metadata === "object" && !Array.isArray(record.metadata) ? record.metadata : {}), progressStage: "DONE" }), finishedAt },
       }),
       db.auditLog.create({
         data: {

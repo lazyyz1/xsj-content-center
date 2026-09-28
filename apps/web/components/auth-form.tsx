@@ -35,10 +35,10 @@ export function AuthForm({ mode, allowRegistration = false }: { mode: "login" | 
       return;
     }
 
-    const result = await authClient.signIn.email({ email, password });
+    const result = await authClient.signIn.email({ email, password }).catch(() => ({ error: { message: "网络连接失败，请稍后重试。" } }));
 
     if (result.error) {
-      setError(result.error.message ?? "请求失败，请重试。");
+      setError("登录失败，请检查账号和密码；若账号已停用，请联系管理员。");
       setPending(false);
       return;
     }

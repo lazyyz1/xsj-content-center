@@ -18,3 +18,10 @@ reference-repos/
 services/local-asr/.venv/
 **/__pycache__/
 *.pyc
+
+.local-data/
+
+# Local integration evidence and runtime credentials
+output/
+
+.next-release-check/

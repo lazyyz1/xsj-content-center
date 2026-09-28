@@ -40,6 +40,7 @@ export function classifyLLMConfig(config: Record<string, unknown>): LLMPolicySta
   if (config.integrationType === "FIXTURE" && config.productModel === "FIXTURE") return "FIXTURE";
   if (Object.keys(config).length === 0) return "UNCONFIGURED";
   const normalized = normalizeLLMPublicConfig(config);
+  if (normalized.provider === "CUSTOM" && text(normalized.modelId) && text(normalized.baseUrl)) return "CURRENT";
   if (!isAIProvider(normalized.provider)) return "NEEDS_RECONFIGURATION";
   if (!text(normalized.modelId)) return "UNCONFIGURED";
   return configuredModel(normalized) ? "CURRENT" : "NEEDS_RECONFIGURATION";
@@ -54,8 +55,28 @@ export function isFixtureLLMConfig(config: Record<string, unknown>) {
   return classifyLLMConfig(config) === "FIXTURE";
 }
 
+export function resolveLLMModelId(provider: string, modelId: string, override?: unknown) {
+  const explicit = text(override);
+  if (explicit) return explicit;
+  if (provider === "DEEPSEEK" && ["deepseek-v4-flash", "deepseek-v4-flash-vision-exp"].includes(modelId)) return "deepseek-flash";
+  return modelId;
+}
+export function configuredLLMChoice(config: Record<string, unknown>) {
+  const provider = String(config.provider || "");
+  const modelId = text(config.modelId);
+  const apiModelId = resolveLLMModelId(provider, modelId, config.apiModelId);
+  const definition = isAIProvider(provider) ? getAIModel(provider, apiModelId) : null;
+  return { provider, modelId, apiModelId, label: text(config.modelDisplayName) || definition?.label || text(config.serviceName) || apiModelId };
+}
+
 export function llmRuntimeConfig(publicConfig: Record<string, unknown>, secretConfig: Record<string, unknown>) {
   const state = classifyLLMConfig(publicConfig);
+  if (state === "CURRENT" && publicConfig.provider === "CUSTOM") {
+    return { provider: "CUSTOM", baseUrl: publicConfig.baseUrl, apiKey: secretConfig.apiKey,
+      model: resolveLLMModelId("CUSTOM", text(publicConfig.modelId), publicConfig.apiModelId), modelId: publicConfig.modelId, requestedModel: publicConfig.modelId,
+      capabilities: { text: true, image: false, reasoning: false, structuredOutput: true, jsonObject: true, tools: false, responsesApi: false },
+      chatStructuredOutput: "JSON_OBJECT", mode: "REAL" };
+  }
   if (state === "CURRENT") {
     const resolved = configuredModel(publicConfig)!;
     const provider = resolved.normalized.provider as AIProvider;
@@ -64,10 +85,10 @@ export function llmRuntimeConfig(publicConfig: Record<string, unknown>, secretCo
       provider,
       baseUrl: resolved.normalized.baseUrl,
       apiKey: secretConfig.apiKey,
-      model: modelId,
+      model: resolveLLMModelId(provider, modelId, resolved.normalized.apiModelId),
       modelId,
       requestedModel: modelId,
-      capabilities: resolved.model.capabilities,
+      capabilities: (getAIModel(provider, resolveLLMModelId(provider, modelId, resolved.normalized.apiModelId)) ?? resolved.model).capabilities,
       chatStructuredOutput: resolved.model.chatStructuredOutput,
       mode: "REAL",
     };

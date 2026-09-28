@@ -9,13 +9,16 @@ export const researchScopeSchema = z.object({
   useOwnArtifacts: z.boolean().default(false),
   notes: z.string().trim().max(20000).default(""),
   useCreatorProfile: z.boolean().default(false),
+  researchProfile: z.literal("ACCOUNT_DOSSIER").optional(),
+  benchmarkCollectionRunId: id.optional(),
+  researchDateRange: z.object({ from: z.string().date().optional(), to: z.string().date().optional() }).strict().refine(value => !value.from || !value.to || value.from <= value.to, "Invalid date range").optional(),
 }).strict();
 export type ResearchScope = z.infer<typeof researchScopeSchema>;
 export const sessionInputSchema = z.object({ title: z.string().trim().min(1).max(200), entryTemplate: z.enum(["DIRECT", "BREAKDOWN", "OPPORTUNITY", "BENCHMARK"]).default("DIRECT"), projectId: id.optional(), requestKey: z.string().uuid() }).strict();
 export const runInputSchema = z.object({ question: z.string().trim().min(1).max(10000), requestKey: z.string().uuid(), scope: researchScopeSchema.optional() }).strict();
-const refs = z.array(id).max(100);
+const refs = z.array(id).max(300);
 const sourceSchema: z.ZodType<ResearchSource> = z.object({
-  ref: id, kind: z.enum(["MATERIAL", "BENCHMARK_ACCOUNT", "BENCHMARK_WORK", "TREND", "PROJECT_ARTIFACT", "USER_INPUT", "CREATOR_PROFILE"]), objectId: id,
+  ref: id, kind: z.enum(["MATERIAL", "BENCHMARK_ACCOUNT", "BENCHMARK_WORK", "BENCHMARK_COMMENT", "TREND", "PROJECT_ARTIFACT", "USER_INPUT", "CREATOR_PROFILE"]), objectId: id,
   title: z.string().max(500), href: z.string().max(2000).nullable(), capturedAt: z.string().nullable(), publishedAt: z.string().nullable(), eventAt: z.string().nullable(),
   contentOrigin: z.enum(["ORIGINAL", "MACHINE_TRANSCRIPT", "AI_READING", "USER_PROVIDED"]), locator: z.string().nullable(), excerpt: z.string().max(20000), version: z.string().nullable(),
 }).strict();
@@ -25,7 +28,7 @@ export const researchBlockSchema: z.ZodType<ResearchBlock> = z.discriminatedUnio
   z.object({ ...base, type: z.literal("metrics"), items: z.array(z.object({ label: z.string().max(200), value: z.number().finite().nullable(), unit: z.string().max(100), validCount: z.number().int().nonnegative(), denominator: z.number().int().nonnegative(), method: z.string().max(1000) }).strict()).max(12) }).strict(),
   z.object({ ...base, type: z.literal("table"), columns: z.array(z.string().max(200)).min(1).max(20), rows: z.array(z.object({ cells: z.array(z.union([z.string().max(5000), z.number().finite(), z.null()])).max(20), sourceRefs: refs }).strict()).max(500) }).strict(),
   ...(["bar_chart", "line_chart"] as const).map(type => z.object({ ...base, type: z.literal(type), unit: z.string().max(100), method: z.string().max(1000), points: z.array(z.object({ label: z.string().max(200), value: z.number().finite().nullable(), sourceRefs: refs }).strict()).max(500), lowerIsBetter: z.boolean() }).strict()),
-  z.object({ ...base, type: z.literal("sources"), refs: z.array(sourceSchema).max(200) }).strict(),
+  z.object({ ...base, type: z.literal("sources"), refs: z.array(sourceSchema).max(300) }).strict(),
 ]);
 export const researchBlocksSchema = z.array(researchBlockSchema).max(60);
 export const researchAnswerSchema = z.object({ sections: z.array(z.object({ title: z.string().trim().min(1).max(200), text: z.string().trim().min(1).max(8000), sourceRefs: refs.min(1), limitation: z.string().trim().min(1).max(1500) }).strict()).min(1).max(10) }).strict();

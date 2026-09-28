@@ -3,6 +3,7 @@ import { z } from "zod";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
 import { createProject, listProjects } from "@/server/project-service";
 import { projectApiError } from "@/server/project-api";
+import { creationModelSchema } from "@/server/creation/models";
 
 const createSchema = z.object({
   title: z.string().trim().min(1).max(200),
@@ -10,6 +11,11 @@ const createSchema = z.object({
   goal: z.string().trim().max(2_000).optional(),
   audience: z.string().trim().max(2_000).optional(),
   sourceItemId: z.string().trim().min(1).optional(),
+  sourceItemIds: z.array(z.string().trim().min(1)).max(8).optional(),
+  clientRequestId: z.uuid().optional(),
+  folderId: z.string().trim().min(1).optional(),
+  methodVersionIds: z.array(z.string().min(1).max(200)).max(1).optional(),
+  modelSelection: creationModelSchema.nullable().optional(),
 });
 
 export async function GET(request: Request) {

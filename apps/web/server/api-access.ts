@@ -1,6 +1,7 @@
 import { db } from "@content-center/db";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
+import { resolveWorkspaceMembership } from "./workspace-context";
 import { auth } from "@/lib/auth";
 
 export async function getApiWorkspaceContext() {
@@ -8,11 +9,7 @@ export async function getApiWorkspaceContext() {
   if (!session) return null;
   const user = await db.user.findUnique({ where: { id: session.user.id }, select: { disabledAt: true } });
   if (!user || user.disabledAt) return null;
-  const membership = await db.workspaceMember.findFirst({
-    where: { userId: session.user.id },
-    include: { workspace: true },
-    orderBy: { createdAt: "asc" },
-  });
+  const membership = await resolveWorkspaceMembership(session.user.id, session.session.id);
   if (!membership) return null;
   return { session, workspace: membership.workspace, role: membership.role };
 }

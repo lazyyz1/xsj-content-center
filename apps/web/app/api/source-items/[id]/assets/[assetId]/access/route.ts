@@ -23,9 +23,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const disposition = searchParams.get("disposition") ?? "inline";
   if (disposition !== "inline" && disposition !== "attachment") return apiError("INVALID_DISPOSITION", 400, "下载方式无效。");
   try {
+    const metadata = asset.metadata && typeof asset.metadata === "object" && !Array.isArray(asset.metadata) ? asset.metadata as Record<string, unknown> : {};
+    const extension = ({ "video/mp4": ".mp4", "audio/mpeg": ".mp3", "audio/wav": ".wav", "audio/mp4": ".m4a", "application/pdf": ".pdf", "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "text/plain": ".txt" } as Record<string, string>)[asset.mimeType || ""] || "";
+    const filename = (typeof metadata.originalName === "string" ? metadata.originalName : `${source.title || "source-asset"}${extension}`).replace(/[\\/:*?"<>|\r\n]/g, "_").slice(0, 180);
     const signed = await getStorageProvider().getSignedUrl(asset.storageKey, ACCESS_TTL_SECONDS, {
       disposition,
-      filename: disposition === "attachment" ? "source-asset" : undefined,
+      filename: disposition === "attachment" ? filename : undefined,
       assetScope: { workspaceId: context.workspace.id, sourceItemId: source.id, assetId: asset.id },
     });
     return NextResponse.json({ url: signed.data.url, expiresInSeconds: ACCESS_TTL_SECONDS, disposition });

@@ -130,5 +130,5 @@ export function maskSecret(secret: string): string {
 }
 
 export function secretLastFour(secret: string): string {
-  return secret.slice(-4);
+  return secret.length <= 8 ? "••••" : secret.slice(-4);
 }

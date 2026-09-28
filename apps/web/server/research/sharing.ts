@@ -7,7 +7,7 @@ import { researchBlocksSchema } from "./contracts";
 import { researchMember, ResearchError, type ResearchActor } from "./access";
 import { getLegacyResearchResult } from "./legacy";
 
-const shareableKinds = new Set<ResearchSource["kind"]>(["MATERIAL", "BENCHMARK_ACCOUNT", "BENCHMARK_WORK", "TREND"]);
+const shareableKinds = new Set<ResearchSource["kind"]>(["MATERIAL", "BENCHMARK_ACCOUNT", "BENCHMARK_WORK", "BENCHMARK_COMMENT", "TREND"]);
 async function createSharedArtifact(tx: Prisma.TransactionClient, actor: ResearchActor, project: { id: string; primaryDraftBranchId: string | null }, source: { kind: "run" | "study"; id: string; title: string; blocks: ResearchBlock[] }) {
   const title = source.title.slice(0, 200);
   const preview = buildResearchSharePreview(title, source.blocks);
@@ -38,7 +38,7 @@ export function buildResearchSharePreview(title: string, blocks: ResearchBlock[]
     lines.push(`来源：${block.sourceRefs.filter(ref => used.has(ref)).join("、")}`, "");
   }
   lines.push("## 可核验来源");
-  const kindName: Record<string, string> = { MATERIAL: "资料", BENCHMARK_ACCOUNT: "对标账号", BENCHMARK_WORK: "对标作品", TREND: "趋势快照" };
+  const kindName: Record<string, string> = { MATERIAL: "资料", BENCHMARK_ACCOUNT: "对标账号", BENCHMARK_WORK: "对标作品", BENCHMARK_COMMENT: "评论样本", TREND: "趋势快照" };
   for (const source of sources.filter(source => used.has(source.ref))) lines.push(`- ${source.ref} ${source.title}（${kindName[source.kind] || "来源"}；采集 ${source.capturedAt ?? "未知"}；发布 ${source.publishedAt ?? "未知"}）${source.href ? ` ${source.href}` : ""}\n  ${source.excerpt}`);
   return { body: lines.join("\n"), sourceCount: used.size, blockCount: selected.length, omitted: blocks.length - selected.length };
 }

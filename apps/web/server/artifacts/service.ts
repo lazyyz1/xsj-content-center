@@ -31,7 +31,7 @@ function strings(value: unknown) {
 
 async function projectForUser(input: { workspaceId: string; userId: string; projectId: string }) {
   const project = await db.contentProject.findFirst({
-    where: { id: input.projectId, workspaceId: input.workspaceId, workspace: { members: { some: { userId: input.userId } } } },
+    where: { id: input.projectId, workspaceId: input.workspaceId, workspace: { disabledAt: null, members: { some: { userId: input.userId, disabledAt: null, user: { disabledAt: null } } } } },
     select: { id: true, primaryDraftBranchId: true, workspace: { select: { members: { where: { userId: input.userId }, take: 1, select: { role: true } } } } },
   });
   if (!project) throw new ArtifactServiceError("ARTIFACT_NOT_FOUND", "产出不存在。");
@@ -82,7 +82,7 @@ export async function createTextArtifact(input: { workspaceId: string; userId: s
   const project = await projectForUser(input);
   requireWrite(project.role);
   const sourceMessage = await db.assistantMessage.findFirst({
-    where: { id: input.sourceMessageId, role: "ASSISTANT", status: "COMPLETED", thread: { workspaceId: input.workspaceId, projectId: input.projectId, canvasObjectId: null } },
+    where: { id: input.sourceMessageId, role: "ASSISTANT", status: "COMPLETED", thread: { workspaceId: input.workspaceId, projectId: input.projectId, canvasObjectId: null, createdById: input.userId } },
     select: { id: true, content: true, metadata: true, artifactId: true },
   });
   if (!sourceMessage) throw new ArtifactServiceError("ARTIFACT_INVALID_INPUT", "这条回复不存在或还没有完成。");
@@ -105,7 +105,7 @@ export async function applyTextArtifactRevision(input: { workspaceId: string; us
   const project = await projectForUser(input);
   requireWrite(project.role);
   const message = await db.assistantMessage.findFirst({
-    where: { id: input.sourceMessageId, role: "ASSISTANT", status: "COMPLETED", thread: { workspaceId: input.workspaceId, projectId: input.projectId, canvasObjectId: null } },
+    where: { id: input.sourceMessageId, role: "ASSISTANT", status: "COMPLETED", thread: { workspaceId: input.workspaceId, projectId: input.projectId, canvasObjectId: null, createdById: input.userId } },
     select: { id: true, artifactId: true, metadata: true, aiRunId: true },
   });
   if (!message) throw new ArtifactServiceError("ARTIFACT_INVALID_INPUT", "这条修改结果不存在或还没有完成。");

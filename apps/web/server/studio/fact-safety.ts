@@ -59,7 +59,13 @@ export function downgradeStudioFactText(text: string, ownFacts: string[]) {
 export function inspectStudioFactText(text: string, ownFacts: string[]) {
   const hasPromise = promise.test(promiseText(text));
   const hasPersonalExperience = firstPersonExperience.test(text) || firstPersonTrackRecord.test(text);
-  const hasNumber = numericFact.test(text);
+  // Counts of requested writing elements are not claims about business performance.
+  const writingCount = "[一二三四五六七八九十\\d]+(?:\\s*[-–—~～至到]\\s*[一二三四五六七八九十\\d]+)?";
+  const writingItem = "(?:标题|选题|标签|卖点|要点|段落|口播稿|文案|备选方案|备选版本)";
+  const numberCheck = text.replace(new RegExp(writingCount + "\\s*(?:个|条|项|段|篇|版)\\s*" + writingItem, "gu"), "写作安排")
+    .replace(new RegExp(writingItem + "\\s*[:：]?\\s*" + writingCount + "\\s*(?:个|条|项|段|篇|版)", "gu"), "写作安排");
+  const adviceNumbers = numberCheck.replace(/(?:建议|可以|不妨|试着|每天|下班或收工前)(?:[^。！？\n]{0,12})?(?:留|花|用|预留|安排)\s*\d+\s*分钟/gu, "时间安排");
+  const hasNumber = numericFact.test(adviceNumbers);
   const hasResultClaim = resultClaim.test(text);
   const hasSupport = supported(text, ownFacts);
   const isHypothetical = hypothetical.test(text);

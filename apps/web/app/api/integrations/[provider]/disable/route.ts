@@ -1,3 +1,4 @@
+import { rejectCrossOrigin } from "@/server/account-api";
 import { canManageWorkspace } from "@content-center/core";
 import { systemManagedProvidersEnabled } from "@content-center/integrations";
 import { NextResponse } from "next/server";
@@ -6,6 +7,7 @@ import { configurableProviderOrResponse, integrationApiError } from "@/server/in
 import { integrationService } from "@/server/integrations";
 
 export async function POST(_request: Request, route: { params: Promise<{ provider: string }> }) {
+  const rejected = rejectCrossOrigin(_request); if (rejected) return rejected;
   if (systemManagedProvidersEnabled()) return apiError("SYSTEM_MANAGED_PROVIDERS", 403);
   const context = await getApiWorkspaceContext();
   if (!context) return apiError("UNAUTHORIZED", 401);

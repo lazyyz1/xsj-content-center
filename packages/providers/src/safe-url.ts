@@ -45,7 +45,7 @@ export function isBlockedAddress(address: string): boolean {
   const family = isIP(normalized);
   if (family === 4) return isBlockedIpv4(normalized);
   if (family !== 6) return true;
-  if (normalized === "::" || normalized === "::1") return true;
+  if (normalized.startsWith("::")) return true;
   if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
   if (/^fe[89ab]/.test(normalized)) return true;
   const mapped = normalized.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];

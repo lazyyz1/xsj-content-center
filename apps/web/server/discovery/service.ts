@@ -228,22 +228,27 @@ export async function getDiscoveryAccountDetail(input: {
   return { items: [publicAccount(result.item)], cached: result.cached };
 }
 
-export async function getBenchmarkWorks(input: { workspaceId: string; userId: string; benchmarkId: string; sort: "LATEST" | "POPULAR" }) {
+export async function getBenchmarkWorks(input: { workspaceId: string; userId: string; benchmarkId: string; sort: "LATEST" | "POPULAR"; offset?: number }) {
   const benchmark = await db.benchmarkAccount.findFirst({ where: { id: input.benchmarkId, workspaceId: input.workspaceId, enabled: true } });
   if (!benchmark) throw new DiscoveryServiceError("DISCOVERY_NOT_FOUND", "对标账号不存在。");
   const page = await cachedProviderCall({
     ...input,
     operation: `DISCOVERY_ACCOUNT_WORKS_${benchmark.platform}`,
-    cacheKey: JSON.stringify({ id: benchmark.externalAccountId, sort: input.sort }),
+    cacheKey: JSON.stringify({ id: benchmark.externalAccountId, sort: input.sort, offset: input.offset ?? 0 }),
     call: (provider) => provider.accountWorks.list({
       platform: benchmark.platform as DiscoveryPlatform,
       accountId: benchmark.externalAccountId,
+      offset: input.offset ?? 0,
       sortType: input.sort === "LATEST" ? "2" : "4",
     }),
   });
   if (!page.cached) await db.benchmarkAccount.update({ where: { id: benchmark.id }, data: { lastSyncedAt: new Date() } });
   const items = page.items.map(publicContent);
-  await db.$transaction(items.slice(0, 30).map((item) => db.benchmarkContentSnapshot.upsert({
+  await db.$transaction(async (tx) => {
+    for (const item of items) {
+      const previous = await tx.benchmarkContentSnapshot.findUnique({ where: { workspaceId_platform_externalId: { workspaceId: input.workspaceId, platform: item.platform, externalId: item.externalId } }, select: { metadata: true } });
+      const previousMetadata = previous?.metadata && typeof previous.metadata === "object" && !Array.isArray(previous.metadata) ? previous.metadata : {};
+      const snapshot = await tx.benchmarkContentSnapshot.upsert({
     where: { workspaceId_platform_externalId: { workspaceId: input.workspaceId, platform: item.platform, externalId: item.externalId } },
     create: {
       workspaceId: input.workspaceId,
@@ -254,27 +259,32 @@ export async function getBenchmarkWorks(input: { workspaceId: string; userId: st
       url: item.originalUrl,
       authorName: item.authorName,
       coverUrl: item.coverUrl,
-      metadata: inputJson({ contentType: item.contentType, description: item.description?.slice(0, 500) ?? null, metrics: item.metrics }),
+      metadata: inputJson({ contentType: item.contentType, description: item.description?.slice(0, 500) ?? null, metrics: item.metrics, durationMs: item.durationMs }),
       publishedAt: item.publishedAt ? new Date(item.publishedAt) : null,
     },
     update: {
-      benchmarkAccountId: benchmark.id,
       title: item.title || item.description || "未命名对标内容",
       url: item.originalUrl,
       authorName: item.authorName,
       coverUrl: item.coverUrl,
-      metadata: inputJson({ contentType: item.contentType, description: item.description?.slice(0, 500) ?? null, metrics: item.metrics }),
+      metadata: inputJson({ ...previousMetadata, contentType: item.contentType, description: item.description?.slice(0, 500) ?? null, metrics: item.metrics, durationMs: item.durationMs }),
       publishedAt: item.publishedAt ? new Date(item.publishedAt) : null,
-      observedAt: new Date(),
+      ...(page.cached ? {} : { observedAt: new Date() }),
     },
-  })));
+      });
+      if (snapshot.benchmarkAccountId !== benchmark.id) throw new DiscoveryServiceError("DISCOVERY_DUPLICATE", "返回作品已属于另一个对标账号，本次刷新未保存。请核对账号身份。");
+      if (!page.cached) await tx.benchmarkMetricObservation.create({ data: { snapshotId: snapshot.id, metrics: inputJson(item.metrics) } });
+    }
+  });
   const [sources, ideaReferences] = await Promise.all([
     items.length ? db.sourceItem.findMany({ where: { workspaceId: input.workspaceId, OR: items.map((item) => ({ sourcePlatform: item.platform, externalId: item.externalId })) }, select: { id: true, sourcePlatform: true, externalId: true } }) : [],
     items.length ? db.contentIdeaReference.findMany({ where: { idea: { workspaceId: input.workspaceId }, OR: items.map((item) => ({ platform: item.platform, externalId: item.externalId })) }, select: { platform: true, externalId: true } }) : [],
   ]);
   const sourceIds = new Map(sources.map((item) => [`${item.sourcePlatform}:${item.externalId}`, item.id]));
   const ideaKeys = new Set(ideaReferences.map((item) => `${item.platform}:${item.externalId}`));
-  return { items: items.map((item) => ({ ...item, sourceItemId: sourceIds.get(`${item.platform}:${item.externalId}`) ?? null, inIdea: ideaKeys.has(`${item.platform}:${item.externalId}`) })), cached: page.cached };
+  const nextOffset = page.hasMore !== false && page.nextOffset !== null && page.nextOffset !== undefined && page.nextOffset > (input.offset ?? 0) ? page.nextOffset : null;
+  return { items: items.map((item) => ({ ...item, sourceItemId: sourceIds.get(`${item.platform}:${item.externalId}`) ?? null, inIdea: ideaKeys.has(`${item.platform}:${item.externalId}`) })), cached: page.cached, hasMore: page.hasMore, nextOffset,
+    coverage: nextOffset !== null ? "MORE_AVAILABLE" : page.hasMore === false ? "PROVIDER_EXHAUSTED" : "PAGINATION_UNAVAILABLE" };
 }
 
 export function listBenchmarks(workspaceId: string, take = 12) {

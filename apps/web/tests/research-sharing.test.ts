@@ -4,7 +4,7 @@ vi.mock("server-only", () => ({}));
 import { db } from "@content-center/db";
 import { getArtifactForUser } from "../server/artifacts/service";
 import { ArtifactContextAdapter } from "../server/artifacts/context-adapter";
-import { getResearchResult } from "../server/research/read-model";
+import { getResearchResult, researchResultLibrary } from "../server/research/read-model";
 import { buildResearchSharePreview, shareResearchRunToProject } from "../server/research/sharing";
 
 describe("explicit Research result handoff", () => {
@@ -36,10 +36,14 @@ describe("explicit Research result handoff", () => {
     expect(preview.body).toContain("SHARED_FINDING");
     expect(preview.body).toContain("Actual public excerpt");
     expect(preview.body).not.toMatch(/SECRET_PROFILE|SECRET_USER_NOTE/);
+    const library = await researchResultLibrary(actor(), {});
+    expect(library.items.find(item => item.id === runId)).toMatchObject({ summary: "SHARED_FINDING", sourceCount: 1, sampleCount: null, sharedCount: 0 });
+    expect((await researchResultLibrary({ workspaceId, userId: editor }, {})).items).toEqual([]);
   });
   it("creates one durable Artifact for concurrent explicit shares while keeping the session private", async () => {
     const results = await Promise.all([shareResearchRunToProject(actor(), runId, projectId), shareResearchRunToProject(actor(), runId, projectId)]);
     expect(results[0].artifactId).toBe(results[1].artifactId);
+    expect((await researchResultLibrary(actor(), {})).items.find(item => item.id === runId)?.sharedCount).toBe(1);
     expect(await db.artifact.count({ where: { projectId, sourceResearchRunId: runId } })).toBe(1);
     expect((await getArtifactForUser({ workspaceId, userId: viewer, projectId, artifactId: results[0].artifactId })).content).toContain("SHARED_FINDING");
     expect((await new ArtifactContextAdapter().resolve({ workspaceId, userId: owner, projectId, artifactId: results[0].artifactId })).item.content).toContain("SHARED_FINDING");

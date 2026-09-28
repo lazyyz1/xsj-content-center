@@ -1,12 +1,12 @@
-import { notFound } from "next/navigation";
+import { creationModelSchema } from "@/server/creation/models";
+import { notFound, redirect } from "next/navigation";
 import { StudioShell } from "@/components/projects/studio-shell";
 import { WorkbenchStart } from "@/components/workbench-start";
 import { requireWorkspace } from "@/server/access";
-import { getDashboardWork } from "@/server/dashboard";
 import { loadWorkbenchPageData } from "@/server/workbench-page-data";
 import { ArtifactServiceError } from "@/server/artifacts/service";
 
-export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ project?: string; node?: string }> }) {
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ project?: string; node?: string; start?: string; skill?: string }> }) {
   const { session, workspace, role } = await requireWorkspace();
   const query = await searchParams;
   const projectId = typeof query.project === "string" ? query.project.trim() : "";
@@ -19,9 +19,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       throw error;
     });
     if (!data) notFound();
-    return <div className="dashboard-workbench"><div className="studio-page"><StudioShell {...data} activeNode={node} /></div></div>;
+    if (node?.startsWith("source:")) {
+      const sourceId = node.slice("source:".length);
+      if (!data.project.sources.some(source => source.sourceItem.id === sourceId)) notFound();
+      redirect(`/library/${encodeURIComponent(sourceId)}`);
+    }
+    return <div className="dashboard-workbench"><div className="studio-page"><StudioShell {...data} activeNode={node} initialRequest={query.start === "1" && data.project.description ? { content: data.project.description, sourceItemIds: data.project.sources.map(source => source.sourceItem.id), skillVersionId: data.methods.selected[0]?.methodVersionId ?? null, modelSelection: creationModelSchema.safeParse(data.project.creationModel).data ?? null } : undefined} /></div></div>;
   }
 
-  const work = await getDashboardWork(workspace.id);
-  return <WorkbenchStart canCreate={role !== "VIEWER"} projects={work.projects.map((project) => ({ id: project.id, title: project.title, updatedAt: project.updatedAt.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) }))} />;
+  return <WorkbenchStart initialSkillId={typeof query.skill === "string" ? query.skill : undefined} canCreate={role !== "VIEWER"} draftKey={`xsj-start-draft:${workspace.id}:${session.user.id}`} />;
 }

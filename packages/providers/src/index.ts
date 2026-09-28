@@ -26,3 +26,5 @@ export * from "./redfox/index";
 export * from "./doubao/index";
 export * from "./local-asr/index";
 export * from "./openai-compatible/index";
+
+export * from "./provider-fetch";

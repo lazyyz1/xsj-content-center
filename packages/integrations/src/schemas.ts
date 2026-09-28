@@ -3,7 +3,7 @@ import { AI_PROVIDERS, getAIModel } from "./model-catalog";
 import { CURRENT_KIMI_PRODUCT_MODEL, KIMI_INTEGRATION_TYPE } from "./kimi-model-policy";
 import { normalizeLLMPublicConfig } from "./kimi-model-policy";
 
-export const CONFIGURABLE_INTEGRATION_PROVIDERS = ["REDFOX", "DOUBAO_ASR", "TRANSCRIPTION", "LLM"] as const;
+export const CONFIGURABLE_INTEGRATION_PROVIDERS = ["REDFOX", "DOUBAO_ASR", "TRANSCRIPTION", "LLM", "WEB_SEARCH"] as const;
 export type ConfigurableIntegrationProvider = (typeof CONFIGURABLE_INTEGRATION_PROVIDERS)[number];
 
 const optionalText = (max: number) =>
@@ -99,13 +99,24 @@ const legacyKimiConfigSchema = z
 const catalogLLMConfigSchema = z.object({
   provider: z.enum(AI_PROVIDERS),
   modelId: z.string().trim().min(1).max(200),
+  apiModelId: optionalText(200),
+  modelDisplayName: optionalText(80),
   baseUrl: optionalUrl,
   apiKey: optionalText(10_000),
 }).strict().superRefine((config, context) => {
   if (!getAIModel(config.provider, config.modelId)) context.addIssue({ code: "custom", path: ["modelId"], message: "Model is not in the approved catalog." });
 }).transform((config) => ({ ...config, baseUrl: config.baseUrl ?? getAIModel(config.provider, config.modelId)!.defaultBaseUrl }));
 
-export const llmConfigSchema = z.union([catalogLLMConfigSchema, legacyKimiConfigSchema]);
+const customLLMConfigSchema = z.object({
+  provider: z.literal("CUSTOM"),
+  serviceName: z.string().trim().min(1).max(80),
+  modelId: z.string().trim().min(1).max(200),
+  apiModelId: optionalText(200),
+  modelDisplayName: optionalText(80),
+  baseUrl: z.string().trim().url().max(2000),
+  apiKey: optionalText(10000),
+}).strict();
+export const llmConfigSchema = z.union([catalogLLMConfigSchema, legacyKimiConfigSchema, customLLMConfigSchema]);
 
 const fixtureLLMConfigSchema = z
   .object({
@@ -125,6 +136,7 @@ const fixtureLLMConfigSchema = z
   }));
 
 export const providerConfigSchemas = {
+  WEB_SEARCH: z.object({ apiKey: optionalText(10_000) }).strict(),
   REDFOX: redfoxConfigSchema,
   DOUBAO_ASR: doubaoAsrConfigSchema,
   TRANSCRIPTION: transcriptionConfigSchema,
@@ -135,6 +147,7 @@ export const providerConfigFields: Record<
   ConfigurableIntegrationProvider,
   { publicFields: readonly string[]; secretFields: readonly string[]; primarySecret?: string }
 > = {
+  WEB_SEARCH: { publicFields: [], secretFields: ["apiKey"], primarySecret: "apiKey" },
   REDFOX: { publicFields: ["baseUrl"], secretFields: ["apiKey"], primarySecret: "apiKey" },
   DOUBAO_ASR: {
     publicFields: ["authMode", "baseUrl", "appId", "resourceId", "protocol", "boostingTableId", "boostingTableName"],
@@ -145,7 +158,7 @@ export const providerConfigFields: Record<
     publicFields: ["source", "qualityMode", "selectionMode", "manualModel", "fallbackToDoubao", "endpoint"],
     secretFields: [],
   },
-  LLM: { publicFields: ["provider", "modelId", "baseUrl", "legacyProductModel", "integrationType", "productModel", "apiModelId"], secretFields: ["apiKey"], primarySecret: "apiKey" },
+  LLM: { publicFields: ["modelDisplayName", "serviceName", "provider", "modelId", "baseUrl", "legacyProductModel", "integrationType", "productModel", "apiModelId"], secretFields: ["apiKey"], primarySecret: "apiKey" },
 };
 
 export function normalizePublicProviderConfig(
@@ -193,7 +206,12 @@ export function parseProviderConfig(
   if (provider === "LLM" && options.allowFixture) {
     return fixtureLLMConfigSchema.parse(input) as Record<string, unknown>;
   }
-  return providerConfigSchemas[provider].parse(input) as Record<string, unknown>;
+  const parsed = providerConfigSchemas[provider].parse(input) as Record<string, unknown>;
+  if (typeof parsed.baseUrl === "string") {
+    const url = new URL(parsed.baseUrl);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error("INVALID_PROVIDER_URL");
+  }
+  return parsed;
 }
 
 export function splitProviderConfig(provider: ConfigurableIntegrationProvider, config: Record<string, unknown>) {

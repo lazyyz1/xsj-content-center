@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sourceUploadStatusLabel } from "../lib/source-upload-client";
-import { uploadErrorMessage, validateUploadedFile } from "../server/source-upload";
+import { readUploadFormData, uploadErrorMessage, validateUploadedFile } from "../server/source-upload";
 import { materialPdf } from "./fixtures/material-files";
 
 describe("source upload validation", () => {
@@ -37,5 +37,20 @@ describe("source upload validation", () => {
     expect(sourceUploadStatusLabel({ status: "QUEUED", processingStatus: "QUEUED" })).toBe("已上传，正在读取");
     expect(sourceUploadStatusLabel({ status: "QUEUED", processingStatus: "SUCCEEDED" })).toBe("已准备好");
     expect(sourceUploadStatusLabel({ status: "QUEUED", processingStatus: "FAILED" })).toBe("上传成功 · 读取失败");
+  });
+});
+
+describe("bounded upload request", () => {
+  it("reads an ordinary multipart form", async () => {
+    const form = new FormData(); form.append("files", new File(["hello"], "note.txt"));
+    const parsed = await readUploadFormData(new Request("http://localhost/upload", {method:"POST",body:form}));
+    expect((parsed.get("files") as File).name).toBe("note.txt");
+  });
+  it("rejects oversized declared and chunked bodies before parsing", async () => {
+    const form = new FormData(); form.append("files", new File(["x".repeat(256)], "note.txt"));
+    const encoded = new Response(form);
+    const bytes = await encoded.arrayBuffer();
+    await expect(readUploadFormData(new Request("http://localhost/upload", {method:"POST",body:bytes,headers:encoded.headers}),128)).rejects.toThrow("UPLOAD_BATCH_TOO_LARGE");
+    await expect(readUploadFormData(new Request("http://localhost/upload", {method:"POST",body:"x",headers:{"content-length":"999","content-type":"multipart/form-data; boundary=x"}}),128)).rejects.toThrow("UPLOAD_BATCH_TOO_LARGE");
   });
 });

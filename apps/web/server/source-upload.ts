@@ -5,8 +5,8 @@ import { extractDocxText, extractPdfText, validateImageBuffer } from "@content-c
 export const MAX_UPLOADS_PER_REQUEST = 10;
 
 const LIMITS = {
-  VIDEO: 500 * 1024 * 1024,
-  AUDIO: 200 * 1024 * 1024,
+  VIDEO: 50 * 1024 * 1024,
+  AUDIO: 50 * 1024 * 1024,
   TEXT: 25 * 1024 * 1024,
   DOCUMENT: 25 * 1024 * 1024,
   IMAGE: 25 * 1024 * 1024,
@@ -130,11 +130,31 @@ export function uploadErrorMessage(code: string) {
   return {
     UNSUPPORTED_FILE_TYPE: "不支持这种文件。",
     EMPTY_FILE: "文件为空。",
-    FILE_TOO_LARGE: "文件太大。",
+    FILE_TOO_LARGE: "文件太大：音视频最多 50 MB，文档和图片最多 25 MB。",
     MIME_MISMATCH: "文件内容与扩展名不匹配。",
     TEXT_ENCODING_UNSUPPORTED: "暂时只支持 UTF-8 文本文件。",
     PDF_INVALID: "无法打开这份 PDF，请检查文件是否损坏或已加密。",
     DOCX_TEXT_EMPTY: "无法读取这份 Word 文档的文字。",
     IMAGE_INVALID: "无法读取这张图片，请更换文件后重试。",
   }[code] ?? "上传失败，请重试。";
+}
+
+// Bound the body before multipart parsing, including requests without Content-Length.
+export async function readUploadFormData(request: Request, maxBytes = 52 * 1024 * 1024) {
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) throw new Error("UPLOAD_BATCH_TOO_LARGE");
+  if (!request.headers.get("content-type")?.toLowerCase().startsWith("multipart/form-data")) throw new Error("INVALID_UPLOAD_FORM");
+  const reader = request.body?.getReader();
+  if (!reader) throw new Error("INVALID_UPLOAD_FORM");
+  const chunks: Uint8Array[] = []; let size = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) throw new Error("UPLOAD_BATCH_TOO_LARGE");
+      chunks.push(value);
+    }
+  } finally { await reader.cancel().catch(() => undefined); }
+  return new Response(Buffer.concat(chunks), { headers: { "content-type": request.headers.get("content-type")! } }).formData();
 }

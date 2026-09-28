@@ -67,6 +67,7 @@ describe("CONTENT_INGEST integration", () => {
     const address = localFixture.address();
     if (!address || typeof address === "string") throw new Error("Fixture did not bind");
     fixtureOrigin = `http://127.0.0.1:${address.port}`;
+    process.env.PROVIDER_TEST_ORIGIN = fixtureOrigin;
     process.env.INGEST_TEST_FIXTURE_ORIGIN = fixtureOrigin;
     await new IntegrationService().saveIntegrationConfig({
       workspaceId,
@@ -78,6 +79,7 @@ describe("CONTENT_INGEST integration", () => {
   });
 
   afterAll(async () => {
+    delete process.env.PROVIDER_TEST_ORIGIN;
     await Promise.all([
       worker.close(),
       events.close(),

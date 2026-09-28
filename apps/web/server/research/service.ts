@@ -1,3 +1,4 @@
+import { LLMError } from "@content-center/providers";
 import "server-only";
 import { createHash } from "node:crypto";
 import { db, type Prisma } from "@content-center/db";
@@ -10,13 +11,24 @@ import { researchBlocksSchema, researchScopeSchema, runInputSchema, sessionInput
 import { resolveResearchInputs } from "./inputs";
 import { researchModeInstruction, researchModeSchema, validateAndRenderModeAnswer, type ResearchMode } from "./mode-output";
 
+import { collectAccountResearchEvidence, planAccountResearch } from "./account-research-evidence";
+import { parseAccountResearchState } from "./account-research-contract";
+import { accountResearchCoverage, executeAccountResearchRun } from "./account-research-run";
+
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 export const RESEARCH_LEASE_MS = 15 * 60 * 1000;
 export async function createResearchSession(actor: ResearchActor, value: unknown) {
   await researchMember(actor, true);
   const input = sessionInputSchema.parse(value);
   if (input.projectId && !await db.contentProject.findFirst({ where: { id: input.projectId, workspaceId: actor.workspaceId, status: { not: "ARCHIVED" } }, select: { id: true } })) throw new ResearchError("PROJECT_NOT_FOUND", "项目不存在或不可访问。", 404);
-  const session = await db.researchSession.upsert({ where: { workspaceId_createdById_requestKey: { workspaceId: actor.workspaceId, createdById: actor.userId, requestKey: input.requestKey } }, create: { workspaceId: actor.workspaceId, createdById: actor.userId, ...input }, update: {} });
+  const identity = { workspaceId_createdById_requestKey: { workspaceId: actor.workspaceId, createdById: actor.userId, requestKey: input.requestKey } };
+  const session = await db.researchSession.upsert({ where: identity, create: { workspaceId: actor.workspaceId, createdById: actor.userId, ...input }, update: {} }).catch(async (error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
+      const concurrent = await db.researchSession.findUnique({ where: identity });
+      if (concurrent) return concurrent;
+    }
+    throw error;
+  });
   if (session.title !== input.title || session.entryTemplate !== input.entryTemplate || session.projectId !== (input.projectId ?? null)) throw new ResearchError("REQUEST_CONFLICT", "这次请求标识已用于另一个研究，请重新发起。");
   return session;
 }
@@ -28,26 +40,41 @@ export function researchRunExpired(run: { status: string; createdAt: Date }) { r
 export async function reserveResearchRun(actor: ResearchActor, sessionId: string, value: unknown) {
   const session = await researchSessionForUser({ ...actor, sessionId }, true);
   const input = runInputSchema.parse(value);
+  const [requested, latest] = await Promise.all([
+    db.researchRun.findUnique({ where: { sessionId_requestKey: { sessionId, requestKey: input.requestKey } } }),
+    db.researchRun.findFirst({ where: { sessionId }, orderBy: { version: "desc" } }),
+  ]);
+  const scope = researchScopeSchema.parse(input.scope ?? requested?.inputScope ?? latest?.inputScope ?? {});
+  scope.materialIds = [...new Set(scope.materialIds)].sort();
+  scope.benchmarkAccountIds = [...new Set(scope.benchmarkAccountIds)].sort();
+  scope.trendKeys = [...new Set(scope.trendKeys)].sort();
+  if (session.entryTemplate === "BREAKDOWN" && !scope.materialIds.length) throw new ResearchError("MATERIAL_REQUIRED", "内容拆解请先选择至少一条资料。", 400);
+  if (session.entryTemplate === "BENCHMARK" && !scope.benchmarkAccountIds.length) throw new ResearchError("BENCHMARK_REQUIRED", "对标研究请先选择至少一个对标账号。", 400);
+  if (scope.researchProfile === "ACCOUNT_DOSSIER" && session.entryTemplate !== "BENCHMARK") throw new ResearchError("ACCOUNT_SCOPE_REQUIRED", "账号档案需要使用对标研究会话。", 400);
+  const hash = createHash("sha256").update(JSON.stringify({ question: input.question, scope })).digest("hex");
+  // Evidence is captured before taking the row lock; no provider call happens here.
+  const evidence = scope.researchProfile === "ACCOUNT_DOSSIER" && !requested ? await collectAccountResearchEvidence(actor, scope) : null;
   return db.$transaction(async tx => {
     await tx.$queryRaw`SELECT "id" FROM "ResearchSession" WHERE "id" = ${session.id} AND "workspaceId" = ${actor.workspaceId} AND "createdById" = ${actor.userId} FOR UPDATE`;
     const existing = await tx.researchRun.findUnique({ where: { sessionId_requestKey: { sessionId, requestKey: input.requestKey } } });
-    const previous = await tx.researchRun.findFirst({ where: { sessionId }, orderBy: { version: "desc" } });
-    const scope = researchScopeSchema.parse(input.scope ?? existing?.inputScope ?? previous?.inputScope ?? {});
-    scope.materialIds = [...new Set(scope.materialIds)].sort();
-    scope.benchmarkAccountIds = [...new Set(scope.benchmarkAccountIds)].sort();
-    scope.trendKeys = [...new Set(scope.trendKeys)].sort();
-    if (session.entryTemplate === "BREAKDOWN" && !scope.materialIds.length) throw new ResearchError("MATERIAL_REQUIRED", "内容拆解请先选择至少一条资料。", 400);
-    if (session.entryTemplate === "BENCHMARK" && !scope.benchmarkAccountIds.length) throw new ResearchError("BENCHMARK_REQUIRED", "对标研究请先选择至少一个对标账号。", 400);
-    const hash = createHash("sha256").update(JSON.stringify({ question: input.question, scope })).digest("hex");
     if (existing) {
       if (existing.requestHash !== hash) throw new ResearchError("REQUEST_CONFLICT", "请求标识已被使用，请重新提交。");
-      return { run: existing, created: false };
+      return { run: existing, created: false, unchanged: false };
     }
+    const previous = await tx.researchRun.findFirst({ where: { sessionId }, orderBy: { version: "desc" } });
+    const completed = evidence ? await tx.researchRun.findFirst({ where: { sessionId, workspaceId: actor.workspaceId, requestedById: actor.userId, status: "COMPLETED" }, orderBy: { version: "desc" } }) : null;
+    const previousState = completed ? parseAccountResearchState(completed.coverage) : null;
+    const accountState = evidence ? planAccountResearch(evidence, previousState, completed?.id ?? null) : null;
+    if (completed && previousState && accountState && completed.requestHash === hash && previousState.evidence.fingerprint === evidence?.fingerprint && accountState.analyzedRefs.length === 0 && accountState.pendingRefs.length === 0) return { run: completed, created: false, unchanged: true };
     await tx.researchRun.updateMany({ where: { sessionId, status: { in: ["QUEUED", "RUNNING"] }, createdAt: { lt: new Date(Date.now() - RESEARCH_LEASE_MS) } }, data: { status: "FAILED", errorCode: "INTERRUPTED", errorMessage: "上次研究已中断，可以重新发起。", finishedAt: new Date() } });
-    if (await tx.researchRun.findFirst({ where: { sessionId, status: { in: ["QUEUED", "RUNNING"] } }, select: { id: true } })) throw new ResearchError("RUN_ACTIVE", "当前研究仍在进行，请等待完成后继续追问。");
-    const run = await tx.researchRun.create({ data: { workspaceId: actor.workspaceId, sessionId, requestedById: actor.userId, requestKey: input.requestKey, requestHash: hash, question: input.question, inputScope: json(scope), version: (previous?.version ?? 0) + 1 } });
+    const active = await tx.researchRun.findFirst({ where: { sessionId, status: { in: ["QUEUED", "RUNNING"] } } });
+    if (active) {
+      if (accountState && active.requestHash === hash) return { run: active, created: false, unchanged: false };
+      throw new ResearchError("RUN_ACTIVE", "当前研究仍在进行，请等待完成后继续追问。");
+    }
+    const run = await tx.researchRun.create({ data: { workspaceId: actor.workspaceId, sessionId, requestedById: actor.userId, requestKey: input.requestKey, requestHash: hash, question: input.question, inputScope: json(scope), version: (previous?.version ?? 0) + 1, ...(accountState ? { coverage: json(accountResearchCoverage(accountState)) } : {}) } });
     await tx.researchSession.update({ where: { id: sessionId }, data: { updatedAt: new Date() } });
-    return { run, created: true };
+    return { run, created: true, unchanged: false };
   });
 }
 
@@ -60,6 +87,7 @@ export async function executeResearchRun(actor: ResearchActor, sessionId: string
   try {
     const run = await db.researchRun.findFirstOrThrow({ where: running });
     const scope = researchScopeSchema.parse(run.inputScope);
+    if (scope.researchProfile === "ACCOUNT_DOSSIER") { await executeAccountResearchRun(actor, run, dependencies); return; }
     const inputs = await resolveResearchInputs(actor, run.question, scope, mode);
     if (mode === "BREAKDOWN" && !inputs.sourceRefs.some(source => source.kind === "MATERIAL" && inputs.context.some(item => item.ref === source.ref))) throw new ResearchError("NO_READABLE_MATERIAL", "所选资料尚无可读正文，请先完成提取、转录或理解。", 409);
     const contextHistory = await db.researchRun.findMany({ where: { sessionId, status: "COMPLETED", version: { lt: run.version } }, orderBy: { version: "desc" }, take: 5, select: { question: true, blocks: true } });
@@ -80,7 +108,7 @@ export async function executeResearchRun(actor: ResearchActor, sessionId: string
     const blocks = validateResearchBlocks([...inputs.blocks, ...aiBlocks, { id: "sources", type: "sources", title: "来源与读取记录", provenance: "REAL_DATA", sourceRefs: inputs.sourceRefs.map(source => source.ref), limitation: inputs.coverage.gaps.join("\n"), refs: inputs.sourceRefs }], inputs.sourceRefs);
     await db.researchRun.updateMany({ where: running, data: { blocks: json(blocks), status: "COMPLETED", stage: "COMPLETED", finishedAt: new Date(), errorCode: null, errorMessage: null } });
   } catch (error) {
-    await db.researchRun.updateMany({ where: running, data: { status: "FAILED", stage: "FAILED", finishedAt: new Date(), errorCode: error instanceof ResearchError ? error.code : "RESEARCH_FAILED", errorMessage: error instanceof ResearchError ? error.message : "本次研究未完成。已有资料和历史成果仍然保留，请检查模型服务后重试。" } });
+    await db.researchRun.updateMany({ where: running, data: { status: "FAILED", stage: "FAILED", finishedAt: new Date(), errorCode: error instanceof ResearchError || error instanceof LLMError ? error.code : "RESEARCH_FAILED", errorMessage: error instanceof ResearchError || error instanceof LLMError ? error.message : "本次研究未完成。已有资料和历史成果仍然保留，请检查模型服务后重试。" } });
   }
 }
 

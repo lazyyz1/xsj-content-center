@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 type Integration = {
-  provider: "REDFOX" | "DOUBAO_ASR" | "TRANSCRIPTION" | "LLM" | "STORAGE";
+  provider: "WEB_SEARCH" | "REDFOX" | "DOUBAO_ASR" | "TRANSCRIPTION" | "LLM" | "STORAGE";
   name: string;
   status: "CONFIGURED" | "UNCONFIGURED" | "NEEDS_RECONFIGURATION" | "ERROR" | "DISABLED" | "MOCK";
   configured: boolean;
@@ -17,8 +17,8 @@ type Integration = {
   usage: readonly string[];
   defaults: Record<string, string>;
   managedBy: "WORKSPACE" | "ENVIRONMENT";
-  connectionTest: "UNSUPPORTED_UNTIL_PROVIDER_STAGE" | "LIVE_API_TEST_NOT_AVAILABLE" | "NOT_APPLICABLE";
-  models?: Array<{ provider: "KIMI" | "DEEPSEEK"; modelId: string; label: string; defaultBaseUrl: string; experimental?: boolean; capabilities: Record<string, boolean> }>;
+  connectionTest: "LIVE" | "UNSUPPORTED_UNTIL_PROVIDER_STAGE" | "LIVE_API_TEST_NOT_AVAILABLE" | "NOT_APPLICABLE";
+  models?: Array<{ provider: "KIMI" | "DEEPSEEK" | "CUSTOM"; modelId: string; label: string; defaultBaseUrl: string; experimental?: boolean; capabilities: Record<string, boolean> }>;
 };
 
 const statusLabel = {
@@ -55,14 +55,14 @@ function friendlyError(error: IntegrationClientError) {
   if (error.code === "INTEGRATION_ENCRYPTION_NOT_CONFIGURED" || error.code === "INVALID_INTEGRATION_ENCRYPTION_KEY") {
     return "密钥加密服务尚未配置，请联系系统管理员。";
   }
-  if (error.code === "INTEGRATION_SECRET_REQUIRED") return "请填写当前认证方式需要的 API 密钥。";
+  if (error.code === "INTEGRATION_SECRET_REQUIRED") return "请填写 API 密钥；更换服务或接口地址时，需要重新输入密钥。";
   if (error.code === "KIMI_NOT_CONFIGURED") return "AI 模型尚未配置，请联系管理员完成设置。";
   if (error.code === "KIMI_MODEL_ID_MISSING") return "请选择一个可用的 AI 模型。";
   if (error.code === "KIMI_AUTH_FAILED") return "AI 模型认证失败，请检查 Provider 配置。";
   if (error.code === "KIMI_MODEL_UNAVAILABLE") return "当前模型配置不可用，请重新选择模型。";
   if (error.code === "INVALID_INTEGRATION_CONFIG") return "配置内容格式不正确，请检查必填项和地址格式。";
   if (error.code === "FORBIDDEN") return "当前账户没有修改服务配置的权限。";
-  return "配置保存失败，请稍后重试。";
+  return "操作未完成，请稍后重试。";
 }
 
 function SecretInput({ label, ariaLabel, value: secret, onChange, required, placeholder }: {
@@ -101,6 +101,8 @@ function SavedSecret({ name, lastFour, onReplace, label = "API Key" }: { name: s
 export function IntegrationCard({ integration, canManage, encryptionConfigured }: { integration: Integration; canManage: boolean; encryptionConfigured: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [testResult, setTestResult] = useState("");
+  const [sampleUrl, setSampleUrl] = useState("");
   const [error, setError] = useState<IntegrationClientError | null>(null);
   const [secret, setSecret] = useState("");
   const [editingSecret, setEditingSecret] = useState(!integration.lastFour);
@@ -109,12 +111,16 @@ export function IntegrationCard({ integration, canManage, encryptionConfigured }
   const initialAuthMode = value(integration.publicConfig, "authMode") || "API_KEY";
   const [authMode, setAuthMode] = useState(initialAuthMode);
   const doubaoHasSelectedSecret = Boolean(integration.lastFour && authMode === initialAuthMode);
-  const initialAIProvider = (value(integration.publicConfig, "provider") || integration.defaults.provider || "KIMI") as "KIMI" | "DEEPSEEK";
+  const initialAIProvider = (value(integration.publicConfig, "provider") || integration.defaults.provider || "KIMI") as "KIMI" | "DEEPSEEK" | "CUSTOM";
   const [aiProvider, setAIProvider] = useState(initialAIProvider);
   const models = integration.models ?? [];
-  const initialModelId = value(integration.publicConfig, "modelId") || integration.defaults.modelId || models.find((model) => model.provider === initialAIProvider)?.modelId || "";
+  const initialModelId = models.find(model => model.provider === initialAIProvider && model.modelId === value(integration.publicConfig, "resolvedModelId"))?.modelId || value(integration.publicConfig, "modelId") || integration.defaults.modelId || models.find((model) => model.provider === initialAIProvider)?.modelId || "";
   const [modelId, setModelId] = useState(initialModelId);
-  const selectedModel = models.find((model) => model.provider === aiProvider && model.modelId === modelId);
+  const [apiModelId, setApiModelId] = useState(value(integration.publicConfig, "apiModelId") || value(integration.publicConfig, "resolvedModelId") || initialModelId);
+  const [modelDisplayName, setModelDisplayName] = useState(value(integration.publicConfig, "modelDisplayName"));
+  const [remoteModels, setRemoteModels] = useState<Array<{ id: string; label: string }>>([]);
+  const [modelListMessage, setModelListMessage] = useState("");
+  const selectedModel = models.find((model) => model.provider === aiProvider && model.modelId === apiModelId) || models.find((model) => model.provider === aiProvider && model.modelId === modelId);
   const [aiBaseUrl, setAIBaseUrl] = useState(value(integration.publicConfig, "baseUrl") || selectedModel?.defaultBaseUrl || integration.defaults.baseUrl || "");
   const aiProviderChanged = integration.provider === "LLM" && aiProvider !== initialAIProvider;
 
@@ -143,6 +149,7 @@ export function IntegrationCard({ integration, canManage, encryptionConfigured }
   }
 
   function configFrom(formData: FormData) {
+    if (integration.provider === "WEB_SEARCH") return secret ? { apiKey: secret } : {};
     if (integration.provider === "REDFOX") return { baseUrl: String(formData.get("baseUrl") || ""), ...(secret ? { apiKey: secret } : {}) };
     if (integration.provider === "DOUBAO_ASR") {
       return {
@@ -157,18 +164,15 @@ export function IntegrationCard({ integration, canManage, encryptionConfigured }
       };
     }
     return {
+      ...(aiProvider === "CUSTOM" ? { serviceName: String(formData.get("serviceName") || "") } : {}),
       provider: aiProvider,
       modelId,
+      ...(apiModelId.trim() ? { apiModelId: apiModelId.trim() } : {}),
+      ...(modelDisplayName.trim() ? { modelDisplayName: modelDisplayName.trim() } : {}),
       baseUrl: aiBaseUrl,
       ...(secret ? { apiKey: secret } : {}),
     };
   }
-
-  const verificationText = integration.provider === "REDFOX"
-    ? "配置保存后，将在首次解析素材时验证。"
-    : integration.provider === "DOUBAO_ASR"
-      ? "配置保存后，将在首次转写时验证。"
-      : "配置保存后，将在首次使用 AI 能力时验证。";
 
   return (
     <Card className="p-6 sm:p-7" aria-label={`${integration.name} 配置`}>
@@ -184,9 +188,10 @@ export function IntegrationCard({ integration, canManage, encryptionConfigured }
 
       {canManage && integration.managedBy === "WORKSPACE" ? (
         <form className="mt-6 grid gap-4 border-t pt-6" action={(formData) => act(async () => { await call(`/api/integrations/${integration.provider}`, "PUT", { config: configFrom(formData) }); })}>
+          {integration.provider === "WEB_SEARCH" ? <>{!editingSecret && integration.lastFour ? <SavedSecret name={integration.name} lastFour={integration.lastFour} onReplace={() => setEditingSecret(true)}/> : null}{editingSecret ? <SecretInput label="Exa API Key" ariaLabel="Exa API Key" value={secret} onChange={setSecret} required={!integration.lastFour} placeholder="输入 Exa API Key"/> : null}<p className="text-sm">密钥加密保存在当前公司空间。<a href="https://dashboard.exa.ai/api-keys" target="_blank" rel="noreferrer">获取 Exa 密钥</a></p></> : null}
           {integration.provider === "REDFOX" ? (
             <>
-              <label className="grid gap-1.5 text-sm">Base URL<Input name="baseUrl" type="url" aria-label="RedFox Base URL" required defaultValue={value(integration.publicConfig, "baseUrl") || integration.defaults.baseUrl} /></label>
+              <label className="grid gap-1.5 text-sm">API 地址<Input name="baseUrl" type="url" aria-label="RedFox Base URL" required defaultValue={value(integration.publicConfig, "baseUrl") || integration.defaults.baseUrl} /></label>
               {!editingSecret && integration.lastFour ? <SavedSecret name={integration.name} lastFour={integration.lastFour} onReplace={() => setEditingSecret(true)} /> : null}
               {editingSecret ? <SecretInput label="API Key" ariaLabel="RedFox API Key" value={secret} onChange={setSecret} required={!integration.lastFour} placeholder={integration.lastFour ? "输入新的 API Key" : "输入 API Key"} /> : null}
             </>
@@ -205,7 +210,7 @@ export function IntegrationCard({ integration, canManage, encryptionConfigured }
               <details className="rounded-xl border border-[color-mix(in_srgb,var(--border)_65%,transparent)] p-4" open={authMode === "LEGACY_APP_TOKEN"}>
                 <summary className="cursor-pointer text-sm font-medium">高级设置</summary>
                 <div className="mt-4 grid gap-4">
-                  <label className="grid gap-1.5 text-sm">Base URL<Input name="baseUrl" type="url" aria-label="豆包语音识别 Base URL" required defaultValue={value(integration.publicConfig, "baseUrl") || integration.defaults.baseUrl} /><span className="text-xs text-[var(--text-secondary)]">默认使用系统提供的服务地址。</span></label>
+                  <label className="grid gap-1.5 text-sm">API 地址<Input name="baseUrl" type="url" aria-label="豆包语音识别 Base URL" required defaultValue={value(integration.publicConfig, "baseUrl") || integration.defaults.baseUrl} /><span className="text-xs text-[var(--text-secondary)]">默认使用系统提供的服务地址。</span></label>
                   <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={authMode === "LEGACY_APP_TOKEN"} onChange={(event) => { setAuthMode(event.target.checked ? "LEGACY_APP_TOKEN" : "API_KEY"); setEditingSecret(true); }} />使用旧版认证</label>
                   {authMode === "LEGACY_APP_TOKEN" ? (
                     <div className="grid gap-4 rounded-xl bg-[var(--surface-elevated)] p-4">
@@ -224,21 +229,39 @@ export function IntegrationCard({ integration, canManage, encryptionConfigured }
           {integration.provider === "LLM" ? (
             <>
               <div className="grid gap-1 rounded-xl bg-[var(--surface-elevated)] p-4 text-sm">
-                <p className="font-medium">当前模型：{selectedModel?.label || modelId || "尚未选择"}</p>
-                <p className="text-xs leading-5 text-[var(--text-secondary)]">模型由管理员统一配置，普通成员继续直接使用内容拆解、提炼和创作。</p>
+                <p className="font-medium">默认模型：{integration.configured ? (value(integration.publicConfig, "resolvedModelId") || value(integration.publicConfig, "modelId") || "已配置") : "尚未设置"}</p>
+                <p className="text-xs leading-5 text-[var(--text-secondary)]">选择下方服务和模型，保存后成为公司默认模型。</p>
               </div>
               {integration.status === "NEEDS_RECONFIGURATION" ? <p className="rounded-xl border border-[color-mix(in_srgb,var(--warning)_35%,transparent)] bg-[color-mix(in_srgb,var(--warning)_8%,transparent)] p-4 text-sm text-[var(--warning)]">当前模型不在已确认目录中，请重新选择。已保存的 API Key 不会被删除。</p> : null}
-              <label className="grid gap-1.5 text-sm">Provider<select aria-label="AI Provider" value={aiProvider} onChange={(event) => { const nextProvider = event.target.value as "KIMI" | "DEEPSEEK"; const nextModel = models.find((model) => model.provider === nextProvider); setAIProvider(nextProvider); setModelId(nextModel?.modelId || ""); setAIBaseUrl(nextModel?.defaultBaseUrl || ""); setEditingSecret(true); }} className="h-10 rounded-[var(--radius)] border bg-transparent px-3"><option value="KIMI">Kimi</option><option value="DEEPSEEK">DeepSeek</option></select></label>
-              <label className="grid gap-1.5 text-sm">默认模型<select aria-label="AI 默认模型" value={modelId} onChange={(event) => setModelId(event.target.value)} className="h-10 rounded-[var(--radius)] border bg-transparent px-3">{!selectedModel && modelId ? <option value={modelId}>{modelId}（现有配置）</option> : null}{models.filter((model) => model.provider === aiProvider).map((model) => <option key={model.modelId} value={model.modelId}>{model.label}{model.experimental ? "（实验）" : ""}</option>)}</select></label>
+              <label className="grid gap-1.5 text-sm">模型服务<select aria-label="AI Provider" value={aiProvider} onChange={(event) => { const nextProvider = event.target.value as "KIMI" | "DEEPSEEK" | "CUSTOM"; const nextModel = models.find((model) => model.provider === nextProvider); setAIProvider(nextProvider); setApiModelId(""); setModelDisplayName(""); setRemoteModels([]); setModelId(nextModel?.modelId || ""); setAIBaseUrl(nextModel?.defaultBaseUrl || ""); setEditingSecret(true); }} className="h-10 rounded-[var(--radius)] border bg-transparent px-3"><option value="KIMI">Kimi</option><option value="DEEPSEEK">DeepSeek</option><option value="CUSTOM">自定义模型服务（OpenAI 兼容）</option></select></label>
+              <label className="grid gap-1.5 text-sm">模型能力配置{aiProvider === "CUSTOM" ? <Input aria-label="自定义模型名称" value={modelId} onChange={event => setModelId(event.target.value)} required placeholder="填写服务商提供的模型名称" /> : <select aria-label="AI 默认模型" value={modelId} onChange={(event) => { setModelId(event.target.value); setApiModelId(""); setModelDisplayName(""); }} className="h-10 rounded-[var(--radius)] border bg-transparent px-3">{!selectedModel && modelId ? <option value={modelId}>{modelId}（现有配置）</option> : null}{models.filter((model) => model.provider === aiProvider).map((model) => <option key={model.modelId} value={model.modelId}>{model.label}{model.experimental ? "（实验）" : ""}</option>)}</select>}</label>
+              <label className="grid gap-1.5 text-sm">实际请求 Model ID<Input aria-label="实际请求 Model ID" value={apiModelId} onChange={event => setApiModelId(event.target.value)} placeholder={modelId} maxLength={200} /><span className="text-xs text-[var(--text-secondary)]">界面配置与服务商 ID 分开保存；测试连接、Agent 和研究均使用此 ID。</span></label>
+              <label className="grid gap-1.5 text-sm">显示名称（可选）<Input aria-label="模型显示名称" value={modelDisplayName} onChange={event => setModelDisplayName(event.target.value)} placeholder="留空使用模型名称" maxLength={80} /></label>
+              <Button type="button" variant="secondary" disabled={busy || !integration.configured || aiProviderChanged} onClick={async () => {
+                setBusy(true); setModelListMessage("正在读取已保存服务的模型列表…");
+                try { const response = await fetch("/api/integrations/LLM/models"); const result = await response.json(); if (!response.ok) throw new Error(result.message || "模型列表读取失败"); setRemoteModels(result.items); setModelListMessage(`已读取 ${result.items.length} 个真实模型，选择后保存配置。`); }
+                catch (cause) { setModelListMessage(cause instanceof Error ? cause.message : "模型列表读取失败，可手动填写 Model ID。"); } finally { setBusy(false); }
+              }}>读取服务商模型</Button>
+              {remoteModels.length ? <label className="grid gap-1.5 text-sm">服务商返回的模型<select aria-label="服务商真实模型" value="" onChange={event => { const item = remoteModels.find(item => item.id === event.target.value); if (item) { setApiModelId(item.id); setModelDisplayName(item.label); } }}><option value="">选择实际模型…</option>{remoteModels.map(item => <option key={item.id} value={item.id}>{item.label} · {item.id}</option>)}</select></label> : null}
+              {modelListMessage ? <p role="status" className="text-xs">{modelListMessage}</p> : null}
+              {aiProvider === "CUSTOM" ? <p className="text-xs text-[var(--text-secondary)]">自定义服务需支持 Chat Completions 文本和 JSON Object 输出。图片、工具调用和深度推理暂不启用。</p> : null}
+              {aiProvider === "CUSTOM" ? <label>服务名称<Input name="serviceName" aria-label="服务名称" defaultValue={value(integration.publicConfig, "serviceName")} required maxLength={80} /></label> : null}
               {selectedModel ? <div className="flex flex-wrap gap-2 text-xs text-[var(--text-secondary)]"><span>能力：</span>{Object.entries(selectedModel.capabilities).filter(([, supported]) => supported).map(([capability]) => <span key={capability} className="rounded-full bg-[var(--surface-elevated)] px-2.5 py-1">{capabilityLabels[capability] || capability}</span>)}</div> : null}
-              <label className="grid gap-1.5 text-sm">Base URL<Input name="baseUrl" type="url" aria-label="AI Base URL" required value={aiBaseUrl} onChange={(event) => setAIBaseUrl(event.target.value)} /></label>
+              <label className="grid gap-1.5 text-sm">API 地址<Input name="baseUrl" type="url" aria-label="AI Base URL" required value={aiBaseUrl} onChange={(event) => setAIBaseUrl(event.target.value)} /></label>
               {!editingSecret && integration.lastFour && !aiProviderChanged ? <SavedSecret name={integration.name} lastFour={integration.lastFour} onReplace={() => setEditingSecret(true)} /> : null}
               {editingSecret ? <SecretInput label="API Key" ariaLabel="AI API Key" value={secret} onChange={setSecret} required={!integration.lastFour || aiProviderChanged} placeholder={aiProviderChanged ? "切换 Provider 时需要填写对应 API Key" : integration.lastFour ? "输入新的 API Key" : "输入 API Key"} /> : null}
             </>
           ) : null}
 
           {editingSecret && integration.lastFour && (secret || doubaoApiKey || doubaoAccessToken) ? <p className="text-xs text-[var(--warning)]">保存后将替换当前 API Key。</p> : null}
-          <p className="text-xs text-[var(--text-secondary)]">{verificationText}</p>
+          <p className="text-xs text-[var(--text-secondary)]">公司配置 · 保存后供当前公司使用。测试连接使用已保存配置，会发送一次最小真实请求，可能产生少量服务费用。</p>
+          {integration.provider !== "LLM" && integration.provider !== "WEB_SEARCH" ? <label className="grid gap-1.5 text-sm">{integration.provider === "REDFOX" ? "测试作品链接" : "测试短音频链接"}<Input type="url" value={sampleUrl} onChange={event => setSampleUrl(event.target.value)} placeholder="https://…" /></label> : null}
+          <Button type="button" variant="secondary" disabled={busy || !integration.configured} onClick={async () => {
+            setBusy(true); setTestResult("正在连接，请稍候…");
+            try { const result = await call(`/api/integrations/${integration.provider}/test`, "POST", sampleUrl ? { sampleUrl } : {}); setTestResult(result.message || "测试完成。"); }
+            catch { setTestResult("测试未完成，请检查权限和网络后重试。"); } finally { setBusy(false); }
+          }}>测试连接</Button>
+          {testResult ? <p role="status" className="text-sm">{testResult}</p> : null}
           <div className="flex flex-wrap gap-2 pt-1">
             <Button disabled={busy || !encryptionConfigured}>保存配置</Button>
             {integration.status === "CONFIGURED" ? <Button type="button" variant="secondary" disabled={busy} onClick={() => act(async () => { await call(`/api/integrations/${integration.provider}/disable`, "POST"); })}>禁用</Button> : null}
@@ -248,7 +271,7 @@ export function IntegrationCard({ integration, canManage, encryptionConfigured }
         </form>
       ) : null}
 
-      {error ? <div className="mt-4" role="alert"><p className="text-sm text-[var(--danger)]">{friendlyError(error)}</p><details className="mt-2 text-xs text-[var(--text-secondary)]"><summary className="cursor-pointer">高级错误详情</summary><p className="mt-2 font-mono">{error.code}: {error.detail}</p></details></div> : null}
+      {error ? <div className="mt-4" role="alert"><p className="text-sm text-[var(--danger)]">{friendlyError(error)}</p></div> : null}
     </Card>
   );
 }

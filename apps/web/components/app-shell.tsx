@@ -150,6 +150,18 @@ export function AppShell({ userName, workspaceName, isSystemAdmin, initialPinned
     }
   }
 
+  useEffect(() => {
+    // Editing belongs to the focused field, not canvas or window-level commands.
+    const protectEditing = (event: KeyboardEvent) => {
+      const target = event.target instanceof Element ? event.target : document.activeElement;
+      if (!target?.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox']")) return;
+      if (event.isComposing || event.key.length === 1 || ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) event.stopImmediatePropagation();
+    };
+    document.addEventListener("keydown", protectEditing);
+    document.addEventListener("keyup", protectEditing);
+    return () => { document.removeEventListener("keydown", protectEditing); document.removeEventListener("keyup", protectEditing); };
+  }, []);
+
   return <SidebarInteractionContext.Provider value={setInteractionLock}>
     <a className="xsj-skip" href="#main-content">跳到主要内容</a>
     <AppTopbar visualState={visualState} menu={menu} setMenu={setMenu} toggleRail={toggleRail} fullscreen={fullscreen} setNotice={setNotice} />

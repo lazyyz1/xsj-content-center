@@ -18,6 +18,9 @@ function payloadFor(url: string) {
   return { code: 200, data: { awemeType: "video", platform: "dy", title: "真实视频", videoUrl: `${mediaBase}/clip.mp4`, awemeId: "123" } };
 }
 
+const priorProviderOrigin = process.env.PROVIDER_TEST_ORIGIN;
+const priorEnvironmentId = process.env.ENVIRONMENT_ID;
+afterAll(() => { if (priorProviderOrigin) process.env.PROVIDER_TEST_ORIGIN = priorProviderOrigin; else delete process.env.PROVIDER_TEST_ORIGIN; if (priorEnvironmentId) process.env.ENVIRONMENT_ID = priorEnvironmentId; else delete process.env.ENVIRONMENT_ID; });
 beforeAll(async () => {
   server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -59,6 +62,8 @@ beforeAll(async () => {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("fixture server did not bind");
   baseUrl = `http://127.0.0.1:${address.port}`;
+  process.env.ENVIRONMENT_ID = "LOCAL_TEST";
+  process.env.PROVIDER_TEST_ORIGIN = baseUrl;
 });
 
 afterAll(async () => {
@@ -112,6 +117,11 @@ describe("RedFoxClient and RedFoxSourceProvider", () => {
     ["unknown-code", "REDFOX_API_ERROR", false],
   ])("maps %s to %s", async (slug, code, retryable) => {
     await expectCode(provider().resolve(`https://www.douyin.com/video/${slug}`), code, retryable);
+  });
+
+  it("reports exhausted credit without reflecting provider text or retrying", async () => {
+    const client = new RedFoxClient({ apiKey: "private-key", fetch: async () => new Response(JSON.stringify({ code: 3201, msg: "private-key provider message", data: null }), { status: 200 }) });
+    await expect(client.getAccountDetail({ platform: "DOUYIN", accountId: "account" })).rejects.toMatchObject({ code: "REDFOX_QUOTA_EXCEEDED", retryable: false, httpStatus: 402, message: "RedFox 积分余额不足，请充值或在设置中更换有余额的 API Key。" });
   });
 
   it("maps timeout as retryable", async () => {

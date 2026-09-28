@@ -29,6 +29,8 @@ function jsonObject(value: unknown): Record<string, unknown> {
 export async function loadWorkbenchPageData(input: { userId: string; workspaceId: string; role: WorkspaceRole; projectId: string; activeArtifactId?: string | null }) {
   const project = await getProjectForUser(input);
   if (!project) return null;
+  // Both draft readers initialize the primary branch. Initialize once before parallel reads.
+  const initializedPrimaryDraft = await getPrimaryDraft(input);
 
   const sourceIds = project.sources.map(({ sourceItemId }) => sourceItemId);
   const feedbackForPage: Promise<CreationFeedbackContext> = getCreationFeedbackContext(input).catch((error) => {
@@ -39,7 +41,7 @@ export async function loadWorkbenchPageData(input: { userId: string; workspaceId
     db.sourceItem.findMany({ where: { workspaceId: input.workspaceId, status: "READY", ...(sourceIds.length ? { id: { notIn: sourceIds } } : {}) }, select: { id: true, title: true, sourcePlatform: true, sourceType: true, createdAt: true, materialAnalyses: { where: { status: "COMPLETED" }, orderBy: { version: "desc" }, take: 1, select: { summary: true } } }, orderBy: { createdAt: "desc" }, take: 100 }),
     new IntegrationService().getIntegrationStatus(input.workspaceId, "LLM"),
     getCreatorProfile(input.workspaceId, input.userId),
-    getPrimaryDraft(input),
+    Promise.resolve(initializedPrimaryDraft),
     listDraftBranches(input),
     db.aIRun.findFirst({ where: { workspaceId: input.workspaceId, projectId: project.id, userId: input.userId, action: "GENERATE_MOTHER_CONTENT", appliedAt: { not: null }, status: "SUCCEEDED" }, orderBy: { appliedAt: "desc" }, select: { outputJson: true } }),
     getProjectMethodState(input),
@@ -58,7 +60,7 @@ export async function loadWorkbenchPageData(input: { userId: string; workspaceId
   const storedBrief = brief ? { topic: brief.topic, angle: brief.angle, audience: brief.audience, coreMessage: brief.coreMessage, coreQuestion: brief.coreQuestion || "", background: brief.background || "", keyPoints: stringArray(brief.keyPoints), structure: stringArray(brief.structure), tone: brief.tone, risks: stringArray(brief.risks), version: brief.version, metadata: brief.metadata } : null;
   const creativePlan = CreativeBriefPrefillService.build({ project: { title: project.title, audience: project.audience, status: project.status }, sources: project.sources, existingBrief: storedBrief, hasMotherContent: Boolean(currentDraft?.body.trim()) });
   const studioProject = {
-    id: project.id, title: project.title, status: project.status, description: project.description, goal: project.goal, audience: project.audience,
+    id: project.id, title: project.title, status: project.status, creationModel: project.creationModel, description: project.description, goal: project.goal, audience: project.audience,
     sources: project.sources.filter(({ sourceItem }) => sourceItem.status !== "ARCHIVED").map(({ role: sourceRole, createdAt: addedAt, sourceItem }) => {
       const analysis = sourceItem.materialAnalyses[0];
       const parsed = materialAnalysisOutputSchema.safeParse(analysis?.understanding);

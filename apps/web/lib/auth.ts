@@ -19,6 +19,7 @@ function trustedAuthOrigins(configuredUrl: string | undefined) {
 }
 
 export const auth = betterAuth({
+  advanced: { cookiePrefix: process.env.AUTH_COOKIE_PREFIX || "better-auth" },
   appName: "AI 内容生产中心",
   baseURL: process.env.APP_URL,
   secret: process.env.AUTH_SECRET,

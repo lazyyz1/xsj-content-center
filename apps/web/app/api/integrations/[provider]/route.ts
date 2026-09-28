@@ -1,3 +1,4 @@
+import { rejectCrossOrigin } from "@/server/account-api";
 import { canManageWorkspace } from "@content-center/core";
 import { systemManagedProvidersEnabled } from "@content-center/integrations";
 import { NextResponse } from "next/server";
@@ -19,6 +20,7 @@ export async function GET(_request: Request, route: RouteContext) {
 }
 
 export async function PUT(request: Request, route: RouteContext) {
+  const rejected = rejectCrossOrigin(request); if (rejected) return rejected;
   if (systemManagedProvidersEnabled()) return apiError("SYSTEM_MANAGED_PROVIDERS", 403);
   const context = await getApiWorkspaceContext();
   if (!context) return apiError("UNAUTHORIZED", 401);
@@ -42,6 +44,7 @@ export async function PUT(request: Request, route: RouteContext) {
 }
 
 export async function DELETE(_request: Request, route: RouteContext) {
+  const rejected = rejectCrossOrigin(_request); if (rejected) return rejected;
   if (systemManagedProvidersEnabled()) return apiError("SYSTEM_MANAGED_PROVIDERS", 403);
   const context = await getApiWorkspaceContext();
   if (!context) return apiError("UNAUTHORIZED", 401);

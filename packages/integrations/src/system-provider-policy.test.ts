@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { getSystemProviderConfig, getSystemProviderPublicConfig, systemManagedProvidersEnabled } from "./system-provider-policy";
 
-const names = ["NODE_ENV", "ENVIRONMENT_ID", "PLAYWRIGHT_SERVER_MODE", "SYSTEM_MANAGED_PROVIDERS", "AI_PROVIDER", "AI_MODEL_ID", "AI_BASE_URL", "KIMI_API_KEY", "KIMI_BASE_URL", "KIMI_MODEL_ID", "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL_ID", "REDFOX_API_KEY", "DOUBAO_API_KEY", "DOUBAO_APP_ID", "DOUBAO_ACCESS_TOKEN", "DOUBAO_ASR_RESOURCE_ID", "TRANSCRIPTION_PRIMARY"] as const;
+const names = ["EXA_API_KEY","NODE_ENV", "ENVIRONMENT_ID", "PLAYWRIGHT_SERVER_MODE", "SYSTEM_MANAGED_PROVIDERS", "AI_PROVIDER", "AI_MODEL_ID", "AI_BASE_URL", "KIMI_API_KEY", "KIMI_BASE_URL", "KIMI_MODEL_ID", "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL_ID", "REDFOX_API_KEY", "DOUBAO_API_KEY", "DOUBAO_APP_ID", "DOUBAO_ACCESS_TOKEN", "DOUBAO_ASR_RESOURCE_ID", "TRANSCRIPTION_PRIMARY"] as const;
 const original = Object.fromEntries(names.map((name) => [name, process.env[name]]));
 
 afterEach(() => {
@@ -12,6 +12,15 @@ afterEach(() => {
 });
 
 describe("system-managed provider policy", () => {
+  it("does not confuse optional web search with transcription configuration", () => {
+    process.env.SYSTEM_MANAGED_PROVIDERS = "true";
+    delete process.env.EXA_API_KEY;
+    expect(getSystemProviderConfig("WEB_SEARCH")).toBeNull();
+    process.env.EXA_API_KEY = "test-search-key";
+    expect(getSystemProviderConfig("WEB_SEARCH")).toEqual({ apiKey: "test-search-key" });
+    expect(getSystemProviderPublicConfig("WEB_SEARCH")).not.toHaveProperty("apiKey");
+  });
+
   it("ignores workspace overrides in explicit system-managed mode", () => {
     process.env.SYSTEM_MANAGED_PROVIDERS = "true";
     process.env.KIMI_API_KEY = "secret-kimi";
@@ -41,12 +50,12 @@ describe("system-managed provider policy", () => {
     expect(getSystemProviderConfig("DOUBAO_ASR")).toMatchObject({ protocol: "RECORDING_FILE_2_0", resourceId: "volc.seedasr.auc" });
   });
 
-  it("routes production transcription without user-selectable provider settings", () => {
+  it("allows workspace API configuration in production unless explicitly system managed", () => {
     process.env.NODE_ENV = "production";
     process.env.SYSTEM_MANAGED_PROVIDERS = "false";
     delete process.env.TRANSCRIPTION_PRIMARY;
-    expect(systemManagedProvidersEnabled()).toBe(true);
-    expect(getSystemProviderConfig("TRANSCRIPTION")).toMatchObject({ source: "DOUBAO", fallbackToDoubao: false });
+    expect(systemManagedProvidersEnabled()).toBe(false);
+    expect(getSystemProviderConfig("TRANSCRIPTION")).toBeNull();
   });
 
   it("keeps LOCAL_TEST production-like runs on workspace integrations", () => {

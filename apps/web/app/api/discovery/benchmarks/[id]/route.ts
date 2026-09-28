@@ -10,7 +10,10 @@ export async function GET(request: Request, { params }: RouteContext<"/api/disco
   try {
     const { id } = await params;
     const sort = new URL(request.url).searchParams.get("sort") === "POPULAR" ? "POPULAR" : "LATEST";
-    return NextResponse.json(await getBenchmarkWorks({ workspaceId: context.workspace.id, userId: context.session.user.id, benchmarkId: id, sort }));
+    const rawOffset = new URL(request.url).searchParams.get("offset");
+    const offset = rawOffset === null ? 0 : Number(rawOffset);
+    if (!Number.isSafeInteger(offset) || offset < 0) return apiError("INVALID_OFFSET", 400);
+    return NextResponse.json(await getBenchmarkWorks({ workspaceId: context.workspace.id, userId: context.session.user.id, benchmarkId: id, sort, offset }));
   } catch (error) {
     return discoveryApiError(error);
   }

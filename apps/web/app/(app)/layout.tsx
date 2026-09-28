@@ -5,7 +5,7 @@ import { requireWorkspace } from "@/server/access";
 import { SIDEBAR_PIN_COOKIE } from "@/components/sidebar-state";
 import { getProjectListView } from "@/server/sidebar/service";
 
-export default async function AppLayout({ children }: { children: React.ReactNode }) {
+export default async function AppLayout({ children, settings }: { children: React.ReactNode; settings: React.ReactNode }) {
   const { session, workspace } = await requireWorkspace();
   const [user, initialProjectListView, cookieStore] = await Promise.all([
     db.user.findUnique({ where: { id: session.user.id }, select: { systemRole: true } }),
@@ -17,6 +17,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <div className="app-shell" data-shell="v4" data-sidebar-initial={initialPinned ? "pinned" : "collapsed"}>
       <AppShell initialPinned={initialPinned} workspaceName={workspace.name} userName={session.user.name} isSystemAdmin={user?.systemRole === "SYSTEM_ADMIN"} initialProjectListView={initialProjectListView} />
       <main id="main-content" className="app-main">{children}</main>
+      {settings}
     </div>
   );
 }

@@ -20,3 +20,8 @@ describe("LLM model policy", () => {
     expect(llmRuntimeConfig({ provider: "DEEPSEEK", modelId: "deepseek-v5", baseUrl: "https://api.deepseek.com" }, { apiKey: "test-secret" })).toBeNull();
   });
 });
+
+describe("provider model ID mapping", () => {
+  it("canonicalizes retired Flash aliases while preserving the saved choice", () => { expect(llmRuntimeConfig({ provider: "DEEPSEEK", modelId: "deepseek-v4-flash", baseUrl: "https://api.deepseek.com" }, { apiKey: "secret" })).toMatchObject({ model: "deepseek-flash", requestedModel: "deepseek-v4-flash" }); });
+  it("uses an explicit API mapping without migrating credentials", () => { expect(llmRuntimeConfig({ provider: "DEEPSEEK", modelId: "deepseek-v4-flash", apiModelId: "workspace-approved-model", baseUrl: "https://api.deepseek.com" }, { apiKey: "secret" })).toMatchObject({ model: "workspace-approved-model", apiKey: "secret", requestedModel: "deepseek-v4-flash" }); });
+});

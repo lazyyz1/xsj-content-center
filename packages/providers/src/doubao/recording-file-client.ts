@@ -1,3 +1,4 @@
+import { providerFetch } from "../provider-fetch";
 import { randomUUID } from "node:crypto";
 import { DoubaoError } from "./errors";
 import { doubaoFlashResponseSchema, type DoubaoFlashResponse, type DoubaoRuntimeConfig } from "./schemas";
@@ -32,7 +33,7 @@ export class DoubaoRecordingFileClient {
   private metadata: { requestId?: string; providerRequestId?: string; statusCode?: string; pollCount?: number } = {};
 
   constructor(private readonly config: DoubaoRuntimeConfig, private readonly options: Options = {}) {
-    this.fetcher = options.fetch ?? fetch;
+    this.fetcher = options.fetch ?? providerFetch;
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 

@@ -68,7 +68,7 @@ export function readS3CompatibleStorageConfig(env: StorageEnvironment = process.
 
 export function storageHealthFromEnv(env: StorageEnvironment = process.env): "CONFIGURED" | "UNCONFIGURED" {
   try {
-    if ((env.STORAGE_DRIVER?.trim() || "S3_COMPATIBLE") === "RENDER_MEDIA_RELAY") readRenderMediaRelayConfig(env);
+    if (["RENDER_MEDIA_RELAY", "LOCAL_FILESYSTEM"].includes(env.STORAGE_DRIVER?.trim() || "")) readRenderMediaRelayConfig(env);
     else readS3CompatibleStorageConfig(env);
     return "CONFIGURED";
   } catch {
@@ -138,7 +138,7 @@ export class S3CompatibleStorageProvider implements StorageProvider {
 
 export function getStorageProvider(): StorageProvider {
   const driver = process.env.STORAGE_DRIVER?.trim() || "S3_COMPATIBLE";
-  if (driver === "RENDER_MEDIA_RELAY") return renderMediaRelayStorageFromEnv();
+  if (driver === "RENDER_MEDIA_RELAY" || driver === "LOCAL_FILESYSTEM") return renderMediaRelayStorageFromEnv();
   return new S3CompatibleStorageProvider(readS3CompatibleStorageConfig());
 }
 

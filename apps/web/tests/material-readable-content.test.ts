@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { db } from "@content-center/db";
+import { ContextBuilderV2 } from "../server/ai/control/context-builder-v2";
 import { getMaterialReadableContent } from "../server/material-detail/readable-content";
 
 describe("Material readable content boundary", () => {
@@ -78,5 +79,11 @@ describe("Material readable content boundary", () => {
     expect(await getMaterialReadableContent({ workspaceId, userId: outsiderId, sourceItemId: imageId })).toBeNull();
     expect(await getMaterialReadableContent({ workspaceId: otherWorkspaceId, userId: outsiderId, sourceItemId: imageId })).toBeNull();
     expect(await read("unknown-source")).toBeNull();
+  });
+  it("supplies an explicitly selected video's transcript to the existing Agent context", async () => {
+    const project = await db.contentProject.create({ data: { workspaceId, createdById: ownerId, title: "Transcript reading", sources: { create: { sourceItemId: videoId, role: "REFERENCE" } } } });
+    const context = await new ContextBuilderV2().build({ workspaceId, userId: ownerId, projectId: project.id, taskType: "GENERAL_QUERY", action: "PROJECT_ASSISTANT", selectedObjects: [{ objectType: "SOURCE_ITEM", objectId: videoId, ownership: "EXTERNAL", whySelected: "用户引用视频" }] });
+    expect(JSON.stringify(context?.manifest.items)).toContain("人工转录正文");
+    expect(JSON.stringify(context?.manifest.items)).toContain("TRANSCRIPT");
   });
 });

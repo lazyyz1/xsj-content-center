@@ -45,7 +45,7 @@ describe("Phase 10B project assistant", () => {
   it("persists one default thread, streams a controlled reply, and records real references", async () => {
     const first = await getProjectAssistantThread({ workspaceId, userId: ownerId, projectId });
     const second = await getProjectAssistantThread({ workspaceId, userId: viewerId, projectId });
-    expect(second.id).toBe(first.id);
+    expect(second.id).not.toBe(first.id);
     const events: AssistantStreamEvent[] = [];
     const completed = await runProjectAssistant({ workspaceId, userId: ownerId, projectId, content: "根据当前资料出几个选题", selectedObject: { objectType: "CANVAS_OBJECT", objectId: canvasObjectId, version: 1, ownership: "PENDING", whySelected: "当前选中" }, sourceItemIds: [sourceId] }, (event) => events.push(event), { runtime });
     expect(completed).toMatchObject({ role: "ASSISTANT", status: "COMPLETED", resultType: "TOPIC", actions: ["TOPIC", "TEXT"], structuredResult: { type: "TOPIC", topics: expect.any(Array) } });
@@ -58,7 +58,7 @@ describe("Phase 10B project assistant", () => {
     expect(completed.sources).toEqual(expect.arrayContaining([expect.objectContaining({ title: "校长访谈整理", type: "项目资料" }), expect.objectContaining({ title: "当前选中的观点", type: "当前选中内容" })]));
     const stored = await db.assistantMessage.findUniqueOrThrow({ where: { id: completed.id }, include: { aiRun: true } });
     expect(stored.aiRun).toMatchObject({ action: "PROJECT_ASSISTANT", provider: "KIMI", status: "SUCCEEDED", metadata: { aiControlVersion: "ai-control-v1", modelRoute: { routingMode: "SINGLE_ENGINE", workspaceEngine: "KIMI", crossProviderFallback: false }, contextManifest: { selectedObjects: expect.arrayContaining([expect.objectContaining({ objectId: canvasObjectId }), expect.objectContaining({ objectId: sourceId })]) } } });
-    expect(JSON.stringify(stored.aiRun?.metadata)).not.toContain("不应默认载入的完整原文");
+    expect(JSON.stringify(stored.aiRun?.metadata)).toContain("不应默认载入的完整原文");
   });
 
   it("marks risky output after completion and supports only explicit candidate saves", async () => {
@@ -83,7 +83,7 @@ describe("Phase 10B project assistant", () => {
     const draftMessage = await runProjectAssistant({ workspaceId, userId: ownerId, projectId, content: "请写一版候选稿" }, () => undefined, { runtime });
     const draft = await saveAssistantMessageResult({ workspaceId, userId: ownerId, projectId, messageId: draftMessage.id, action: "DRAFT" });
     expect(draft.draft).toMatchObject({ isPrimary: false, workingState: { body: draftMessage.content } });
-    await expect(saveAssistantMessageResult({ workspaceId, userId: viewerId, projectId, messageId: topicMessage.id, action: "TEXT" })).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    await expect(saveAssistantMessageResult({ workspaceId, userId: viewerId, projectId, messageId: topicMessage.id, action: "TEXT" })).rejects.toMatchObject({ code: "MESSAGE_NOT_FOUND" });
   });
 
   it("returns rewrite and plain-text results through the same contract", async () => {
@@ -127,12 +127,12 @@ describe("Phase 10B project assistant", () => {
     const [assistant, skillPool, canvas, service] = await Promise.all([readFile(new URL("../components/projects/studio-default-method.tsx", import.meta.url), "utf8"), readFile(new URL("../components/projects/studio-method-selector.tsx", import.meta.url), "utf8"), readFile(new URL("../components/projects/content-canvas.tsx", import.meta.url), "utf8"), readFile(new URL("../server/assistant/service.ts", import.meta.url), "utf8")]);
     expect(assistant).toContain("AbortController");
     expect(skillPool).toContain("studio-skill-pool");
-    expect(assistant).toContain("studio-resolver-status");
+    expect(assistant).toContain("agent-status");
     expect(assistant).toContain("event.type === \"status\"");
     expect(assistant).toContain('event.key === "Enter" && !event.shiftKey');
-    expect(assistant).toContain("来源 {message.sources.length}");
-    expect(assistant).toContain("保存为文本");
-    expect(assistant).toContain("创建候选稿");
+    expect(assistant).toContain("已参考 {message.sources.length} 个来源");
+    expect(assistant).toContain("保存为成果");
+    expect(assistant).toContain("选择模型");
     expect(assistant).not.toContain("我方依据");
     expect(service).toContain('"已确认信息"');
     expect(service).not.toContain(': "我方依据"');

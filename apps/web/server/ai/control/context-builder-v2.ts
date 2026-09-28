@@ -5,6 +5,12 @@ import { db } from "@content-center/db";
 import { ProjectContextBuilder } from "../project-context";
 import type { SkillResolution } from "../skill-resolver";
 import type { AIControlTask, ContextItem, ContextManifest, ContextOwnership, ConversationContextMessage, SelectedContextObject } from "./contracts";
+import { AIControlError } from "./contracts";
+import { resolveContextReferences, type ContextReference } from "../../assistant/references";
+import { fitContext } from "../../assistant/context-budget";
+import { resolveSkillPoolDryRun, selectedMethodMetadata } from "../skill-resolver";
+import { getSelectedGenerationMethods, type SelectedGenerationMethod } from "../../project-methods/service";
+import { resolveOwnContribution } from "../../../lib/content-production";
 
 type BuildInput = {
   workspaceId: string;
@@ -16,6 +22,10 @@ type BuildInput = {
   selectedObjects?: SelectedContextObject[];
   resolvedContextItems?: ContextItem[];
   conversationHistory?: ConversationContextMessage[];
+  references?: ContextReference[];
+  skillVersionId?: string | null;
+  userInput?: string;
+  historySummary?: string;
 };
 
 type ProjectContextRecord = {
@@ -138,6 +148,7 @@ export class ContextBuilderV2 {
   ) {}
 
   async build(input: BuildInput) {
+    if (input.action === "PROJECT_ASSISTANT" && input.taskType === "GENERAL_QUERY") return this.buildAssistant(input);
     const [project, legacy] = await Promise.all([
       this.store.loadProject(input),
       this.legacyBuilder.build({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, action: input.action, studioAction: input.studioAction }),
@@ -194,6 +205,56 @@ export class ContextBuilderV2 {
       contextManifest: { manifestId, schemaVersion: manifest.schemaVersion },
     };
     return { ...legacy, defaultMethod: effectiveDefaultMethod, skillResolution: legacy.skillResolution as SkillResolution | undefined, context, manifest, contextTruncated: manifest.truncation.any };
+  }
+
+  private async buildAssistant(input: BuildInput): Promise<Omit<Awaited<ReturnType<ProjectContextBuilder["build"]>>, "context"> & { context: { items: ContextItem[]; warnings: string[] }; manifest: ContextManifest }> {
+    const project = await this.store.loadProject(input);
+    if (!project) throw new AIControlError("PERMISSION_DENIED");
+    const refs = [...(input.references ?? []), ...(input.selectedObjects ?? []).filter(r => r.objectType === "SOURCE_ITEM").map(r => ({ sourceType: "MATERIAL" as const, sourceId: r.objectId }))];
+    const resolved = await resolveContextReferences(input, refs, { query: input.userInput });
+    let methods: SelectedGenerationMethod[] = [];
+    if (input.skillVersionId) {
+      const version = await db.methodVersion.findFirst({ where: { id: input.skillVersionId, asset: { workspaceId: input.workspaceId, ownerUserId: input.userId, status: { not: "DISABLED" } } } });
+      if (!version) throw new AIControlError("PERMISSION_DENIED", "所选 Skill 不存在或不可使用。");
+      const strings = (v: unknown) => Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : [];
+      methods = [{ methodAssetId: version.assetId, methodVersionId: version.id, version: version.version, title: version.title, steps: strings(version.steps), applicableScenarios: strings(version.applicableScenarios), boundaries: strings(version.boundaries), workflowContract: version.workflowContract as unknown as SelectedGenerationMethod["workflowContract"] }];
+    } else if (input.skillVersionId === undefined) methods = (await getSelectedGenerationMethods(input)).slice(0, 1);
+    const skillResolution = resolveSkillPoolDryRun({ taskType: input.taskType, userTask: input.userInput, workspaceId: input.workspaceId, selectedSkills: methods.map(m => selectedMethodMetadata({ ...m, id: m.methodVersionId, workspaceId: input.workspaceId })) });
+    const make = (objectType: string, objectId: string, content: string, ownership: ContextOwnership = "PENDING"): ContextItem => ({ objectType, objectId, content, ownership, version: null, provenance: "project_assistant", whySelected: "当前对话上下文", truncated: false });
+    const projectItem = make("PROJECT", project.id, JSON.stringify({ title: project.title, description: project.description, goal: project.goal, audience: project.audience }), "OWN_CONFIRMED");
+    const skills = methods.map(m => make("METHOD_VERSION", m.methodVersionId, JSON.stringify(m), "METHOD_GUIDANCE"));
+    const history = (input.conversationHistory ?? []).map(m => ({ ...make("ASSISTANT_MESSAGE", m.id, `${m.role}: ${m.content}`), version: m.createdAt }));
+    // Reserve recent dialogue separately so a large explicit document cannot erase the last answer.
+    const recent = fitContext([...history].reverse(), 10_000);
+    const latestAnswer = [...history].reverse().find(i => i.content.startsWith("ASSISTANT:"));
+    if (latestAnswer && !recent.items.some(i => i.objectId === latestAnswer.objectId)) throw new AIControlError("NO_CONTEXT", "上一条回答超过本轮上下文预算，请先保存为成果，再引用该成果继续修改。");
+    recent.items.reverse();
+    const canvas = await this.selectedObjectAdapter.resolve({ workspaceId: input.workspaceId, projectId: input.projectId, selectedObjects: (input.selectedObjects ?? []).filter(r => r.objectType === "CANVAS_OBJECT") });
+    const selected = [...resolved.items, ...canvas, ...(input.resolvedContextItems ?? [])];
+    // Each explicit source receives a share; one large PDF must not crowd out all other references.
+    const perReference = Math.max(1400, Math.floor(18_000 / Math.max(1, selected.length)));
+    const balancedSelected = selected.flatMap(entry => fitContext([entry], perReference).items);
+    const fitted = fitContext([projectItem, ...skills, ...balancedSelected, ...(input.historySummary ? [make("CONVERSATION_SUMMARY", "summary", input.historySummary)] : [])], 22_000);
+    if (skills.some(skill => !fitted.items.some(i => i.objectType === "METHOD_VERSION" && i.objectId === skill.objectId))) throw new AIControlError("NO_CONTEXT", "所选 Skill 内容超过本轮预算，请精简 Skill 后重试。");
+    const items = [...fitted.items, ...recent.items];
+    const truncated = items.some(i => i.truncated) || fitted.budget.omitted.length > 0 || recent.budget.omitted.length > 0;
+    const warnings = [...resolved.warnings, ...(truncated ? ["部分上下文超过预算，已保留优先内容；可减少引用后重试。"] : [])];
+    const core = {
+      schemaVersion: "ai-context-manifest-v1" as const, generatedAt: new Date().toISOString(), project: { id: project.id, version: project.updatedAt.toISOString() }, currentDraft: null,
+      selectedObjects: items.filter(i => selected.some(s => s.objectType === i.objectType && s.objectId === i.objectId)).map(({ objectType, objectId, version, ownership, whySelected, truncated }) => ({ objectType, objectId, version, ownership, whySelected, truncated })),
+      methodVersions: methods.map(m => ({ assetId: m.methodAssetId, versionId: m.methodVersionId, version: m.version })), creatorProfile: null, confirmedInformationRefs: [],
+      sourceRefs: items.filter(i => i.source).map(i => i.objectId), externalRefs: items.filter(i => i.source).map(i => i.objectId), conversationMessageRefs: recent.items.map(i => i.objectId), items,
+      truncation: { any: truncated, categories: Object.fromEntries(items.filter(i => i.truncated).map(i => [i.objectType, true])) },
+      budget: { maximumBytes: 32_000, usedBytes: fitted.budget.usedBytes + recent.budget.usedBytes, omitted: [...fitted.budget.omitted, ...recent.budget.omitted] }, warnings,
+      toolResults: [
+        ...items.filter(i => i.source).map(i => ({ tool: `read_${i.source!.sourceType.toLowerCase()}`, status: "COMPLETED" as const, sourceId: i.objectId, result: { characters: i.content.length, truncated: i.truncated } })),
+        ...resolved.warnings.map(error => ({ tool: "resolve_reference", status: "SKIPPED" as const, error })),
+      ],
+    };
+    const manifest: ContextManifest = { ...core, manifestId: createHash("sha256").update(JSON.stringify(core)).digest("hex").slice(0, 24) };
+    const context = { items, warnings };
+    return { context, manifest, snapshot: null, ownFacts: [], hasOwnEvidence: false, hasOwnCaseOrData: false, ownContribution: resolveOwnContribution({}), hasOwnBackground: false, contextTruncated: truncated, selectedMethods: methods, defaultMethod: null, skillResolution,
+      inputSummary: { action: input.action, sourceCount: core.sourceRefs.length, evidenceCount: 0, materialAnalysisCount: 0, materialDistillationCount: 0, hasUnifiedCreativeAnalysis: false, hasCreativeBrief: false, contextChars: JSON.stringify(context).length, hasCreatorProfile: false, confirmedOwnFactCount: 0, creatorUnderstandingCount: 0, pendingCreatorInformationCount: 0, hasCurrentDraft: false, hasOwnEvidence: false, hasOwnCaseOrData: false, ownContribution: resolveOwnContribution({}), hasOwnBackground: false, contextTruncated: truncated, resolver: skillResolution } };
   }
 }
 

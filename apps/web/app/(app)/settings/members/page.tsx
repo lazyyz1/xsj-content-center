@@ -1,30 +1,10 @@
-import { Badge, Card } from "@content-center/ui";
 import { db } from "@content-center/db";
 import { PageHeader } from "@/components/page";
-import { requireWorkspaceRole } from "@/server/access";
-
+import { MemberSettings } from "@/components/member-settings";
+import { requireWorkspace } from "@/server/access";
 export default async function MembersPage() {
-  const { workspace } = await requireWorkspaceRole(["OWNER", "ADMIN"]);
-  const members = await db.workspaceMember.findMany({
-    where: { workspaceId: workspace.id },
-    include: { user: true },
-    orderBy: { createdAt: "asc" },
-  });
-
-  return (
-    <>
-      <PageHeader title="团队与权限" description="当前仅展示内容空间成员与权限，不开放邀请或角色编辑。" />
-      <Card className="divide-y divide-[var(--border)] overflow-hidden">
-        {members.map((member) => (
-          <div key={member.id} className="flex items-center justify-between gap-4 p-5">
-            <div className="min-w-0">
-              <p className="truncate font-medium">{member.user.name}</p>
-              <p className="truncate text-sm text-[var(--text-secondary)]">{member.user.email}</p>
-            </div>
-            <Badge>{member.role}</Badge>
-          </div>
-        ))}
-      </Card>
-    </>
-  );
+  const { workspace, session, role } = await requireWorkspace();
+  if (!["OWNER", "ADMIN"].includes(role)) return <><PageHeader title="成员与权限" description="你没有权限管理成员。请联系公司所有者或管理员。" /></>;
+  const members = await db.workspaceMember.findMany({ where: { workspaceId: workspace.id }, select: { id: true, role: true, disabledAt: true, createdAt: true, user: { select: { id: true, name: true, email: true, disabledAt: true } } }, orderBy: { createdAt: "asc" } });
+  return <><PageHeader title="成员与权限" description={workspace.name + " · " + members.length + " 位成员"} /><MemberSettings owner={role === "OWNER"} actorId={session.user.id} members={members.map(m => ({ id: m.id, role: m.role, disabled: Boolean(m.disabledAt || m.user.disabledAt), createdAt: m.createdAt.toISOString(), user: { id: m.user.id, name: m.user.name, email: m.user.email } }))} /></>;
 }

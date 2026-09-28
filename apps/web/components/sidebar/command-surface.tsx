@@ -48,7 +48,7 @@ export function CommandSurface({ open, anchor, label, onClose, onInteractionLock
       if (document.querySelector("dialog[open]")) return;
       if (event.key === "Escape") { event.preventDefault(); closeRef.current(); anchor?.focus(); }
       if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-        const buttons = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") || []);
+        const buttons = Array.from(ref.current?.querySelectorAll<HTMLElement>("button:not(:disabled), summary") || []).filter(element => element.getClientRects().length > 0);
         if (!buttons.length) return;
         event.preventDefault();
         const index = buttons.indexOf(document.activeElement as HTMLButtonElement);

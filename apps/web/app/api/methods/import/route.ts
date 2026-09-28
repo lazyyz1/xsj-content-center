@@ -4,7 +4,7 @@ import { apiError, getApiWorkspaceContext } from "@/server/api-access";
 import { importWorkflowSkill, MethodError, previewWorkflowSkill } from "@/server/methods/service";
 import { WorkflowSkillParseError } from "@/server/workflow-skill/contract";
 
-const inputSchema = z.object({ markdown: z.string().trim().min(1).max(100_000), save: z.boolean().optional() }).strict();
+const inputSchema = z.object({ markdown: z.string().min(1).max(100_000), save: z.boolean().optional() }).strict();
 
 function friendlyError(error: unknown) {
   if (error instanceof WorkflowSkillParseError) return NextResponse.json({ error: "WORKFLOW_SKILL_INVALID", message: "这个创作方法还不能导入。", issues: error.issues }, { status: 400 });
