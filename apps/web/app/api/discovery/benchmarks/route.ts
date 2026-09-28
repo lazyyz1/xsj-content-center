@@ -1,3 +1,4 @@
+import { canAddResearchAccount } from "@/server/experience-account";
 import { NextResponse } from "next/server";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
 import { discoveryApiError } from "@/server/discovery/api";
@@ -13,7 +14,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const context = await getApiWorkspaceContext();
   if (!context) return apiError("UNAUTHORIZED", 401);
-  if (context.role !== "OWNER" && context.role !== "ADMIN") return apiError("FORBIDDEN", 403, "只有管理员可以管理共享对标账号。");
+  if (!canAddResearchAccount(context.role, context.session.user)) return apiError("FORBIDDEN", 403, "当前账号没有添加对标账号的权限。");
   try {
     const input = addBenchmarkSchema.parse(await request.json().catch(() => null));
     const item = await addBenchmark({ workspaceId: context.workspace.id, userId: context.session.user.id, account: input.account });
