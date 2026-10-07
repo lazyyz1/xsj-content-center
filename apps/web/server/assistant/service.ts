@@ -1,3 +1,5 @@
+import type { AssistantSourceDTO, AssistantStructuredResult, AssistantResultAction, AssistantMessageDTO, AssistantThreadDTO, AssistantExecutionStatusCode, AssistantExecutionStatus, AssistantStreamEvent, NodeAssistantStreamEvent } from "../../lib/contracts/assistant";
+export type { AssistantSourceDTO, AssistantTopicResultItem, AssistantCheckResultItem, AssistantStructuredResult, AssistantResultAction, AssistantMessageDTO, AssistantThreadDTO, AssistantExecutionStatusCode, AssistantExecutionStatus, AssistantStreamEvent, NodeAssistantStreamEvent } from "../../lib/contracts/assistant";
 import "server-only";
 
 import { mediaLinkFromMessage, prepareMediaLink, type MediaLinkAction } from "./media-link";
@@ -16,7 +18,7 @@ import { createIdea } from "../discovery/service";
 import type { SkillResolution } from "../ai/skill-resolver";
 import { ArtifactContextAdapter } from "../artifacts/context-adapter";
 
-import type { ContextReference, SourceReference } from "./references";
+import { resolveContextReferences, type ContextReference, type SourceReference } from "./references";
 
 const assistantSystemPrompt = `你是“鑫世界内部内容研究与创作协作助手”。你只服务于当前项目的找、看懂、整理、创作和检查。
 把用户当作第一次使用的新手，用自然对话带着完成事情，不让用户先学习工作流或填写问卷。
@@ -34,22 +36,17 @@ const assistantSystemPrompt = `你是“鑫世界内部内容研究与创作协�
 避免“赋能、打造闭环、深度剖析、解锁、底层逻辑”等空泛措辞，不反复使用“不是……而是……”，不为了整齐凑三点，不在结尾强行升华或加金句。长短句自然交替，口播应能一口气顺畅读出；不靠刻意口头禅和密集感叹号装口语。
 保持用户原有的观点、用词习惯和具体细节。自然表达不能通过编造第一人称经历、感受、案例或数据实现。需要说明资料不足时，简短说清影响，不在成稿里反复插入整段免责声明。不要提及 Prompt、Context、Provider、Model、Token、Schema、API、guideline、内部章节代码、规则编号或内部对象编号；引用方法时只说员工能理解的方法名称。上下文缺少真实资料或已确认信息时要明确说明，不得用假设场景补成项目事实。不要输出隐藏推理过程。`;
 
-export type AssistantSourceDTO = { title: string; type: string; excerpt: string; reference?: SourceReference; citation?: number };
-export type AssistantTopicResultItem = { title: string; angle?: string; reason?: string; sourceRefs?: string[] };
-export type AssistantCheckResultItem = { originalText: string; issue: string; reason?: string; suggestion?: string; severity?: "HIGH" | "MEDIUM" | "LOW"; sourceRefs?: string[] };
-export type AssistantStructuredResult =
-  | { type: "TOPIC"; topics: AssistantTopicResultItem[] }
-  | { type: "REWRITE"; original: string; aiVersion: string; changeSummary?: string[] }
-  | { type: "CHECK"; issues: AssistantCheckResultItem[] }
-  | { type: "NEXT_STEP"; recommendedAction: string; reason: string; secondaryActions?: string[] }
-  | { type: "TEXT"; content: string };
-export type AssistantResultAction = "TEXT" | "TOPIC" | "DRAFT" | "CREATE_ARTIFACT" | "APPLY_ARTIFACT";
-export type AssistantMessageDTO = { id: string; role: "USER" | "ASSISTANT"; content: string; status: "PENDING" | "STREAMING" | "COMPLETED" | "FAILED" | "STOPPED"; createdAt: string; artifactId: string | null; sources: AssistantSourceDTO[]; warnings: string[]; resultType: "TEXT" | "TOPIC" | "REWRITE" | "DRAFT" | "CHECK" | "NEXT_STEP"; structuredResult: AssistantStructuredResult | null; actions: AssistantResultAction[] };
-export type AssistantThreadDTO = { id: string; messages: AssistantMessageDTO[] };
-export type AssistantExecutionStatusCode = "TASK_READING" | "TASK_UNDERSTANDING" | "SKILL_POOL_LOADED" | "SKILL_ACTIVATED" | "SKILL_SKIPPED" | "SKILL_CONFLICT" | "AUTO_INVOKE_SUGGESTED" | "GENERATION_STARTED" | "CHECK_STARTED" | "COMPLETED";
-export type AssistantExecutionStatus = { code: AssistantExecutionStatusCode; message: string; tone?: "neutral" | "positive" | "warning" };
-export type AssistantStreamEvent = { type: "start"; threadId: string; userMessage: AssistantMessageDTO; assistantMessage: AssistantMessageDTO } | { type: "status"; status: AssistantExecutionStatus } | { type: "delta"; messageId: string; delta: string } | { type: "done" | "stopped"; message: AssistantMessageDTO } | { type: "error"; messageId: string; code: string; message: string };
-export type NodeAssistantStreamEvent = { type: "start"; threadId: string; generateRunId: string; userMessage: AssistantMessageDTO; assistantMessage: AssistantMessageDTO } | { type: "delta"; messageId: string; delta: string } | { type: "done"; message: AssistantMessageDTO; resultObject: CanvasObjectDTO; relationCount: number } | { type: "stopped"; message: AssistantMessageDTO } | { type: "error"; messageId: string; code: string; message: string };
+
+
+
+
+
+
+
+
+
+
+
 
 export class AssistantServiceError extends Error {
   constructor(readonly code: "PROJECT_NOT_FOUND" | "MESSAGE_NOT_FOUND" | "INVALID_INPUT" | "PERMISSION_DENIED", message: string) { super(message); this.name = "AssistantServiceError"; }
@@ -166,7 +163,7 @@ function sourcesFromManifest(manifest: ContextManifest) {
 function contextWarnings(manifest: ContextManifest | null) { return manifest?.warnings ?? []; }
 
 function postCheck(content: string, ownFacts: string[], externalEvidence = "") {
-  const normalizeEvidence = (value: string) => value.replace(/[\s*#\[\]<>《》“”"：:，,。]/gu, "");
+  const normalizeEvidence = (value: string) => value.replace(/[\s*#[\]<>《》“”"：:，,。]/gu, "");
   const external = normalizeEvidence(externalEvidence);
   const check = (sentence: string) => {
     const result = inspectStudioFactText(sentence, ownFacts);
@@ -203,15 +200,19 @@ async function scopedProject(input: { workspaceId: string; userId: string; proje
 async function defaultThread(input: { workspaceId: string; userId: string; projectId: string }) {
   await scopedProject(input);
   return db.$transaction(async tx => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`assistant:${input.workspaceId}:${input.projectId}:${input.userId}`}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`assistant:${input.workspaceId}:${input.projectId}`}))`;
     const where = { projectId: input.projectId, workspaceId: input.workspaceId, createdById: input.userId, canvasObjectId: null };
-    const existing = await tx.assistantThread.findFirst({ where, orderBy: { createdAt: "asc" } });
+    const existing = await tx.assistantThread.findFirst({ where: { projectId: input.projectId, workspaceId: input.workspaceId, canvasObjectId: null }, orderBy: { createdAt: "asc" } });
+    if (existing && existing.createdById !== input.userId) throw new AssistantServiceError("PERMISSION_DENIED", "此项目对话不属于当前账号。你仍可查看获准的项目成果，不能使用其他成员的对话。");
     return existing ?? tx.assistantThread.create({ data: { ...where } });
   });
 }
 
 export async function getProjectAssistantThread(input: { workspaceId: string; userId: string; projectId: string }): Promise<AssistantThreadDTO> {
-  const thread = await defaultThread(input);
+  await scopedProject(input);
+  const thread = await db.assistantThread.findFirst({ where: { workspaceId: input.workspaceId, projectId: input.projectId, canvasObjectId: null }, select: { id: true, createdById: true }, orderBy: { createdAt: "asc" } });
+  if (!thread) return { id: "", messages: [] };
+  if (thread.createdById !== input.userId) return { id: "", messages: [], unavailableReason: "此项目对话不属于当前账号。你仍可查看获准的项目成果，不能使用其他成员的对话。" };
   const messages = await db.assistantMessage.findMany({ where: { threadId: thread.id }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 80 });
   return { id: thread.id, messages: messages.reverse().map(messageDTO) };
 }
@@ -227,6 +228,7 @@ export async function runProjectAssistant(input: { workspaceId: string; userId: 
   }
   const content = input.content.trim();
   if (!content || content.length > 4_000 || (input.sourceItemIds?.length ?? 0) + (input.references?.length ?? 0) > 8) throw new AssistantServiceError("INVALID_INPUT", "请输入 1 到 4000 个字，并且最多引用 8 条资料。");
+  if (input.references?.some(reference => reference.researchSelection)) await resolveContextReferences({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId }, input.references.filter(reference => reference.researchSelection));
   const targetArtifact = input.targetArtifactId ? await (dependencies.artifactContextAdapter ?? new ArtifactContextAdapter()).resolve({ workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, artifactId: input.targetArtifactId }) : null;
   const thread = await defaultThread(input);
   const [userMessage, assistantMessage] = await db.$transaction(async tx => {

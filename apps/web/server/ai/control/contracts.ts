@@ -1,5 +1,5 @@
 import type { AIModelCapability } from "@content-center/integrations";
-import type { SourceReference } from "../../assistant/references";
+import type { SourceReference } from "../../../lib/contracts/references";
 
 export const AI_CONTROL_TASKS = [
   "CONTENT_CHECK",

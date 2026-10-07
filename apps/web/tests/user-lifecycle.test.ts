@@ -36,6 +36,10 @@ describe("admin user lifecycle", () => {
     await expect(setUserDisabled({ adminId, userId, disabled: false })).resolves.toMatchObject({ id: userId, disabledAt: null });
   });
 
+  it("refuses disabling the final effective owner even when another administrator exists", async () => {
+    const sole=await db.workspace.create({data:{name:"Last owner fixture",slug:"last-owner-"+suffix,members:{create:[{userId:otherUserId,role:"OWNER"},{userId:userId,role:"ADMIN"}]}}});
+    try { await expect(setUserDisabled({adminId,userId:otherUserId,disabled:true})).rejects.toMatchObject({code:"LAST_WORKSPACE_MANAGER"}); expect((await db.user.findUniqueOrThrow({where:{id:otherUserId},select:{disabledAt:true}})).disabledAt).toBeNull(); } finally { await db.workspace.delete({where:{id:sole.id}}); }
+  });
   it("rejects a non-admin actor", async () => {
     await expect(setUserDisabled({ adminId: userId, userId: otherUserId, disabled: true })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });

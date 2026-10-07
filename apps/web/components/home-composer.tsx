@@ -177,9 +177,9 @@ export function HomeComposer({ idea, onIdeaChange, inputRef, canCreate, busy, dr
   useLayoutEffect(() => { if (inputRef.current) { inputRef.current.style.height = "auto"; inputRef.current.style.height = `${Math.min(200, Math.max(82, inputRef.current.scrollHeight))}px`; } }, [idea, inputRef]);
   const keepOpen = Boolean(idea || attachments.length || skillIds.length || panel || busy);
   const matches = (value: string) => value.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase());
-  const popup = panel ? createPortal(<div ref={panelRef} role="dialog" aria-label={{ models: "选择模型", skills: "选择 Skill", folders: "选择项目", library: "从资料库选择" }[panel]} className="home-picker" style={{ ...position, position: "fixed" }}>
-    <header><strong>{{ models: "选择模型", skills: "选择 Skill", folders: "选择项目", library: "从资料库选择" }[panel]}</strong><button type="button" aria-label="关闭选择框" onClick={close}><X size={16} /></button></header>
-    {panel !== "models" ? <input autoFocus aria-label={{ skills: "搜索 Skill", folders: "搜索项目", library: "搜索已有资料" }[panel]} placeholder="搜索…" value={search} onChange={(event) => setSearch(event.target.value)} /> : null}
+  const popup = panel ? createPortal(<div ref={panelRef} role="dialog" aria-label={{ models: "选择模型", skills: "选择 Skill", folders: "选择项目文件夹", library: "从资料库选择" }[panel]} className="home-picker" style={{ ...position, position: "fixed" }}>
+    <header><strong>{{ models: "选择模型", skills: "选择 Skill", folders: "选择项目文件夹", library: "从资料库选择" }[panel]}</strong><button type="button" aria-label="关闭选择框" onClick={close}><X size={16} /></button></header>
+    {panel !== "models" ? <input autoFocus aria-label={{ skills: "搜索 Skill", folders: "搜索项目文件夹", library: "搜索已有资料" }[panel]} placeholder="搜索…" value={search} onChange={(event) => setSearch(event.target.value)} /> : null}
     {panelLoading ? <p role="status">正在读取…</p> : null}{panelError ? <p role="alert">{panelError}</p> : null}
     <div className="home-picker-list">
       {panel === "models" ? <>{models?.configured ? <button type="button" className="home-picker-row" aria-pressed={!model} onClick={() => { setModel(null); close(); }}><Box /><span><b>跟随工作区默认</b><small>{models.models.find((item) => item.modelId === models.defaultModelId)?.label || models.defaultLabel}</small></span>{!model ? <Check /> : null}</button> : <p>还没有配置可用模型。</p>}{models?.models.filter(item => item.modelId !== models.defaultModelId).map((item) => <button type="button" className="home-picker-row" key={item.modelId} aria-pressed={model?.modelId === item.modelId} onClick={() => { setModel({ provider: item.provider, modelId: item.modelId }); close(); }}><Box /><span><b>{item.label}</b><small>{item.description}</small></span>{model?.modelId === item.modelId ? <Check /> : null}</button>)}</> : null}
@@ -206,7 +206,8 @@ export function HomeComposer({ idea, onIdeaChange, inputRef, canCreate, busy, dr
       </div><button className="xsj-send" aria-label="开始创作" type="submit" disabled={!canCreate || busy || blocked || !idea.trim()}>{busy ? <Loader2 className="xsj-spin" /> : <ArrowUp />}</button></footer>
       {statusMessage || notice || error ? <div className="home-composer-notice" role={error ? "alert" : "status"}>{error || notice || statusMessage}</div> : null}
     </form>
-    <div className="home-project-bar"><button ref={(node) => { anchors.current.folders = node; }} type="button" aria-label="选择项目" aria-expanded={panel === "folders"} disabled={!canCreate || busy} onClick={() => open("folders")}><Folder size={14} /><span>{folderId ? folders.find((item) => item.folderId === folderId)?.label || "项目已失效，请重新选择" : "选择项目 · 未分组"}</span><ChevronDown size={13} /></button></div>
+    <div className="home-project-bar"><button ref={(node) => { anchors.current.folders = node; }} type="button" aria-label="选择项目文件夹" aria-expanded={panel === "folders"} disabled={!canCreate || busy} onClick={() => open("folders")}><Folder size={14} /><span>{folderId ? folders.find((item) => item.folderId === folderId)?.label || "文件夹已失效，请重新选择" : "项目文件夹 · 未分组"}</span><ChevronDown size={13} /></button><Link href="/projects" aria-disabled={busy} onClick={event => { if (busy) event.preventDefault(); }}>打开已有项目</Link></div>
+    <p className="home-composer-notice">发送会开始新工作；要继续已有项目，请先打开它。</p>
     {popup}
   </div>;
 }

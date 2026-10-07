@@ -25,3 +25,5 @@ services/local-asr/.venv/
 output/
 
 .next-release-check/
+
+.next-account-review/

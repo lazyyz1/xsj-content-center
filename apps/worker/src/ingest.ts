@@ -32,7 +32,7 @@ function publicError(error: unknown): { code: string; message: string; retryable
   return { code: "INTERNAL_ERROR", message: "采集处理失败。", retryable: false };
 }
 
-export async function processContentIngestJob(job: Job<ContentIngestPayload>) {
+export async function processContentIngestJob(job: Job<ContentIngestPayload>, dependencies: { provider?: IngestSourceProvider } = {}) {
   const startedAt = new Date();
   const record = await db.ingestJob.findFirst({
     where: {
@@ -54,10 +54,15 @@ export async function processContentIngestJob(job: Job<ContentIngestPayload>) {
     return processRedFoxIngestJob(record, job, startedAt);
   }
 
-  const attempt = job.attemptsMade + 1;
-  const provider = providerFor(record.sourceItem);
-  await db.$transaction([
-    db.ingestJob.update({
+  const attempt = Math.max(job.attemptsMade + 1, record.attempt + 1);
+  const provider = dependencies.provider ?? providerFor(record.sourceItem);
+  const claimed = await db.$transaction(async tx=>{
+    await tx.$queryRawUnsafe('SELECT "id" FROM "SourceItem" WHERE "id"=$1 AND "workspaceId"=$2 FOR UPDATE',record.sourceItemId,record.workspaceId);
+    await tx.$queryRawUnsafe('SELECT "id" FROM "IngestJob" WHERE "id"=$1 FOR UPDATE',record.id);
+    const current=await tx.ingestJob.findFirst({where:{id:record.id,workspaceId:record.workspaceId,status:{in:["QUEUED","RUNNING"]}}});
+    const source=await tx.sourceItem.findFirst({where:{id:record.sourceItemId,workspaceId:record.workspaceId,status:{not:"ARCHIVED"}}});
+    if(!current || !source)return false;
+    await tx.ingestJob.update({
       where: { id: record.id },
       data: {
         status: "RUNNING",
@@ -69,9 +74,9 @@ export async function processContentIngestJob(job: Job<ContentIngestPayload>) {
         errorCode: null,
         errorMessage: null,
       },
-    }),
-    db.sourceItem.update({ where: { id: record.sourceItemId }, data: { status: "PROCESSING" } }),
-    db.auditLog.create({
+    });
+    await tx.sourceItem.update({ where: { id: record.sourceItemId }, data: { status: "PROCESSING" } });
+    await tx.auditLog.create({
       data: {
         workspaceId: record.workspaceId,
         userId: record.requestedById,
@@ -80,8 +85,10 @@ export async function processContentIngestJob(job: Job<ContentIngestPayload>) {
         resourceId: record.id,
         metadata: { sourceItemId: record.sourceItemId, provider: provider.providerName, attempt },
       },
-    }),
-  ]);
+    });
+    return true;
+  });
+  if(!claimed)return {status:"cancelled" as const,sourceItemId:record.sourceItemId};
   if (attempt > 1) {
     await db.auditLog.create({
       data: {
@@ -119,7 +126,12 @@ export async function processContentIngestJob(job: Job<ContentIngestPayload>) {
       return { status: "cancelled" as const, sourceItemId: record.sourceItemId };
     }
 
-    await db.$transaction(async (tx) => {
+    const persisted = await db.$transaction(async (tx) => {
+      await tx.$queryRawUnsafe('SELECT "id" FROM "SourceItem" WHERE "id"=$1 AND "workspaceId"=$2 FOR UPDATE', record.sourceItemId, record.workspaceId);
+      await tx.$queryRawUnsafe('SELECT "id" FROM "IngestJob" WHERE "id"=$1 FOR UPDATE',record.id);
+      const current = await tx.ingestJob.findFirst({where:{id:record.id,workspaceId:record.workspaceId,status:"RUNNING"}});
+      const source = await tx.sourceItem.findFirst({where:{id:record.sourceItemId,workspaceId:record.workspaceId,status:{not:"ARCHIVED"}}});
+      if (!current || !source) return false;
       await tx.sourceItem.update({
         where: { id: record.sourceItemId },
         data: {
@@ -178,7 +190,9 @@ export async function processContentIngestJob(job: Job<ContentIngestPayload>) {
           },
         },
       });
+      return true;
     });
+    if (!persisted) return {status:"cancelled" as const,sourceItemId:record.sourceItemId};
     console.info("CONTENT_INGEST_STATUS", {
       jobId: record.id,
       workspaceId: record.workspaceId,
@@ -195,8 +209,13 @@ export async function processContentIngestJob(job: Job<ContentIngestPayload>) {
     const willRetry = retryable && attempt < record.maxAttempts;
     const finishedAt = new Date();
     const durationMs = finishedAt.getTime() - startedAt.getTime();
-    await db.$transaction([
-      db.ingestJob.update({
+    const failurePersisted = await db.$transaction(async tx=>{
+      await tx.$queryRawUnsafe('SELECT "id" FROM "SourceItem" WHERE "id"=$1 AND "workspaceId"=$2 FOR UPDATE',record.sourceItemId,record.workspaceId);
+      await tx.$queryRawUnsafe('SELECT "id" FROM "IngestJob" WHERE "id"=$1 FOR UPDATE',record.id);
+      const current=await tx.ingestJob.findFirst({where:{id:record.id,workspaceId:record.workspaceId,status:"RUNNING"}});
+      const source=await tx.sourceItem.findFirst({where:{id:record.sourceItemId,workspaceId:record.workspaceId,status:{not:"ARCHIVED"}}});
+      if(!current || !source)return false;
+      await tx.ingestJob.update({
         where: { id: record.id },
         data: {
           status: willRetry ? "QUEUED" : "FAILED",
@@ -205,12 +224,12 @@ export async function processContentIngestJob(job: Job<ContentIngestPayload>) {
           errorMessage: failure.message,
           finishedAt: willRetry ? null : finishedAt,
         },
-      }),
-      db.sourceItem.update({
+      });
+      await tx.sourceItem.update({
         where: { id: record.sourceItemId },
         data: { status: willRetry ? "PENDING" : "FAILED" },
-      }),
-      db.auditLog.create({
+      });
+      await tx.auditLog.create({
         data: {
           workspaceId: record.workspaceId,
           userId: record.requestedById,
@@ -219,8 +238,10 @@ export async function processContentIngestJob(job: Job<ContentIngestPayload>) {
           resourceId: record.id,
           metadata: { sourceItemId: record.sourceItemId, provider: provider.providerName, attempt, retrying: willRetry, errorCode: failure.code },
         },
-      }),
-    ]);
+      });
+      return true;
+    });
+    if(!failurePersisted)return {status:"cancelled" as const,sourceItemId:record.sourceItemId};
     console.error("CONTENT_INGEST_STATUS", {
       jobId: record.id,
       workspaceId: record.workspaceId,

@@ -9,6 +9,7 @@ const statusClass: Record<RuntimeStatus, string> = {
   MISSING: "bg-amber-100 text-amber-800",
   UNREACHABLE: "bg-red-100 text-red-800",
   DEGRADED: "bg-orange-100 text-orange-800",
+  DISABLED_FOR_REVIEW: "bg-slate-100 text-slate-700",
 };
 
 export default async function RuntimePage() {
@@ -36,7 +37,7 @@ export default async function RuntimePage() {
           <div className="rounded-xl bg-slate-50 p-4 sm:col-span-2"><dt className="text-xs text-slate-500">Database target</dt><dd className="mt-1 font-mono text-sm">{health.database.target.host ?? "unknown"}:{health.database.target.port ?? "?"}/{health.database.target.database ?? "unknown"}</dd></div>
         </dl>
         <div className="mt-8 grid gap-3 sm:grid-cols-2">
-          {services.map(([name, status]) => <div key={name} className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3"><span className="font-medium">{name}</span><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass[status]}`}>{status}</span></div>)}
+          {services.map(([name, status]) => <div key={name} className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3"><span className="font-medium">{name}</span><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass[status]}`}>{status === "DISABLED_FOR_REVIEW" ? "当前环境禁用" : status}</span></div>)}
         </div>
         <p className="mt-8 text-xs text-slate-500">Checked at {health.checkedAt}</p>
       </div>

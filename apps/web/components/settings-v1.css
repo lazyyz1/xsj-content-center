@@ -104,3 +104,19 @@
 .profile-choice button {border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:8px 13px;font-size:12px;}
 .profile-choice button[aria-pressed="true"] {border-color:var(--accent);background:var(--accent-soft);color:var(--accent);}
 .profile-choice small {display:block;color:var(--text-secondary);margin-top:8px;}
+
+/* Narrow screens use a category picker so account fields keep usable width. */
+.settings-mobile-category { display:none; }
+@media(max-width:640px) {
+  .settings-window[open] { grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); }
+  .settings-window-sidebar { padding:12px 54px 12px 16px; }
+  .settings-window-label,.settings-window .settings-tabs,.settings-window-company { display:none; }
+  .settings-mobile-category { display:flex; align-items:center; gap:10px; font-size:13px; }
+  .settings-mobile-category select { flex:1; min-width:0; min-height:40px; padding:6px 10px; border:1px solid #dedee2; border-radius:8px; background:#fdfdff; font-size:16px; }
+  .settings-window-content { padding:20px 16px 24px; border-radius:0; }
+  .settings-window-close { top:10px; right:8px; width:40px; height:40px; }
+  .settings-window .settings-content :is(input,select) { font-size:16px; min-height:40px; }
+  .settings-info-table > div { align-items:flex-start; }
+  .settings-info-table > div > span:first-child { flex-shrink:0; }
+  .settings-section-heading { flex-wrap:wrap; }
+}

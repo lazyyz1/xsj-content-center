@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseProviderConfig, IntegrationService } from "@content-center/integrations";
 import {
+  isLocalReviewOffline,
   LocalAsrClient,
   LocalAsrError,
   type LocalAsrBenchmarkProfile,
@@ -54,6 +55,7 @@ async function benchmarkProfile() {
 }
 
 export async function getLocalAsrDisplay(workspaceId: string): Promise<LocalAsrDisplay> {
+  if (isLocalReviewOffline()) return { status: "NOT_RUNNING", errorCode: "LOCAL_REVIEW_OFFLINE", hardware: null, models: [], qualityModes: {} };
   const config = await configuration(workspaceId);
   const client = new LocalAsrClient({ endpoint: config.endpoint, model: "SENSEVOICE_SMALL", device: "CPU" });
   try {
@@ -82,6 +84,7 @@ export async function initializeLocalAsrModel(input: {
   qualityMode?: TranscriptionQualityMode;
   model?: LocalAsrModel;
 }) {
+  if (isLocalReviewOffline()) throw new LocalAsrError("LOCAL_REVIEW_OFFLINE", "验收环境已关闭模型初始化。", false);
   const config = await configuration(input.workspaceId);
   const profile = await benchmarkProfile();
   const targetModel = input.model ?? profile[input.qualityMode ?? config.qualityMode].model;

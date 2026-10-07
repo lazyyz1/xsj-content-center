@@ -7,7 +7,7 @@ vi.mock("server-only", () => ({}));
 import { db } from "@content-center/db";
 import { MockLLMProvider } from "@content-center/providers";
 import { ArtifactContextAdapter } from "../server/artifacts/context-adapter";
-import { applyTextArtifactRevision, createTextArtifact, getArtifact, listArtifacts } from "../server/artifacts/service";
+import { applyTextArtifactRevision, createTextArtifact, getArtifact, listArtifacts, saveTextArtifact } from "../server/artifacts/service";
 import { runProjectAssistant } from "../server/assistant/service";
 
 describe("generic text artifacts", () => {
@@ -97,6 +97,22 @@ describe("generic text artifacts", () => {
     await expect(applyTextArtifactRevision({ workspaceId, userId: ownerId, projectId, artifactId: artifactA.artifactId, sourceMessageId: mismatch.id, expectedVersion: updatedA.version })).rejects.toMatchObject({ code: "ARTIFACT_MESSAGE_MISMATCH" });
     const foreignMessage = await completedMessage("其他项目回复", { project: otherProjectId });
     await expect(createTextArtifact({ workspaceId, userId: ownerId, projectId, title: "错误来源", sourceMessageId: foreignMessage.id })).rejects.toMatchObject({ code: "ARTIFACT_INVALID_INPUT" });
+  });
+
+  it("saves a manual revision, reopens it and rejects stale or foreign edits", async () => {
+    const source = await completedMessage("原始可持续修改的成果。");
+    const original = await createTextArtifact({ workspaceId, userId: ownerId, projectId, title: "手动成果", sourceMessageId: source.id });
+    const edited = await saveTextArtifact({ workspaceId, userId: ownerId, projectId, artifactId: original.artifactId, expectedVersion: original.version, title: "我的新版成果", body: "加入我自己的真实观点。" });
+    expect(edited).toMatchObject({ title: "我的新版成果", content: "加入我自己的真实观点。", version: original.version + 1 });
+    expect(await getArtifact({ workspaceId, userId: ownerId, projectId, artifactId: original.artifactId })).toMatchObject(edited);
+    const row = await db.artifact.findUniqueOrThrow({ where: { id: original.artifactId }, include: { draftBranch: { include: { revisions: { orderBy: { revision: "asc" } } } } } });
+    expect(row.draftBranch.revisions[0]!.body).toBe(original.content);
+    expect(row.draftBranch.revisions.at(-1)!.origin).toBe("HUMAN");
+    const input = { workspaceId, userId: ownerId, projectId, artifactId: original.artifactId, expectedVersion: original.version, title: "不应覆盖", body: "不应覆盖" };
+    await expect(saveTextArtifact(input)).rejects.toMatchObject({ code: "ARTIFACT_VERSION_CONFLICT" });
+    await expect(saveTextArtifact({ ...input, userId: viewerId, expectedVersion: edited.version })).rejects.toMatchObject({ code: "ARTIFACT_FORBIDDEN" });
+    await expect(saveTextArtifact({ ...input, workspaceId: otherWorkspaceId, userId: otherOwnerId, projectId: otherWorkspaceProjectId })).rejects.toMatchObject({ code: "ARTIFACT_NOT_FOUND" });
+    expect((await getArtifact({ workspaceId, userId: ownerId, projectId, artifactId: original.artifactId })).content).toBe(edited.content);
   });
 
   it("targets one Artifact through a server-resolved context item and persists both turn messages", async () => {

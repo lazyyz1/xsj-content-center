@@ -7,7 +7,7 @@ import { auth } from "../lib/auth";
 const signupSchema = z.object({
   name: z.string().trim().min(2).max(80),
   email: z.string().trim().toLowerCase().email().max(320),
-  password: z.string().min(8).max(200),
+  password: z.string().min(8).max(128),
   inviteCode: z.string().min(1).max(200),
 });
 

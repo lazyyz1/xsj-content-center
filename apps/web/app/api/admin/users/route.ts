@@ -1,13 +1,16 @@
-import { db, ensurePersonalWorkspaceForUser } from "@content-center/db";
+import { db } from "@content-center/db";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
+import { createInternalPlatformUser } from "@/server/account-space";
+import { accountApiError } from "@/server/account-api";
 import { apiError, getSystemAdminApiContext } from "@/server/api-access";
+
+import { rejectCrossOrigin } from "@/server/account-api";
 
 const createUserSchema = z.object({
   name: z.string().trim().min(2).max(80),
   email: z.string().trim().toLowerCase().email().max(320),
-  password: z.string().min(8).max(200),
+  password: z.string().min(8).max(128),
 });
 
 export async function GET() {
@@ -21,12 +24,11 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const rejected = rejectCrossOrigin(request); if (rejected) return rejected;
   const context = await getSystemAdminApiContext();
   if ("response" in context) return context.response;
   const parsed = createUserSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return apiError("INVALID_USER", 400, "姓名、邮箱或初始密码格式不正确。");
-  if (await db.user.findUnique({ where: { email: parsed.data.email }, select: { id: true } })) return apiError("USER_EXISTS", 409);
-  const registration = await auth.api.signUpEmail({ body: parsed.data });
-  await ensurePersonalWorkspaceForUser(db, { userId: registration.user.id });
-  return NextResponse.json({ user: { id: registration.user.id, name: registration.user.name, email: registration.user.email } }, { status: 201 });
+  try { return NextResponse.json({ user: await createInternalPlatformUser(context.user.id, parsed.data) }, { status: 201 }); }
+  catch (error) { return accountApiError(error); }
 }

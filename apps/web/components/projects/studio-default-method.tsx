@@ -5,19 +5,20 @@ import { ArrowDown, AtSign, Copy, Plus, Check, ChevronDown, FileText, Link2, Loa
 import { useRouter } from "next/navigation";
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { StudioActionRecommendation } from "@/server/ai/schemas";
-import type { AssistantExecutionStatus, AssistantMessageDTO, AssistantResultAction, AssistantStreamEvent, NodeAssistantStreamEvent } from "@/server/assistant/service";
-import type { CanvasObjectDTO } from "@/server/canvas/service";
+import type { AssistantExecutionStatus, AssistantMessageDTO, AssistantResultAction, AssistantStreamEvent, NodeAssistantStreamEvent } from "@/lib/contracts/assistant";
+import type { CanvasObjectDTO } from "@/lib/contracts/canvas";
 import type { ProjectMaterial } from "./project-materials-panel";
 import type { StudioSelectionAction } from "./mother-content-editor";
 import { AssistantResultRenderer } from "./assistant-result-renderer";
 import { AssistantMarkdown } from "./assistant-markdown";
 import { NameDialog } from "../sidebar/name-dialog";
-import type { ContextReference, ReferenceOption } from "@/server/assistant/references";
+import type { ContextReference, ReferenceOption, ResearchCreationDraft } from "@/lib/contracts/references";
 import type { LLMModelSelection } from "@/server/ai/llm-runtime";
+import { cleanResearchDrafts, readProjectInput, writeProjectInput, readResearchHandoff, clearResearchHandoff } from "@/lib/research-creation-draft";
 import { uploadSourceFiles } from "@/lib/source-upload-client";
 import "./project-agent.css";
 import type { ProjectMethodStateDTO } from "@/server/project-methods/service";
-import type { ArtifactView } from "@/server/artifacts/view-model";
+import type { ArtifactView } from "@/lib/contracts/artifacts";
 
 const artifactDialogInteractionLock = () => undefined;
 
@@ -37,7 +38,7 @@ const actionPrompts: Record<StudioSelectionAction, string> = {
 async function jsonRequest(url: string, init?: RequestInit) {
   const response = await fetch(url, init);
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.message || "操作失败，请重试。");
+  if (!response.ok) throw Object.assign(new Error(result.message || "操作失败，请重试。"), { status: response.status });
   return result;
 }
 
@@ -66,6 +67,7 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [conversationUnavailable, setConversationUnavailable] = useState("");
   const [notice, setNotice] = useState("");
   const [artifactDialog, setArtifactDialog] = useState<{ message: AssistantMessageDTO; title: string } | null>(null);
   const [executionStatuses, setExecutionStatuses] = useState<AssistantExecutionStatus[]>([]);
@@ -100,6 +102,59 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
   const [showScrollDown, setShowScrollDown] = useState(false);
   const scrollToLatest = () => { followOutput.current = true; setShowScrollDown(false); const element = streamRef.current; if (element) { element.scrollTop = element.scrollHeight; alignReadingEdge(element); } };
   useEffect(() => { const element = composerRef.current; if (element) { element.style.height = "auto"; element.style.height = `${Math.min(180, Math.max(52, element.scrollHeight))}px`; } }, [input]);
+
+  const [draftScope,setDraftScope] = useState<{ workspaceId:string; userId:string; projectId:string } | null>(null);
+  const [researchPending,setResearchPending] = useState<ResearchCreationDraft | null>(null);
+  const [replaceResearchInput,setReplaceResearchInput] = useState(false);
+  const [handoffBusy,setHandoffBusy] = useState(false);
+  const handoffLock = useRef(false), handoffSeen = useRef(false);
+  useEffect(()=>{handoffSeen.current=false;},[projectId]);
+  const currentComposer = useRef({input,references,materialIds,skillId,modelId});
+  currentComposer.current={input,references,materialIds,skillId,modelId};
+  useEffect(() => {
+    setDraftScope(null); setResearchPending(null);
+    if (loading || selectedObject || conversationUnavailable) return;
+    const signature=JSON.stringify(currentComposer.current), controller = new AbortController();
+    void jsonRequest("/api/research/creation?projectId=" + encodeURIComponent(projectId),{signal:controller.signal}).then(target => {
+      if(controller.signal.aborted)return;
+      cleanResearchDrafts(target.actor);
+      const scope={...target.actor,projectId}, stored=readProjectInput(scope), pending=readResearchHandoff(scope);
+      setDraftScope(scope);
+      if(JSON.stringify(currentComposer.current)===signature){
+      if(stored){setInput(stored.input);setReferences(stored.references);setMaterialIds(stored.materialIds);setSkillId(stored.skillId);setModelId(stored.modelId);}
+      else {setInput("");setReferences([]);setMaterialIds([]);}
+      }
+      if(pending){handoffSeen.current=true;setResearchPending(pending);}
+    }).catch(cause=>{if(!controller.signal.aborted){if(cause.status===401)cleanResearchDrafts();setNotice(cause.message || "临时输入未能恢复，未自动发送任何内容。");}});
+    return()=>controller.abort();
+  },[projectId,loading,selectedObject?.objectId,conversationUnavailable]);
+  useEffect(()=>{
+    if(!draftScope||draftScope.projectId!==projectId||selectedObject||loading)return;
+    const scope=draftScope,draft={input,references,materialIds,skillId,modelId};
+    if(!writeProjectInput(scope,draft))setNotice("临时草稿存储不可用，离开前请保留当前输入。");
+  },[draftScope,projectId,selectedObject?.objectId,loading,input,references,materialIds,skillId,modelId]);
+  function cancelResearchDraft(){
+    if(draftScope)clearResearchHandoff(draftScope);
+    setResearchPending(null);composerRef.current?.focus();setNotice("已取消本次带入，原输入与引用保留，没有分享研究。");
+  }
+  async function acceptResearchDraft(replace:boolean){
+    if(!researchPending||!draftScope||handoffLock.current||selectedObject||sending||loading)throw Error("请稍后再试。");
+    if(researchPending.expiresAt<=Date.now()){cancelResearchDraft();throw Error("这次准备已过期，请回研究页重新带入。");}
+    handoffLock.current=true;setHandoffBusy(true);
+    try{
+      const next=await jsonRequest("/api/research/creation",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({projectId,resultId:researchPending.reference.sourceId,selection:researchPending.reference.researchSelection,content:researchPending.content})}) as ResearchCreationDraft;
+      const old=references.find(item=>item.sourceType===next.reference.sourceType&&item.sourceId===next.reference.sourceId);
+      if(old&&JSON.stringify(old.researchSelection)!==JSON.stringify(next.reference.researchSelection))throw Error("当前已有同一研究的其他引用。请先移除旧引用，再带入选中的结论。");
+      const merged=old?references:[...references,next.reference];
+      const text=replace?next.content:[input,next.content].filter(value=>value.trim()).join("\n\n");
+      if(text.length>4000||merged.length+materialIds.length>8)throw Error("现有输入或引用较多，请先调整；当前内容与本次准备都已保留。");
+      const draft={input:text,references:merged,materialIds,skillId,modelId};
+      writeProjectInput(draftScope,draft);
+      setInput(text);setReferences(merged);clearResearchHandoff(draftScope);setResearchPending(null);
+      setNotice("已放入待发送内容，原研究未改动、未分享。审阅后由你发送。");composerRef.current?.focus();
+    }finally{handoffLock.current=false;setHandoffBusy(false);}
+  }
+
   const lastPromptRef = useRef("");
   const createdObjectIdRef = useRef<string | null>(null);
 
@@ -107,9 +162,10 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
     let active = true;
     const preserveCreatedResult = selectedObject?.objectId === createdObjectIdRef.current;
     setLoading(true); followOutput.current = true;
+    setConversationUnavailable("");
     if (!preserveCreatedResult) { setMessages([]); setError(""); setExecutionStatuses([]); }
     const url = selectedObject ? `/api/projects/${projectId}/canvas/objects/${selectedObject.objectId}/assistant` : `/api/projects/${projectId}/assistant`;
-    void jsonRequest(url).then((thread: { messages?: AssistantMessageDTO[] }) => { if (!active) return; if (thread.messages?.length || !preserveCreatedResult) setMessages(thread.messages ?? []); if (preserveCreatedResult) createdObjectIdRef.current = null; }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : "对话记录加载失败。"); }).finally(() => { if (active) setLoading(false); });
+    void jsonRequest(url).then((thread: { messages?: AssistantMessageDTO[]; unavailableReason?: string }) => { if (!active) return; setConversationUnavailable(thread.unavailableReason ?? ""); if (thread.messages?.length || !preserveCreatedResult) setMessages(thread.messages ?? []); if (preserveCreatedResult) createdObjectIdRef.current = null; }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : "对话记录加载失败。"); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; abortRef.current?.abort(); };
   }, [projectId, selectedObject?.objectId]);
 
@@ -133,13 +189,13 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
 
   const send = async (override?: string, retryBody?: Record<string, unknown>) => {
     const content = (override ?? input).trim();
-    if (!content || sending || uploading || !configured || (selectedObject && !editable)) return;
+    if (!content || sending || uploading || !configured || conversationUnavailable || (selectedObject && !editable)) return;
     followOutput.current = true; setShowScrollDown(false);
     setSending(true); setError(""); setNotice(""); lastPromptRef.current = content;
     const controller = new AbortController(); abortRef.current = controller;
     try {
       const url = selectedObject ? `/api/projects/${projectId}/canvas/objects/${selectedObject.objectId}/assistant` : `/api/projects/${projectId}/assistant`;
-      const body = retryBody ?? (selectedObject ? { instruction: content, ...(additionalObjectIds.length ? { additionalObjectIds } : {}), ...(materialIds.length ? { sourceItemIds: materialIds } : {}) } : { content, references: references.map(({ sourceType, sourceId }): ContextReference => ({ sourceType, sourceId })), skillVersionId: skillId || null, modelSelection: modelOptions.find(m => m.modelId === modelId) ? { provider: modelOptions.find(m => m.modelId === modelId)!.provider, modelId } : null, ...(targetArtifact ? { targetArtifactId: targetArtifact.artifactId } : {}), ...(materialIds.length ? { sourceItemIds: materialIds } : {}) });
+      const body = retryBody ?? (selectedObject ? { instruction: content, ...(additionalObjectIds.length ? { additionalObjectIds } : {}), ...(materialIds.length ? { sourceItemIds: materialIds } : {}) } : { content, references: references.map(({ sourceType, sourceId, researchSelection }): ContextReference => ({ sourceType, sourceId, ...(researchSelection ? { researchSelection } : {}) })), skillVersionId: skillId || null, modelSelection: modelOptions.find(m => m.modelId === modelId) ? { provider: modelOptions.find(m => m.modelId === modelId)!.provider, modelId } : null, ...(targetArtifact ? { targetArtifactId: targetArtifact.artifactId } : {}), ...(materialIds.length ? { sourceItemIds: materialIds } : {}) });
       lastRequest.current = body;
       const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: controller.signal });
       if (!response.ok || !response.body) { const body = await response.json().catch(() => ({})); throw new Error(body.message || "当前 AI 服务暂时不可用，请稍后再试。"); }
@@ -173,10 +229,10 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
   };
 
   useEffect(() => {
-    if (!initialRequest || loading || !configured || selectedObject || messages.length || error || startedProject.current === projectId) return;
+    if (!draftScope || handoffSeen.current || researchPending || !initialRequest || loading || !configured || conversationUnavailable || selectedObject || messages.length || error || startedProject.current === projectId) return;
     startedProject.current = projectId;
     void send(initialRequest.content, initialRequest);
-  }, [initialRequest, loading, configured, selectedObject, messages.length, error, projectId]);
+  }, [initialRequest, loading, configured, conversationUnavailable, selectedObject, messages.length, error, projectId, draftScope, researchPending]);
 
   useImperativeHandle(ref, () => ({ executeSelection: (action) => { if (selection) void send(`${actionPrompts[action]}\n\n${selection.text}`); } }));
 
@@ -203,8 +259,8 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
 
   const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } };
 
-  return <div className={`studio-project-assistant ${!selectedObject ? "agent-chat" : ""}`} data-testid="studio-project-assistant">
-    {artifactDialog ? <NameDialog title="保存为成果" initialValue={artifactDialog.title} confirmLabel="保存成果" onInteractionLockChange={artifactDialogInteractionLock} onClose={() => setArtifactDialog(null)} onSave={async title => {
+  return <div className={`studio-project-assistant ${!selectedObject ? "agent-chat" : ""}`} data-testid="studio-project-assistant" data-draft-ready={Boolean(draftScope)&&!loading}>
+    {artifactDialog ? <NameDialog title="保存为项目成果" description="保存后，该工作空间有读取权限的有效成员（含只读成员）可见。请检查正文中是否包含不希望共享的个人信息；取消不会保存。" initialValue={artifactDialog.title} confirmLabel="保存成果" onInteractionLockChange={artifactDialogInteractionLock} onClose={() => setArtifactDialog(null)} onSave={async title => {
       const artifact = await jsonRequest(`/api/projects/${projectId}/artifacts`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "TEXT", title, sourceMessageId: artifactDialog.message.id }) }) as ArtifactView;
       setNotice("已保存为独立文本产出。");
       router.push(`/dashboard?project=${projectId}&node=artifact:${artifact.artifactId}`);
@@ -221,7 +277,7 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
         {message.role === "ASSISTANT" ? <footer className="agent-actions">
           <button type="button" aria-label="复制回答" title="复制回答" disabled={!message.content} onClick={() => void navigator.clipboard.writeText(message.content).then(() => setNotice("已复制。")).catch(() => setError("复制失败，请手动选择文本。"))}><Copy size={15} /></button>
           {message.status === "COMPLETED" && !selectedObject && (!message.artifactId || message.actions.includes("APPLY_ARTIFACT") && message.artifactId === targetArtifact?.artifactId) ? <button type="button" aria-label={message.artifactId && targetArtifact ? "应用到当前成果" : "保存为成果"} title={message.artifactId && targetArtifact ? "应用到当前成果" : "保存为成果"} disabled={!editable} onClick={() => void saveResult(message, message.artifactId && targetArtifact ? "APPLY_ARTIFACT" : "CREATE_ARTIFACT")}><Save size={15} /></button> : null}
-          <button type="button" aria-label="重新生成" title="重新生成" disabled={sending} onClick={() => { const previous = messages.slice(0, index).reverse().find(m => m.role === "USER"); void send(previous?.content || lastPromptRef.current, previous && !selectedObject ? { content: previous.content, retryUserMessageId: previous.id } : previous ? requestByUser.current.get(previous.id) : lastRequest.current || undefined); }}><RefreshCw size={15} /></button>
+          <button type="button" aria-label="重新生成" title="重新生成" disabled={sending || Boolean(conversationUnavailable)} onClick={() => { const previous = messages.slice(0, index).reverse().find(m => m.role === "USER"); void send(previous?.content || lastPromptRef.current, previous && !selectedObject ? { content: previous.content, retryUserMessageId: previous.id } : previous ? requestByUser.current.get(previous.id) : lastRequest.current || undefined); }}><RefreshCw size={15} /></button>
         </footer> : null}
       </article>)}
     </div>
@@ -235,20 +291,35 @@ export const StudioDefaultMethod = forwardRef<StudioAssistantHandle, Props>(func
       {materialIds.map((id) => { const source = projectMaterials.find((item) => item.id === id); return source ? <span key={id}><Link2 size={14} />{source.title}<button type="button" aria-label={`移除资料 ${source.title}`} onClick={() => setMaterialIds((current) => current.filter((value) => value !== id))}><X size={13} /></button></span> : null; })}
     </div>
 
+
+    {researchPending ? <section className="agent-research-handoff" aria-label="审阅研究带入内容">
+      <h3>研究发现已准备好，尚未发送</h3>
+      <p>{researchPending.conversationVisibility}</p>
+      <strong>{researchPending.reference.title} · 已选 {researchPending.reference.researchSelection?.items.length} 条结论</strong>
+      <details><summary>查看本次结论与创作意图</summary><p>{researchPending.content}</p>{researchPending.reference.researchSelection?.items.map(item=><p key={item.id}>{item.text}</p>)}</details>
+      <p>现有输入、引用、资料和专业技能选择会保留。没有自动保存研究成果或调用模型。</p>
+      <button type="button" disabled={handoffBusy||sending||loading||Boolean(conversationUnavailable)} onClick={()=>void acceptResearchDraft(false).catch(cause=>setError(cause.message))}>{input.trim()?"追加到现有输入":"放入待发送内容"}</button>
+      {input.trim()?<button type="button" disabled={handoffBusy||sending||loading} onClick={()=>setReplaceResearchInput(true)}>替换输入文字…</button>:null}
+      <button type="button" disabled={handoffBusy} onClick={cancelResearchDraft}>取消带入，保留原输入</button>
+    </section>:null}
+    {replaceResearchInput ? <NameDialog title="替换当前输入？" confirmOnly description="只替换输入文字，已有引用、资料和专业技能选择仍保留。不会发送、分享或调用模型。" confirmLabel="确认替换文字" onInteractionLockChange={artifactDialogInteractionLock} onClose={()=>{setReplaceResearchInput(false);composerRef.current?.focus();}} onSave={async()=>{await acceptResearchDraft(true);}}/>:null}
+
     {materialOpen && selectedObject ? <section className="studio-assistant-material-picker"><header><strong>添加引用</strong><button type="button" aria-label="关闭引用选择" onClick={() => setMaterialOpen(false)}><X size={16} /></button></header><label><Search size={14} /><input autoFocus value={materialSearch} onChange={(event) => setMaterialSearch(event.target.value)} placeholder="搜索画布内容或当前创作资料" /></label><div>{selectedObject && visibleCanvasObjects.length ? <p>画布内容</p> : null}{selectedObject ? visibleCanvasObjects.map((object) => <button type="button" key={object.id} aria-pressed={additionalObjectIds.includes(object.id)} onClick={() => setAdditionalObjectIds((current) => current.includes(object.id) ? current.filter((id) => id !== object.id) : [...current, object.id].slice(-5))}><FileText size={15} /><span><strong>{object.title || "未命名内容"}</strong><small>{object.textContent || (object.generatedFrom.length ? `基于 ${object.generatedFrom.length} 项内容生成` : "画布内容")}</small></span>{additionalObjectIds.includes(object.id) ? <Check size={15} /> : null}</button>) : null}{visibleMaterials.length ? <p>当前创作资料</p> : null}{visibleMaterials.map((source) => <button type="button" key={source.id} aria-pressed={materialIds.includes(source.id)} onClick={() => setMaterialIds((current) => current.includes(source.id) ? current.filter((id) => id !== source.id) : [...current, source.id].slice(-8))}><FileText size={15} /><span><strong>{source.title}</strong><small>{source.summary || source.description || "尚未整理摘要"}</small></span>{materialIds.includes(source.id) ? <Check size={15} /> : null}</button>)}</div></section> : null}
 
     {materialOpen && !selectedObject ? <section className="studio-assistant-material-picker"><header><strong>引用已有内容</strong><button type="button" aria-label="关闭引用选择" onClick={() => setMaterialOpen(false)}><X size={15} /></button></header><input aria-label="搜索引用" autoFocus value={materialSearch} onChange={e => setMaterialSearch(e.target.value)} placeholder="搜索资料、研究、成果、对标账号、趋势" /><div className="agent-reference-results">{referenceResults.map(r => <button type="button" key={`${r.sourceType}:${r.sourceId}`} onClick={() => { setReferences(current => current.some(v => v.sourceType === r.sourceType && v.sourceId === r.sourceId) ? current : [...current, r].slice(0, 8)); setMaterialOpen(false); setInput(value => value.replace(/@[^@\s]*$/, "")); }}><FileText size={15} /><span><strong>{r.title}</strong><small>{({ MATERIAL: "资料", RESEARCH: "研究成果", ARTIFACT: "成果", BENCHMARK: "对标账号", TREND: "趋势", KNOWLEDGE: "知识库" })[r.sourceType]} · {r.description}</small></span></button>)}{!referenceResults.length ? <p>没有匹配的可用内容。</p> : null}</div></section> : null}
+    {conversationUnavailable ? <p className="studio-assistant-error" role="status">{conversationUnavailable}</p> : null}
+    {!editable ? <p role="status">你可以查看获准内容，不能上传资料、保存候选或修改项目成果。</p> : null}
     {error ? <p className="studio-assistant-error" role="alert">{error}</p> : null}{notice ? <p className="studio-assistant-success" role="status">{notice}</p> : null}
     {!configured ? <p className="studio-assistant-error">当前 AI 服务暂时不可用，请稍后再试。</p> : null}
     <footer className="studio-assistant-composer">
-      <textarea ref={composerRef} aria-label="和鑫小助说" value={input} disabled={!configured || Boolean(selectedObject && !editable)} onChange={(event) => { setInput(event.target.value); const mention = event.target.value.match(/@([^@\s]*)$/); if (mention && !selectedObject) { setMaterialOpen(true); setMaterialSearch(mention[1] || ""); } }} onKeyDown={onComposerKeyDown} rows={2} maxLength={4_000} placeholder={selectedObject ? "基于当前内容，你想继续生成什么？" : "继续告诉 AI 你想做什么……"} />
+      <textarea ref={composerRef} aria-label="和鑫小助说" value={input} disabled={Boolean(conversationUnavailable) || Boolean(selectedObject && !editable)} onChange={(event) => { setInput(event.target.value); const mention = event.target.value.match(/@([^@\s]*)$/); if (mention && !selectedObject) { setMaterialOpen(true); setMaterialSearch(mention[1] || ""); } }} onKeyDown={onComposerKeyDown} rows={2} maxLength={4_000} placeholder={selectedObject ? "基于当前内容，你想继续生成什么？" : "继续告诉 AI 你想做什么……"} />
       <div className="agent-composer-tools">
         <input ref={uploadRef} type="file" hidden multiple accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp,.mp4,.mp3,.wav" onChange={e => { void upload(Array.from(e.target.files || [])); e.target.value = ""; }} />
         <button type="button" aria-label="上传文件或图片" title="上传文件或图片" disabled={uploading || !editable} onClick={() => uploadRef.current?.click()}>{uploading ? <LoaderCircle size={17} /> : <Plus size={17} />}</button>
         <button type="button" aria-label="引用已有内容" title="引用已有内容" aria-expanded={materialOpen} onClick={() => setMaterialOpen(v => !v)}><AtSign size={17} /></button>
-        <select aria-label="选择 Skill" value={skillId} onChange={e => setSkillId(e.target.value)}><option value="">不使用 Skill</option>{[...new Map([...methods.selected, ...methods.available].map(m => [m.methodVersionId, m])).values()].map(m => <option key={m.methodVersionId} value={m.methodVersionId}>{m.title}</option>)}</select>
+        <select aria-label="选择 Skill" value={skillId} onChange={e => setSkillId(e.target.value)}><option value="">不使用专业技能</option>{[...new Map([...methods.selected, ...methods.available].map(m => [m.methodVersionId, m])).values()].map(m => <option key={m.methodVersionId} value={m.methodVersionId}>{m.title}</option>)}</select>
         <select className="agent-model" aria-label="选择模型" value={modelId} onChange={e => setModelId(e.target.value)}><option value="">{defaultModelLabel}</option>{modelOptions.map(m => <option key={m.modelId} value={m.modelId}>{m.label}</option>)}</select>
-        {sending ? <button type="button" aria-label="停止生成" title="停止生成" onClick={() => abortRef.current?.abort()}><Square size={16} /></button> : <Button aria-label="发送给鑫小助" disabled={!input.trim() || uploading || !configured} onClick={() => void send()}><Send size={16} /></Button>}
+        {sending ? <button type="button" aria-label="停止生成" title="停止生成" onClick={() => abortRef.current?.abort()}><Square size={16} /></button> : <Button aria-label="发送给鑫小助" disabled={!input.trim() || uploading || !configured || Boolean(conversationUnavailable)} onClick={() => void send()}><Send size={16} /></Button>}
       </div>
     </footer>
     <button type="button" className="studio-assistant-mobile-close" onClick={onClose}>收起鑫小助</button>

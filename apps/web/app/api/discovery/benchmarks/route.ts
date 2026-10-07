@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   if (!canAddResearchAccount(context.role, context.session.user)) return apiError("FORBIDDEN", 403, "当前账号没有添加对标账号的权限。");
   try {
     const input = addBenchmarkSchema.parse(await request.json().catch(() => null));
-    const item = await addBenchmark({ workspaceId: context.workspace.id, userId: context.session.user.id, account: input.account });
+    const item = await addBenchmark({ workspaceId: context.workspace.id, userId: context.session.user.id, account: input.account, purpose: input.purpose });
     return NextResponse.json({ item }, { status: 201 });
   } catch (error) {
     return discoveryApiError(error);

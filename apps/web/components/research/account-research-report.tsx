@@ -19,7 +19,7 @@ function evidence(value: View, title: string, text: string, citations: Citation[
 function CounterEvidence({ value, onEvidence, refs }: Props & { refs: string[] }) {
   if (!refs.length || !value.report) return null;
   const citations = refs.flatMap(ref => value.report!.workAnalyses.find(item => item.ref === ref)?.citations ?? []);
-  return <button type="button" className="dossier-evidence-button" onClick={() => onEvidence({ ...evidence(value, "反例与适用边界", "这些样本提醒我们：同样的表达方式不一定得到相同表现。请结合原文核对差异。", citations, "反例来自当前研究快照，不能单凭指标证明原因。"), sources: refs.flatMap(ref => { const source = value.report!.sources.find(item => item.ref === ref); return source ? [{ ...source, excerpt: citations.filter(item => item.ref === ref).map(item => item.quote).join("\n") || "该样本仅作为基础数据反例，未保存正文分析。" }] : []; }) })}>核对 {refs.length} 条反例 ↗</button>;
+  return <button type="button" className="dossier-evidence-button" onClick={() => onEvidence({ ...evidence(value, "反例与适用边界", "这些样本提醒我们：同样的表达方式不一定得到相同表现。请结合原文核对差异。", citations, "反例来自当前研究快照，不能单凭指标证明原因。"), sources: refs.flatMap(ref => { const source = value.report!.sources.find(item => item.ref === ref); return source ? [{ ...source, excerpt: source.excerpt || "本版本只保存了这条作品的来源关系。" }] : []; }) })}>核对 {refs.length} 条反例 ↗</button>;
 }
 function EvidenceButton({ value, onEvidence, title, text, citations, limitation }: Props & { title: string; text: string; citations: Citation[]; limitation: string }) {
   return <button type="button" className="dossier-evidence-button" onClick={() => onEvidence(evidence(value, title, text, citations, limitation))}>查看 {new Set(citations.map(item => item.ref)).size} 项依据 ↗</button>;

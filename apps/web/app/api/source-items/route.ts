@@ -34,8 +34,11 @@ export async function POST(request: Request) {
   const context = await getApiWorkspaceContext();
   if (!context) return apiError("UNAUTHORIZED", 401);
   if (context.role === "VIEWER") return apiError("FORBIDDEN", 403);
+  const clientRequestId=request.headers.get("idempotency-key") ?? undefined;
+  if(clientRequestId && !z.uuid().safeParse(clientRequestId).success)return apiError("INVALID_REQUEST_KEY",400);
   const parsed = createSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return apiError("INVALID_INPUT", 400, "采集输入不完整或格式不正确。");
+  const requestKeyRecord = clientRequestId ? await db.ingestJob.findFirst({where:{workspaceId:context.workspace.id,requestedById:context.session.user.id,metadata:{path:["clientRequestId"],equals:clientRequestId}},select:{id:true}}) : null;
   if (parsed.data.kind === "URL") {
     let canonicalUrl: string;
     try {
@@ -44,7 +47,7 @@ export async function POST(request: Request) {
       return apiError("INVALID_URL", 400);
     }
     const duplicate = await db.sourceItem.findFirst({ where: { workspaceId: context.workspace.id, canonicalUrl }, select: { id: true } });
-    if (duplicate) return NextResponse.json({ error: "DUPLICATE_URL", sourceItemId: duplicate.id }, { status: 409 });
+    if (duplicate && !requestKeyRecord) return NextResponse.json({ error: "DUPLICATE_URL", sourceItemId: duplicate.id }, { status: 409 });
   }
   if (parsed.data.kind === "DOUYIN" || parsed.data.kind === "REDFOX") {
     let canonicalUrl: string;
@@ -71,7 +74,7 @@ export async function POST(request: Request) {
       },
       select: { id: true, status: true },
     });
-    if (duplicate) {
+    if (duplicate && !requestKeyRecord) {
       return NextResponse.json(
         {
           error: "DUPLICATE_SOURCE",
@@ -86,10 +89,11 @@ export async function POST(request: Request) {
     }
   }
   try {
-    const created = await createSourceAndJob({ workspaceId: context.workspace.id, userId: context.session.user.id, source: parsed.data });
-    return NextResponse.json({ sourceItemId: created.sourceItem.id, jobId: created.ingestJob.id, status: "QUEUED" }, { status: 202 });
+    const created = await createSourceAndJob({ workspaceId: context.workspace.id, userId: context.session.user.id, source: parsed.data, clientRequestId });
+    return NextResponse.json({ sourceItemId: created.sourceItem.id, jobId: created.ingestJob.id, status: created.ingestJob.status }, { status: 202 });
   } catch (error) {
     if (error instanceof SourceServiceError) {
+      if(error.code==="IDEMPOTENCY_KEY_REUSED")return apiError(error.code,409,"同一请求标识不能用于不同内容。");
       return apiError(
         error.code,
         error.code === "REDFOX_DISABLED" ? 409 : 400,

@@ -155,6 +155,7 @@ export function AppShell({ userName, workspaceName, isSystemAdmin, initialPinned
     const protectEditing = (event: KeyboardEvent) => {
       const target = event.target instanceof Element ? event.target : document.activeElement;
       if (!target?.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox']")) return;
+      if (!event.isComposing && !event.altKey && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") return;
       if (event.isComposing || event.key.length === 1 || ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) event.stopImmediatePropagation();
     };
     document.addEventListener("keydown", protectEditing);

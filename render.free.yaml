@@ -1,3 +1,5 @@
+# LEGACY COMPATIBILITY: staging only, not the approved local/customer release profile.
+# Schema upgrades and bootstrap require a separate reviewed maintenance action.
 # Free demo: Web and serialized Worker share one ephemeral instance.
 services:
   - type: web
@@ -9,10 +11,8 @@ services:
     branch: codex/web-experience-candidate
     autoDeployTrigger: commit
     # Free staging only builds the Web app; Turbo's full monorepo build is unnecessarily memory-heavy here.
-    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @content-center/web exec next build --webpack
-    # Free services do not support preDeployCommand; migrate deploy is idempotent and runs before start.
-    startCommand: pnpm --filter @content-center/db db:migrate && pnpm --filter @content-center/web admin:bootstrap && pnpm --filter @content-center/web experience:bootstrap && node scripts/start-free-experience.mjs
-    healthCheckPath: /login
+    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @content-center/web exec next build --webpack    startCommand: node scripts/start-free-experience.mjs
+    healthCheckPath: /api/health/live # Liveness only; customer readiness is separately checked.
     envVars:
       - key: NODE_ENV
         value: production

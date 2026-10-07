@@ -130,3 +130,26 @@ export async function applyTextArtifactRevision(input: { workspaceId: string; us
   }
   return getArtifactForUser(input);
 }
+
+/** Manual editing reuses the same versioned branch primitive as AI revisions. */
+export async function saveTextArtifact(input: { workspaceId: string; userId: string; projectId: string; artifactId: string; expectedVersion: number; title: string; body: string }): Promise<ArtifactView> {
+  const title = input.title.trim();
+  if (!title || title.length > 200 || input.body.length > 1_000_000 || !Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 1) throw new ArtifactServiceError("ARTIFACT_INVALID_INPUT", "请检查成果标题、正文和版本。");
+  const project = await projectForUser(input); requireWrite(project.role);
+  try {
+    await db.$transaction(async tx => {
+      const artifact = await tx.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId, projectId: input.projectId, draftBranch: { deletedAt: null } }, include: { draftBranch: true } });
+      if (!artifact) throw new ArtifactServiceError("ARTIFACT_NOT_FOUND", "成果不存在或不可访问。");
+      if (artifact.draftBranchId === project.primaryDraftBranchId) throw new ArtifactServiceError("ARTIFACT_INVALID_INPUT", "请在项目稿件中修改当前主稿。");
+      if (artifact.draftBranch.version !== input.expectedVersion) throw new ArtifactServiceError("ARTIFACT_VERSION_CONFLICT", "成果已经更新，请重新打开后再保存；当前编辑内容仍保留。");
+      await writeDraftRevisionInTransaction(tx, { workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, branchId: artifact.draftBranchId, primaryDraftBranchId: project.primaryDraftBranchId, expectedVersion: input.expectedVersion, title, body: input.body, outline: strings(artifact.draftBranch.workingOutline), origin: "HUMAN", originNote: "手动修改通用文本成果" });
+      await tx.artifact.update({ where: { id: artifact.id }, data: { title, updatedAt: new Date() } });
+      await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "artifact.manually_saved", resourceType: "artifact", resourceId: artifact.id, metadata: json({ projectId: input.projectId, previousVersion: input.expectedVersion }) } });
+    }, { isolationLevel: "Serializable" });
+  } catch (error) {
+    if (error instanceof ArtifactServiceError) throw error;
+    if (error instanceof DraftServiceError && error.code === "DRAFT_VERSION_CONFLICT" || error && typeof error === "object" && "code" in error && error.code === "P2034") throw new ArtifactServiceError("ARTIFACT_VERSION_CONFLICT", "成果已经更新，请重新打开后再保存；当前编辑内容仍保留。");
+    throw error;
+  }
+  return getArtifactForUser(input);
+}

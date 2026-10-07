@@ -47,6 +47,7 @@ function mockFixture(prompt: string) {
 }
 
 export async function loadLLMRuntime(workspaceId: string, service = new IntegrationService(), selection?: LLMModelSelection | null): Promise<LLMRuntime> {
+  if (process.env.LOCAL_REVIEW_OFFLINE === "true" || process.env.EXTERNAL_CALLS_DISABLED === "true") throw new LLMError("LOCAL_REVIEW_OFFLINE", "升级验收副本不调用模型，请在正式环境启用后使用。", false);
   const status = await service.getIntegrationStatus(workspaceId, "LLM");
   if (status.status === "DISABLED") throw new LLMError("LLM_DISABLED", "AI 模型已禁用。", false);
   if (status.status !== "CONFIGURED" && status.status !== "MOCK") {

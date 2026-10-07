@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 const { enqueueMaterialAnalysis } = vi.hoisted(() => ({ enqueueMaterialAnalysis: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("@content-center/worker/queue", () => ({ enqueueMaterialAnalysis }));
+vi.mock("@content-center/worker/queue-producer", () => ({ enqueueMaterialAnalysis }));
 
 import { db } from "@content-center/db";
 import { IntegrationService } from "@content-center/integrations";

@@ -1,4 +1,5 @@
 import type { TranscriptionInput } from "../types";
+import { isLocalReviewOffline } from "../review-policy";
 import { LocalAsrError, type LocalAsrErrorCode } from "./errors";
 import { localAsrHealthSchema, localAsrTranscriptSchema } from "./schemas";
 import type { LocalAsrDevice, LocalAsrModel } from "./types";
@@ -94,6 +95,7 @@ export class LocalAsrClient {
   }
 
   private async request(url: URL, init: RequestInit, timeoutMs: number) {
+    if (isLocalReviewOffline()) throw new LocalAsrError("LOCAL_REVIEW_OFFLINE", "验收环境已关闭语音服务调用。", false);
     try {
       return await this.fetcher(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
     } catch (error) {

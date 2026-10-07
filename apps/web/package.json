@@ -26,6 +26,7 @@
     "@xyflow/react": "12.11.6",
     "better-auth": "1.7.2",
     "bullmq": "6.3.3",
+    "jsdom": "30.0.1",
     "lucide-react": "1.38.0",
     "next": "16.3.4",
     "pdf-parse": "2.4.5",

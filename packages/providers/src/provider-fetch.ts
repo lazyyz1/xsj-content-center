@@ -2,9 +2,11 @@ import { request as httpsRequest } from "node:https";
 import { request as httpRequest } from "node:http";
 import type { LookupFunction } from "node:net";
 import { resolvePublicAddress } from "./safe-url";
+import { assertReviewExternalAllowed } from "./review-policy";
 
 /** Credential-bearing requests: pinned DNS, no redirects, bounded response, no raw errors. */
 export const providerFetch: typeof fetch = async (input, init = {}) => {
+  assertReviewExternalAllowed();
   const target = new URL(input instanceof Request ? input.url : String(input));
   const testOrigin = process.env.ENVIRONMENT_ID === "LOCAL_TEST" ? process.env.PROVIDER_TEST_ORIGIN : undefined;
   if ((target.protocol !== "https:" && target.origin !== testOrigin) || target.username || target.password) throw new Error("PROVIDER_ADDRESS_INVALID");

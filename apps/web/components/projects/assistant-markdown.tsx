@@ -1,7 +1,7 @@
 "use client";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { AssistantMessageDTO } from "@/server/assistant/service";
+import type { AssistantMessageDTO } from "@/lib/contracts/assistant";
 
 type MarkdownNode = { type: string; value?: string; url?: string; children?: MarkdownNode[] };
 export function AssistantMarkdown({ message }: { message: AssistantMessageDTO }) {

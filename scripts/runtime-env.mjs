@@ -1,13 +1,19 @@
+import process from "node:process";
+import console from "node:console";
 import { existsSync, readFileSync } from "node:fs";
+import { parseEnv } from "node:util";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, URL } from "node:url";
 import { spawn } from "node:child_process";
 import net from "node:net";
+import { assertLegacyRuntime } from "./local-profile.mjs";
 import tls from "node:tls";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, "..");
 const [expectedEnvironment, envFile, ...command] = process.argv.slice(2);
+
+try { assertLegacyRuntime(expectedEnvironment); } catch (error) { console.error(error.message); process.exit(2); }
 
 const usage = "Usage: node scripts/runtime-env.mjs <LOCAL_REAL|LOCAL_TEST> <env-file> <command> [args...]";
 if (!expectedEnvironment || !envFile || command.length === 0) {
@@ -22,23 +28,7 @@ if (!existsSync(envPath)) {
   process.exit(2);
 }
 
-function parseEnvFile(contents) {
-  const values = {};
-  for (const rawLine of contents.split(/\r?\n/u)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const match = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/u);
-    if (!match) continue;
-    let value = match[2].trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    values[match[1]] = value;
-  }
-  return values;
-}
-
-const fileValues = parseEnvFile(readFileSync(envPath, "utf8"));
+const fileValues = parseEnv(readFileSync(envPath, "utf8"));
 if (fileValues.ENVIRONMENT_ID !== expectedEnvironment) {
   console.error(`RUNTIME_ENVIRONMENT_MISMATCH: expected ${expectedEnvironment}, received ${fileValues.ENVIRONMENT_ID || "missing"}`);
   process.exit(2);

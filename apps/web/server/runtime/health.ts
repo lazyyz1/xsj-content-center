@@ -4,9 +4,9 @@ import net from "node:net";
 import tls from "node:tls";
 import { db } from "@content-center/db";
 import { getSystemProviderConfig, systemManagedProvidersEnabled } from "@content-center/integrations";
-import { storageHealthFromEnv } from "@content-center/providers";
+import { isLocalReviewOffline, storageHealthFromEnv } from "@content-center/providers";
 
-export const RUNTIME_STATUSES = ["OK", "UNCONFIGURED", "MISSING", "UNREACHABLE", "DEGRADED"] as const;
+export const RUNTIME_STATUSES = ["OK", "UNCONFIGURED", "MISSING", "UNREACHABLE", "DEGRADED", "DISABLED_FOR_REVIEW"] as const;
 export type RuntimeStatus = (typeof RUNTIME_STATUSES)[number];
 
 export type RuntimeHealth = {
@@ -118,7 +118,8 @@ export async function getRuntimeHealth(): Promise<RuntimeHealth> {
   const environmentRedfox = policy === "ENVIRONMENT" && Boolean(getSystemProviderConfig("REDFOX"));
   const environmentLlm = policy === "ENVIRONMENT" && Boolean(getSystemProviderConfig("LLM"));
   const environmentDoubao = policy === "ENVIRONMENT" && Boolean(getSystemProviderConfig("DOUBAO_ASR"));
-  const localAsr = await httpProbe(process.env.LOCAL_ASR_ENDPOINT || "http://127.0.0.1:8765", "/health");
+  const reviewOffline = isLocalReviewOffline();
+  const localAsr = !reviewOffline && await httpProbe(process.env.LOCAL_ASR_ENDPOINT || "http://127.0.0.1:8765", "/health");
   const storageConfigured = storageHealthFromEnv() === "CONFIGURED";
 
   return {
@@ -130,16 +131,16 @@ export async function getRuntimeHealth(): Promise<RuntimeHealth> {
     worker: { status: worker },
     storage: { status: !storageConfigured ? "UNCONFIGURED" : storageReachable ? "OK" : "DEGRADED" },
     redfox: {
-      status: policy === "ENVIRONMENT" ? statusFromConfigured(environmentRedfox) : statusFromConfigured((workspaceProviders.get("REDFOX") ?? 0) > 0),
-      source: policy === "ENVIRONMENT" ? "ENVIRONMENT" : (workspaceProviders.get("REDFOX") ?? 0) > 0 ? "WORKSPACE" : "NONE",
+      status: reviewOffline ? "DISABLED_FOR_REVIEW" : policy === "ENVIRONMENT" ? statusFromConfigured(environmentRedfox) : statusFromConfigured((workspaceProviders.get("REDFOX") ?? 0) > 0),
+      source: reviewOffline ? "NONE" : policy === "ENVIRONMENT" ? "ENVIRONMENT" : (workspaceProviders.get("REDFOX") ?? 0) > 0 ? "WORKSPACE" : "NONE",
     },
     llm: {
-      status: policy === "ENVIRONMENT" ? statusFromConfigured(environmentLlm) : statusFromConfigured((workspaceProviders.get("LLM") ?? 0) > 0),
-      source: policy === "ENVIRONMENT" ? "ENVIRONMENT" : (workspaceProviders.get("LLM") ?? 0) > 0 ? "WORKSPACE" : "NONE",
+      status: reviewOffline ? "DISABLED_FOR_REVIEW" : policy === "ENVIRONMENT" ? statusFromConfigured(environmentLlm) : statusFromConfigured((workspaceProviders.get("LLM") ?? 0) > 0),
+      source: reviewOffline ? "NONE" : policy === "ENVIRONMENT" ? "ENVIRONMENT" : (workspaceProviders.get("LLM") ?? 0) > 0 ? "WORKSPACE" : "NONE",
     },
     asr: {
-      status: environmentDoubao || localAsr || (workspaceProviders.get("DOUBAO_ASR") ?? 0) > 0 ? "OK" : "UNCONFIGURED",
-      source: environmentDoubao ? "ENVIRONMENT" : localAsr ? "LOCAL" : (workspaceProviders.get("DOUBAO_ASR") ?? 0) > 0 ? "WORKSPACE" : "NONE",
+      status: reviewOffline ? "DISABLED_FOR_REVIEW" : environmentDoubao || localAsr || (workspaceProviders.get("DOUBAO_ASR") ?? 0) > 0 ? "OK" : "UNCONFIGURED",
+      source: reviewOffline ? "NONE" : environmentDoubao ? "ENVIRONMENT" : localAsr ? "LOCAL" : (workspaceProviders.get("DOUBAO_ASR") ?? 0) > 0 ? "WORKSPACE" : "NONE",
     },
   };
 }

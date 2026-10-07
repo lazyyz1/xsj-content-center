@@ -7,6 +7,7 @@ export type DossierWork = {
   topic: string | null; openingSnippet?: string | null;
   topicBasis?: "TEXT" | "TITLE" | null;
   researchStatus?: "NOT_ANALYZED" | "CURRENT" | "OUTDATED" | "TITLE_ONLY";
+  deepResearched?: boolean;
 };
 export type DossierMetric = "views" | "likes" | "comments" | "favorites" | "shares";
 export const dossierMetricLabels: Record<DossierMetric, string> = { views: "播放", likes: "点赞", comments: "评论", favorites: "收藏", shares: "分享" };

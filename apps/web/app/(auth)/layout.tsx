@@ -9,6 +9,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <h1 className="mt-3 text-2xl font-semibold tracking-tight">AI 内容生产中心</h1>
           <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">登录后进入你的团队内容工作台。</p>
         </div>
+        {process.env.ENVIRONMENT_ID === "LOCAL_REVIEW" ? <p role="status" className="mb-4 text-sm">升级验收副本 · 保留原账号与资料的本地副本。此处修改不会同步原环境；模型和外部服务已关闭。</p> : <p className="mb-4 text-xs text-[var(--text-secondary)]">请确认当前网址与账号所属环境一致。</p>}
         {children}
       </Card>
     </main>

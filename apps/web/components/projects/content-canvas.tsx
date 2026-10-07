@@ -55,7 +55,7 @@ import {
 } from "react";
 import { CanvasFreeNode, FreeNodeActionsProvider, type CanvasSaveState, type FreeCanvasNode } from "./canvas-free-node";
 import { PROJECT_MATERIAL_DRAG_TYPE, ProjectMaterialsPanel, type ProjectMaterial, type ProjectMaterialDrop } from "./project-materials-panel";
-import type { CanvasLayoutInput, CanvasObjectDTO } from "@/server/canvas/service";
+import type { CanvasLayoutInput, CanvasObjectDTO } from "@/lib/contracts/canvas";
 import { employeeSourceMeta } from "@/lib/content-labels";
 
 export type CardKind = "brief" | "sources" | "facts" | "methods" | "suggestion" | "draft";

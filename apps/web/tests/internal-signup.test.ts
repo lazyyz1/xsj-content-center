@@ -54,7 +54,7 @@ describe("invite-protected internal signup", () => {
   it("creates a USER session and personal workspace with the correct invite code", async () => {
     const response = await registerInternalUser(request({ name: "Internal User", email, password: "safe-test-password", inviteCode }));
     expect(response.status).toBe(200);
-    expect(response.headers.get("set-cookie")).toContain("better-auth.session_token");
+    expect(response.headers.get("set-cookie")?.includes(`${process.env.AUTH_COOKIE_PREFIX || "better-auth"}.session_token=`)).toBe(true);
 
     const user = await db.user.findUniqueOrThrow({
       where: { email },

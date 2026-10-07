@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowRight, CheckCircle2, CircleAlert, Lightbulb, Sparkles } from "lucide-react";
-import type { AssistantMessageDTO, AssistantStructuredResult, AssistantTopicResultItem } from "@/server/assistant/service";
+import type { AssistantMessageDTO, AssistantStructuredResult, AssistantTopicResultItem } from "@/lib/contracts/assistant";
 
 type Props = {
   message: AssistantMessageDTO;

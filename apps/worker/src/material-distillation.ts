@@ -290,7 +290,7 @@ export async function processMaterialDistillationJob(job: Job<ContentIngestPaylo
     throw new UnrecoverableError("Source content changed after material distillation was queued");
   }
 
-  const attempt = job.attemptsMade + 1;
+  const attempt = Math.max(job.attemptsMade + 1, record.attempt + 1);
   await db.$transaction([
     db.ingestJob.update({ where: { id: record.id }, data: { status: "RUNNING", provider: "LLM", providerMode: "REAL", attempt, progress: 10, startedAt, finishedAt: null, errorCode: null, errorMessage: null, metadata: json({ ...metadata, progressStage: "DISTILLING" }) } }),
     db.materialDistillation.update({ where: { id: distillation.id }, data: { status: "PROCESSING", errorCode: null, errorMessage: null } }),

@@ -45,7 +45,9 @@ describe("Phase 10B project assistant", () => {
   it("persists one default thread, streams a controlled reply, and records real references", async () => {
     const first = await getProjectAssistantThread({ workspaceId, userId: ownerId, projectId });
     const second = await getProjectAssistantThread({ workspaceId, userId: viewerId, projectId });
-    expect(second.id).not.toBe(first.id);
+    expect(first).toEqual({ id: "", messages: [] });
+    expect(second).toEqual({ id: "", messages: [] });
+    expect(await db.assistantThread.count({ where: { projectId } })).toBe(0);
     const events: AssistantStreamEvent[] = [];
     const completed = await runProjectAssistant({ workspaceId, userId: ownerId, projectId, content: "根据当前资料出几个选题", selectedObject: { objectType: "CANVAS_OBJECT", objectId: canvasObjectId, version: 1, ownership: "PENDING", whySelected: "当前选中" }, sourceItemIds: [sourceId] }, (event) => events.push(event), { runtime });
     expect(completed).toMatchObject({ role: "ASSISTANT", status: "COMPLETED", resultType: "TOPIC", actions: ["TOPIC", "TEXT"], structuredResult: { type: "TOPIC", topics: expect.any(Array) } });

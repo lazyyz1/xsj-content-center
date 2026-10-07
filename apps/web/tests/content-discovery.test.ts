@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-vi.mock("@content-center/worker/queue", () => ({ enqueueContentIngest: vi.fn().mockResolvedValue(undefined) }));
+const { enqueueContentIngestMock } = vi.hoisted(() => ({enqueueContentIngestMock: vi.fn().mockResolvedValue(undefined)}));
+vi.mock("@content-center/worker/queue", () => ({ enqueueContentIngest: enqueueContentIngestMock }));
+vi.mock("@content-center/worker/queue-producer", () => ({ enqueueContentIngest: enqueueContentIngestMock }));
 
 import { db } from "@content-center/db";
 import { enqueueContentIngest } from "@content-center/worker/queue";

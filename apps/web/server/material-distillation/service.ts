@@ -1,8 +1,9 @@
+import { markDispatchPending } from "@content-center/worker/job-recovery";
 import "server-only";
 
 import { db, type MaterialDistillation, type Prisma } from "@content-center/db";
 import { resolveSourceContent } from "@content-center/core";
-import { enqueueMaterialDistillation } from "@content-center/worker/queue";
+import { enqueueMaterialDistillation } from "@content-center/worker/queue-producer";
 import { materialDistillationGenerationSchema, materialDistillationModeSchema, type MaterialDistillationMode, type MaterialDistillationOutput } from "@content-center/providers";
 import { loadLLMRuntime, type LLMRuntime } from "../ai/llm-runtime";
 import { z } from "zod";
@@ -109,10 +110,7 @@ export async function requestMaterialDistillation(input: { workspaceId: string; 
     await enqueueMaterialDistillation({ jobId: reserved.job.id, workspaceId: input.workspaceId, sourceItemId: source.id, requestedById: input.userId }, reserved.job.maxAttempts);
     return { ...toMaterialDistillationDTO(reserved.distillation, sourceContent.updatedAt), jobId: reserved.job.id, status: "QUEUED" as const };
   } catch {
-    await db.$transaction([
-      db.materialDistillation.update({ where: { id: reserved.distillation.id }, data: { status: "FAILED", errorCode: "QUEUE_UNAVAILABLE", errorMessage: "精华提炼暂时无法开始。" } }),
-      db.ingestJob.update({ where: { id: reserved.job.id }, data: { status: "FAILED", errorCode: "QUEUE_UNAVAILABLE", errorMessage: "精华提炼暂时无法开始。", finishedAt: new Date() } }),
-    ]);
-    throw new MaterialDistillationError("QUEUE_UNAVAILABLE", "精华提炼暂时无法开始。");
+    await markDispatchPending(reserved.job.id, input.workspaceId);
+    return { ...toMaterialDistillationDTO(reserved.distillation, sourceContent.updatedAt), jobId: reserved.job.id, status: "QUEUED" as const };
   }
 }

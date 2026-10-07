@@ -1,3 +1,4 @@
+import { markDispatchPending } from "./job-recovery";
 import { reserveExperienceUsage } from "./experience-limits";
 import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -259,20 +260,8 @@ export async function requestSourceTranscription(input: {
       requestedById: input.requestedById,
     }, job.maxAttempts);
   } catch {
-    await db.$transaction([
-      db.ingestJob.update({ where: { id: job.id }, data: { status: "FAILED", errorCode: "QUEUE_UNAVAILABLE", errorMessage: "转写队列暂时不可用。", finishedAt: new Date() } }),
-      db.auditLog.create({
-        data: {
-          workspaceId: input.workspaceId,
-          userId: input.requestedById,
-          action: "transcription.enqueue_failed",
-          resourceType: "ingest_job",
-          resourceId: job.id,
-          metadata: { sourceItemId: input.sourceItemId, errorCode: "QUEUE_UNAVAILABLE" },
-        },
-      }),
-    ]);
-    throw new Error("QUEUE_UNAVAILABLE");
+    await markDispatchPending(job.id, input.workspaceId);
+
   }
   return { job, created: true as const };
 }
@@ -490,7 +479,7 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
 
   const mediaAssetId = job.data.mediaAssetId ?? job.data.videoAssetId;
   if (!mediaAssetId) throw new UnrecoverableError("Transcription media asset is missing");
-  const attempt = job.attemptsMade + 1;
+  const attempt = Math.max(job.attemptsMade + 1, record.attempt + 1);
   const plan = planFromRecord(record) ?? (record.provider === "DOUBAO_ASR"
     ? { provider: "DOUBAO_ASR" as const, qualityMode: "BALANCED" as const, fallbackToDoubao: false }
     : await resolveWorkspaceTranscriptionPlan(record.workspaceId));

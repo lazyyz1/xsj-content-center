@@ -73,12 +73,23 @@ describe("RedFox discovery adapters", () => {
   });
 
   it.each([
-    ["DOUYIN", "/story/api/dyData/queryWorkList", { accountId: "account-1", offset: 0, sortType: "4" }],
+    ["DOUYIN", "/story/api/dyData/queryWorkList", { accountId: "account-1", offset: 0, sortType: "_4" }],
     ["XIAOHONGSHU", "/story/api/xhsUser/queryWorkList", { redId: "account-1", offset: 0, sortType: "4" }],
   ] as const)("uses the official %s account-works contract", async (platform, path, body) => {
     const result = await provider().accountWorks.list({ platform, accountId: "account-1", sortType: "4" });
     expect(result.items[0]).toMatchObject({ externalId: "work-1", platform });
     expect(requests.at(-1)).toEqual({ path, body, apiKey: "ak_discovery_test" });
+  });
+
+  it("rejects unsupported homepage identity before any HTTP request", async () => {
+    const before = requests.length;
+    await expect(provider().accountDetail.get({ platform: "DOUYIN", accountId: "MS4w-homepage-fixture" })).rejects.toMatchObject({ code: "REDFOX_BAD_REQUEST", retryable: false });
+    expect(requests).toHaveLength(before);
+  });
+
+  it("keeps Douyin homepage secUserId separate from the public handle and uses documented latest sorting", async () => {
+    await provider().accountWorks.list({ platform: "DOUYIN", accountId: "MS4w-homepage-fixture", sortType: "2", offset: 20 });
+    expect(requests.at(-1)?.body).toEqual({ secUserId: "MS4w-homepage-fixture", offset: 20, sortType: "_2" });
   });
 
   it.each([

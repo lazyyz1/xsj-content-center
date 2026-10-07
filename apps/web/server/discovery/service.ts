@@ -242,7 +242,7 @@ export async function getBenchmarkWorks(input: { workspaceId: string; userId: st
       sortType: input.sort === "LATEST" ? "2" : "4",
     }),
   });
-  if (!page.cached) await db.benchmarkAccount.update({ where: { id: benchmark.id }, data: { lastSyncedAt: new Date() } });
+
   const items = page.items.map(publicContent);
   await db.$transaction(async (tx) => {
     for (const item of items) {
@@ -276,6 +276,7 @@ export async function getBenchmarkWorks(input: { workspaceId: string; userId: st
       if (!page.cached) await tx.benchmarkMetricObservation.create({ data: { snapshotId: snapshot.id, metrics: inputJson(item.metrics) } });
     }
   });
+  if (!page.cached) await db.benchmarkAccount.update({ where: { id: benchmark.id }, data: { lastSyncedAt: new Date() } });
   const [sources, ideaReferences] = await Promise.all([
     items.length ? db.sourceItem.findMany({ where: { workspaceId: input.workspaceId, OR: items.map((item) => ({ sourcePlatform: item.platform, externalId: item.externalId })) }, select: { id: true, sourcePlatform: true, externalId: true } }) : [],
     items.length ? db.contentIdeaReference.findMany({ where: { idea: { workspaceId: input.workspaceId }, OR: items.map((item) => ({ platform: item.platform, externalId: item.externalId })) }, select: { platform: true, externalId: true } }) : [],
@@ -296,7 +297,7 @@ export function listBenchmarks(workspaceId: string, take = 12) {
   });
 }
 
-export async function addBenchmark(input: { workspaceId: string; userId: string; account: ExternalAccountInput }) {
+export async function addBenchmark(input: { workspaceId: string; userId: string; account: Omit<ExternalAccountInput, "sourceProvider">; purpose?: string }) {
   const creatorProfile = await db.creatorProfile.findUnique({ where: { workspaceId_userId: { workspaceId: input.workspaceId, userId: input.userId } }, select: { id: true } });
   try {
     return await db.$transaction(async (tx) => {
@@ -307,6 +308,7 @@ export async function addBenchmark(input: { workspaceId: string; userId: string;
           platform: input.account.platform,
           externalAccountId: input.account.externalId,
           name: input.account.name,
+          researchNotes: input.purpose?.trim() || null,
           avatarUrl: input.account.avatarUrl,
           bio: input.account.bio,
           originalUrl: input.account.originalUrl,
@@ -344,14 +346,20 @@ export function getIdea(workspaceId: string, ideaId: string) {
   return db.contentIdea.findFirst({ where: { id: ideaId, workspaceId }, include: { references: { orderBy: { createdAt: "desc" }, include: { trendSnapshot: true } }, project: { select: { id: true } } } });
 }
 
-export async function createIdea(input: { workspaceId: string; userId: string; title: string; description?: string; reference?: ExternalContentInput; sourceItemId?: string }) {
+export async function createIdea(input: { workspaceId: string; userId: string; title: string; description?: string; reference?: ExternalContentInput; sourceItemId?: string; deduplicateSource?: boolean }) {
   const creatorProfile = await db.creatorProfile.findUnique({ where: { workspaceId_userId: { workspaceId: input.workspaceId, userId: input.userId } }, select: { id: true } });
-  const source = input.sourceItemId ? await db.sourceItem.findFirst({ where: { id: input.sourceItemId, workspaceId: input.workspaceId }, select: { id: true } }) : null;
+  const source = input.sourceItemId ? await db.sourceItem.findFirst({ where: { id: input.sourceItemId, workspaceId: input.workspaceId }, select: { id: true, title: true, sourcePlatform: true, externalId: true, sourceUrl: true, updatedAt: true } }) : null;
   if (input.sourceItemId && !source) throw new DiscoveryServiceError("DISCOVERY_NOT_FOUND", "素材不存在。");
   return db.$transaction(async (tx) => {
+    if (input.deduplicateSource && source) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"research-topic:" + input.workspaceId + ":" + input.userId + ":" + source.id + ":" + input.title}))`;
+      const previous = await tx.contentIdea.findFirst({ where: { workspaceId: input.workspaceId, createdById: input.userId, title: input.title, status: { not: "ARCHIVED" }, references: { some: { sourceItemId: source.id } } } });
+      if (previous) return previous;
+    }
     const idea = await tx.contentIdea.create({ data: { workspaceId: input.workspaceId, creatorProfileId: creatorProfile?.id, title: input.title, description: input.description || null, createdById: input.userId } });
     if (input.reference) await tx.contentIdeaReference.create({ data: { ...referenceData(idea.id, input.reference), sourceItemId: source?.id } });
-    await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "discovery.idea_created", resourceType: "content_idea", resourceId: idea.id, metadata: { hasReference: Boolean(input.reference) } } });
+    if (source && !input.reference) await tx.contentIdeaReference.create({ data: { ideaId: idea.id, sourceItemId: source.id, platform: source.sourcePlatform, externalId: source.externalId || source.id, title: source.title || "来源资料", url: source.sourceUrl || "/library/" + source.id, metadataSnapshot: inputJson({ referenceType: "MATERIAL", sourceVersion: source.updatedAt.toISOString() }) } });
+    await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "discovery.idea_created", resourceType: "content_idea", resourceId: idea.id, metadata: { hasReference: Boolean(input.reference || source) } } });
     return idea;
   });
 }

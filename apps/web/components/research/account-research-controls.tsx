@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { ResearchUseFindings } from "./research-use-findings";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, RefreshCw, Sparkles } from "lucide-react";
@@ -47,9 +48,10 @@ export function AccountResearchControls({ accountId, value, canWrite, collection
     catch (error) { setMessage(error instanceof Error ? error.message : "保存失败，请重试。"); }
     finally { setBusy(false); }
   }
-  return <div className="account-research-controls"><div className="account-research-action-row"><button type="button" className="dossier-primary" disabled={!canWrite || busy || Boolean(active) || !value.update} onClick={() => void update()}>{busy || active ? <Loader2 size={14} className="research-spin" /> : value.latest ? <RefreshCw size={14} /> : <Sparkles size={14} />}{active ? stage || "正在研究" : value.latest ? needsUpdate ? "更新研究" : "检查并更新研究" : "开始账号研究"}</button><button type="button" onClick={() => router.refresh()} disabled={busy}>检查证据</button>{value.sessionId ? <Link className="dossier-text-link" href={`/research/session/${value.sessionId}`}>继续提问 →</Link> : null}{value.latest ? value.latest.saved ? <Link className="dossier-text-link" href={`/research/results/run/${value.latest.id}#share-result`}>审阅并加入项目 →</Link> : <button type="button" disabled={!canWrite || busy} onClick={() => void save()}>保存为研究成果</button> : null}</div>
+  return <div className="account-research-controls"><div className="account-research-action-row"><button type="button" className="dossier-primary" disabled={!canWrite || busy || Boolean(active) || !value.update || !needsUpdate} onClick={() => void update()}>{busy || active ? <Loader2 size={14} className="research-spin" /> : value.latest ? <RefreshCw size={14} /> : <Sparkles size={14} />}{active ? stage || "正在研究" : value.latest ? needsUpdate ? "更新研究" : "研究已是最新" : "开始账号研究"}</button><button type="button" onClick={() => router.refresh()} disabled={busy}>检查证据</button>{value.sessionId ? <Link className="dossier-text-link" href={`/research/session/${value.sessionId}`}>继续提问 →</Link> : null}{value.latest ? value.latest.saved ? <Link className="dossier-text-link" href={`/research/results/run/${value.latest.id}`}>查看已保存研究 →</Link> : <button type="button" disabled={!canWrite || busy} onClick={() => void save()}>保存为研究成果</button> : null}</div>
     <p className="dossier-footnote">{active ? "可以离开页面，研究会作为新版本保留。" : value.latest && !needsUpdate ? "当前证据与已有研究一致，再次检查不会重复调用模型。" : "点击后才调用 AI。只重做新增或变更内容的逐条分析，并综合复核旧判断。"}</p>
     {value.update ? <p className="dossier-footnote">当前有 {value.update.metadata} 条基础记录、{value.update.readable} 条可读正文{value.update.comments ? `、${value.update.comments} 条评论样本` : ""}。{value.latest ? `新增作品 ${value.update.added} 条，正文变化 ${value.update.updatedText} 条，指标或标题变化 ${value.update.updatedMetadata} 条。` : "有多少真实证据，就从多少开始。"}</p> : <p className="dossier-footnote">当前范围还没有作品证据，先更新数据或扩大范围。</p>}
-    {message ? <p role="status" className="account-research-message">{message}</p> : value.failure ? <p role="status" className="account-research-message">{value.failure}</p> : null}
+    {value.latest ? <ResearchUseFindings key={value.latest.id} resultId={value.latest.id} canWrite={canWrite} /> : null}
+    {message ? <p role="status" className="account-research-message">{message}</p> : value.failure && needsUpdate ? <p role="status" className="account-research-message">{value.failure}</p> : null}
   </div>;
 }

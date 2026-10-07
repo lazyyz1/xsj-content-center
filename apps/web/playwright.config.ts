@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { defineConfig, devices } from "@playwright/test";
+import { assertTestDatabaseTarget } from "../../packages/db/src/test-target";
+assertTestDatabaseTarget(process.env);
 
 process.env.INTEGRATION_ENCRYPTION_KEY ||= randomBytes(32).toString("base64");
 process.env.ALLOW_PUBLIC_SIGNUP ??= "true";

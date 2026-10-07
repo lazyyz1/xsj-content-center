@@ -158,6 +158,10 @@ export class RedFoxClient {
   }
 
   getAccountDetail(input: { platform: "DOUYIN" | "XIAOHONGSHU"; accountId: string; userId?: string }) {
+    // https://redfox.hk/apis/douyin/XUT4CECZ: accountId supports unique_id / short_id / uid only.
+    if (input.platform === "DOUYIN" && input.accountId.trim().startsWith("MS4w")) {
+      throw new RedFoxError("REDFOX_BAD_REQUEST", "抖音身份查询不支持主页 sec_user_id；请先通过已核实的抖音号或 uid 识别路径。未调用第三方。", false, 400);
+    }
     const path = input.platform === "DOUYIN"
       ? "/story/api/dyData/queryUser"
       : "/story/api/xhsUser/queryAccountDetail";
@@ -171,8 +175,13 @@ export class RedFoxClient {
     const path = input.platform === "DOUYIN"
       ? "/story/api/dyData/queryWorkList"
       : "/story/api/xhsUser/queryWorkList";
-    const identity = input.platform === "DOUYIN" ? { accountId: input.accountId } : { redId: input.accountId };
-    return this.post(path, { ...identity, offset: input.offset ?? 0, sortType: input.sortType }, "REDFOX_API_KEY");
+    const identity = input.platform === "DOUYIN"
+      ? input.accountId.startsWith("MS4w") ? { secUserId: input.accountId } : { accountId: input.accountId }
+      : { redId: input.accountId };
+    // The documented _0/_2/_4 descriptions conflict with default examples; live verification remains pending.
+    // Never try alternate paid requests automatically.
+    const sortType = input.platform === "DOUYIN" && input.sortType && ["0", "2", "4"].includes(input.sortType) ? `_${input.sortType}` : input.sortType;
+    return this.post(path, { ...identity, offset: input.offset ?? 0, sortType }, "REDFOX_API_KEY");
   }
 
   getWorkDetail(input: { platform: "DOUYIN" | "XIAOHONGSHU"; externalId?: string; url?: string }) {

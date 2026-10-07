@@ -9,7 +9,11 @@ export const researchScopeSchema = z.object({
   useOwnArtifacts: z.boolean().default(false),
   notes: z.string().trim().max(20000).default(""),
   useCreatorProfile: z.boolean().default(false),
-  researchProfile: z.literal("ACCOUNT_DOSSIER").optional(),
+  researchProfile: z.enum(["ACCOUNT_DOSSIER", "ACCOUNT_V2", "WORK_DEEP", "TOPIC_OPPORTUNITY_V2", "FOCUS_V2"]).optional(),
+  benchmarkWorkId: id.optional(),
+  focusWorkIds: z.array(id).max(30).optional(),
+  researchDepth: z.literal("DEEP").optional(),
+  forceReanalysis: z.boolean().optional(),
   benchmarkCollectionRunId: id.optional(),
   researchDateRange: z.object({ from: z.string().date().optional(), to: z.string().date().optional() }).strict().refine(value => !value.from || !value.to || value.from <= value.to, "Invalid date range").optional(),
 }).strict();
@@ -63,3 +67,5 @@ export function validateResearchBlocks(value: unknown, sources: ResearchSource[]
   }
   return blocks;
 }
+
+export const researchSelectionSchema = z.object({ kind: z.enum(["run", "study"]), version: z.number().int().positive(), items: z.array(z.object({ id: z.string().min(1).max(200), text: z.string().trim().min(1).max(12000) }).strict()).min(1).max(30) }).strict().refine(value => new Set(value.items.map(item => item.id)).size === value.items.length, "不能重复选择结论").refine(value => value.items.reduce((sum,item) => sum + item.text.length,0) <= 30000, "本次结论过长，请缩小范围");
