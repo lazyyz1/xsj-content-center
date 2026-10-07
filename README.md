@@ -1,5 +1,9 @@
 # AI 内容生产中心
 
+> **当前协作入口（2026-10-07）：** 请先读[内容工作台协作交接](docs/WORKBENCH_HANDOFF.md)，区分源码、3000/3030实际版本、验证范围与同事协作顺序。
+>
+> **历史说明：** 下方阶段3C、V1、First Run及测试说明保留作历史背景；旧启动命令可能执行迁移或启动Worker，以当前交接的环境检查与授权为先。
+
 > **治理提示：** 当前产品与架构定义以 [PRODUCT.md](PRODUCT.md)、[ARCHITECTURE.md](ARCHITECTURE.md)、[LEGACY.md](LEGACY.md)、[AGENTS.md](AGENTS.md) 为准。下文部分阶段状态、功能完成度和历史开发说明尚未同步，不能作为当前产品定义。
 
 > **主仓定位：** [`lazyyz1/xsj-content-center`](https://github.com/lazyyz1/xsj-content-center) 是 AI 内容生产中心后续开发、问题跟踪和文档维护的唯一主仓。新功能和修复应从本仓选择明确的目标分支开始；当前 Cleanup 尚未建立 `main`，也未切换 GitHub 默认分支。
