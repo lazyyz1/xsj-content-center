@@ -52,7 +52,7 @@ Discovery/Trend/Benchmark底层仍供Research使用，旧/discovery不是新的�
 | review | release-20261007T025939Z-15417e50；127.0.0.1:3030 | 隔离PostgreSQL55436与review MinIO19000 |
 | 旧入口 | 本轮未发现3017/3020监听 | 旧目录/库/卷保留，不合并或删库 |
 
-本轮不切换运行版本。此前3030老师/对标UI已有服务与浏览器验收，但真实RedFox采集、模型拆解、ASR未实测。随后新增MS4w身份保护只在源码和本地测试通过，尚未进入这两个运行产物。构建成功也不等于部署或运行。
+本轮不切换运行版本。此前3030老师/对标UI已有服务与浏览器验收，但真实RedFox采集、模型拆解、ASR未实测。随后新增MS4w身份保护已通过源码、本地测试和本次交接快照构建验证，尚未进入这两个运行产物。构建成功也不等于部署或运行。
 
 ### 日报外部来源
 
@@ -154,3 +154,6 @@ CURRENT IMPLEMENTATION GAP：同事首次新机器尚无一键创建daily/review
 
 E盘交接worktree直接复用D盘已安装node_modules时，release-20261007T080026Z-8047e9b8失败：webpack把跨盘绝对路径拼成./D:/…，不是业务类型/lint失败；networkDenied0、sourceUnchanged/liveFilesUnchanged均true。没有安装新依赖、取消离线门禁或启动服务。
 同一已提交源码（含2处EOF规范化）转到全新同盘临时目录再构建：release-20261007T081014Z-c636b517 BUILT，exitCode0，networkDenied0，sourceUnchanged/liveFilesUnchanged均true；生产类型检查与106项页面生成任务通过，未启动或部署。此复验也排除了现场integration诊断脚本对编译的隐含依赖。新同事应在自己的checkout安装锁定依赖，不跨盘复用其他人的node_modules。
+
+
+同步验收：交接分支前两项提交已推送，远端与本地SHA核对一致。2026-10-07推送后可读取的本分支GitHub check-runs和workflow-runs均为0，因此不能称远端CI已通过；本地验收结果仍以上述记录为准。后续文档提交状态见最终同步回执。
