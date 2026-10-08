@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { accountResearchAnswerSchema, type AccountEvidence, type AccountEvidenceWork, type AccountResearchAnswer, type AccountResearchState, type AccountWorkAnalysis } from "./account-research-contract";
+import { accountResearchAnswerSchema, type AccountEvidence, type AccountEvidenceWork, type AccountResearchState, type AccountWorkAnalysis } from "./account-research-contract";
 import { median } from "./benchmark-dossier-math";
 
 export function workMetadataText(work: AccountEvidenceWork) {

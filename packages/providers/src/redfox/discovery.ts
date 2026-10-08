@@ -23,6 +23,7 @@ export type ExternalContent = {
   publishedAt: string | null;
   metrics: ExternalMetrics;
   durationMs: number | null;
+  dataAsOf?: string | null;
   sourceProvider: "REDFOX";
   /** Server-only provider snapshot. API layers must omit this field. */
   rawProviderMetadata?: Record<string, unknown>;

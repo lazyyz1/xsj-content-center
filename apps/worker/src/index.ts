@@ -1,8 +1,13 @@
-import { db } from "@content-center/db";
+import { acquireWorkerMode, assertWorkerMode } from "./worker-mode";
+import { startJobReconciler, recordTerminalQueueFailure } from "./job-recovery";
+import type { Job } from "bullmq";
+import type { ContentIngestPayload } from "./queue-producer";
 import { createServer } from "node:http";
 import { createContentIngestWorker, createHealthWorker, createTranscribeSourceWorker } from "./queue";
 import { cleanupExpiredAsrAudio } from "./transcription";
 
+assertWorkerMode("independent");
+const modeLease = await acquireWorkerMode("independent", () => { console.warn("WORKER_MODE_LEASE_LOST"); void shutdown(1); });
 const healthPort = Number(process.env.WORKER_HEALTH_PORT ?? "3010");
 let ready = false;
 const healthServer = createServer((request, response) => {
@@ -27,27 +32,22 @@ const transcriptionWorker = createTranscribeSourceWorker();
 // Reflect terminal queue failures (including lost/stalled workers) in the persisted UI state.
 for (const processor of [ingestWorker, transcriptionWorker]) processor.on("failed", (job, error) => {
   if (!job || !("jobId" in job.data)) return;
-  const terminal = job.attemptsMade >= (job.opts.attempts || 1) || /stalled|unrecoverable/iu.test(error.message) || error.name === "UnrecoverableError";
-  if (!terminal) return;
-  const data = job.data;
-  void db.$transaction(async tx => {
-    const changed = await tx.ingestJob.updateMany({ where: { id: data.jobId, workspaceId: data.workspaceId, status: { in: ["QUEUED","RUNNING"] } }, data: { status: "FAILED", errorCode: "WORKER_INTERRUPTED", errorMessage: "后台任务中断，请重试。已保存资料不会丢失。", finishedAt: new Date() } });
-    if (changed.count && job.name === "CONTENT_INGEST") await tx.sourceItem.updateMany({where:{id:data.sourceItemId,workspaceId:data.workspaceId,status:{in:["PENDING","PROCESSING"]}},data:{status:"FAILED"}});
-    if (changed.count) await tx.sourceAsset.updateMany({where:{sourceItemId:data.sourceItemId,workspaceId:data.workspaceId,status:"DOWNLOADING"},data:{status:"FAILED"}});
-  }).catch(() => console.warn("JOB_FAILURE_STATE_UPDATE_FAILED"));
+  void recordTerminalQueueFailure(job as Job<ContentIngestPayload>,error).catch(() => console.warn("JOB_FAILURE_STATE_UPDATE_FAILED"));
 });
 await Promise.all([worker.waitUntilReady(), ingestWorker.waitUntilReady(), transcriptionWorker.waitUntilReady()]);
 ready = true;
 console.info("WORKER_CONNECTED");
+const stopReconciler = startJobReconciler();
 
 const audioCleanupTimer = setInterval(() => {
   void cleanupExpiredAsrAudio().catch(() => console.warn("ASR_AUDIO_CLEANUP_RUN_FAILED"));
 }, 60 * 60 * 1_000);
 audioCleanupTimer.unref();
 
-async function shutdown() {
+async function shutdown(exitCode = 0) {
   ready = false;
   clearInterval(audioCleanupTimer);
+  stopReconciler();
   await new Promise<void>((resolve) => {
     if (!healthServer.listening) {
       resolve();
@@ -56,7 +56,8 @@ async function shutdown() {
     healthServer.close(() => resolve());
   });
   await Promise.all([worker.close(), ingestWorker.close(), transcriptionWorker.close()]);
-  process.exit(0);
+  await modeLease.close();
+  process.exit(exitCode);
 }
 
 process.on("SIGINT", shutdown);

@@ -1,3 +1,5 @@
+# LEGACY COMPATIBILITY: staging only, not the approved local/customer release profile.
+# Schema upgrades and bootstrap require a separate reviewed maintenance action.
 services:
   - type: web
     name: xsj-content-web-staging
@@ -9,7 +11,7 @@ services:
     buildCommand: pnpm install --frozen-lockfile && pnpm exec turbo build
     preDeployCommand: pnpm --filter @content-center/db db:migrate
     startCommand: pnpm --filter @content-center/web start
-    healthCheckPath: /login
+    healthCheckPath: /api/health/live # Liveness only; customer readiness is separately checked.
     envVars:
       - key: EXPERIENCE_LIMITS_ENABLED
         value: "true"

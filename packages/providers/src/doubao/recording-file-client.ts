@@ -93,7 +93,10 @@ export class DoubaoRecordingFileClient {
       this.metadata = { requestId, providerRequestId: response.headers.get("X-Tt-Logid") ?? logId ?? undefined, statusCode: statusCode ?? undefined, pollCount };
       if (PENDING.has(statusCode ?? "")) continue;
       if (!response.ok || statusCode !== SUCCESS) throw failure(response, statusCode, logId);
-      const parsed = doubaoFlashResponseSchema.safeParse(await response.json().catch(() => null));
+      let body:unknown;
+      try {body=await response.json();}
+      catch(error){throw new DoubaoError(error instanceof SyntaxError?"DOUBAO_INVALID_RESPONSE":"DOUBAO_SERVER_ERROR","豆包没有返回完整有效结果，请核对任务。",!(error instanceof SyntaxError));}
+      const parsed = doubaoFlashResponseSchema.safeParse(body);
       if (!parsed.success) throw new DoubaoError("DOUBAO_INVALID_RESPONSE", "豆包返回结构不符合录音文件识别协议。", false);
       return parsed.data;
     }

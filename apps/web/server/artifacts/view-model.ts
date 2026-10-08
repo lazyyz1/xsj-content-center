@@ -1,15 +1,10 @@
-export type ArtifactSummaryView = {
-  artifactId: string;
-  type: "TEXT";
-  title: string;
-  version: number;
-  excerpt: string;
-  updatedAt: string;
-};
+import "server-only";
 
-export type ArtifactView = ArtifactSummaryView & {
-  content: string;
-};
+import type { ArtifactSummaryView, ArtifactView } from "../../lib/contracts/artifacts";
+export type { ArtifactSummaryView, ArtifactView } from "../../lib/contracts/artifacts";
+
+
+
 
 type ArtifactViewRow = {
   id: string;

@@ -2,12 +2,14 @@ import "server-only";
 import { execFile } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 import { db } from "@content-center/db";
+import { assertReviewExternalAllowed } from "@content-center/providers";
 import { importBenchmarkComments } from "./benchmark-inputs";
 import { ResearchAccessError } from "./research-library";
 import { z } from "zod";
 
 const resultSchema = z.object({ comments: z.array(z.unknown()).max(1000), hasMore: z.boolean(), nextOffset: z.number().int().nonnegative().nullable() });
 async function run(workId: string, offset: number): Promise<unknown> {
+  assertReviewExternalAllowed();
   const python = process.env.BENCHMARK_F2_PYTHON;
   if (!python || !isAbsolute(python) || !process.env.BENCHMARK_F2_COOKIE) throw new Error("F2_NOT_CONFIGURED");
   const script = process.env.BENCHMARK_F2_SCRIPT || resolve(process.cwd(), "../../services/research-collector/f2_comments.py");
@@ -23,6 +25,7 @@ async function run(workId: string, offset: number): Promise<unknown> {
   });
 }
 export async function collectF2Comments(input: { workspaceId: string; userId: string; accountId: string; snapshotId: string; offset: number }, dependencies: { run?: (workId: string, offset: number) => Promise<unknown> } = {}) {
+  assertReviewExternalAllowed();
   const member = await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: input.workspaceId, userId: input.userId } } });
   if (!member) throw new ResearchAccessError(404);
   if (member.role === "VIEWER") throw new ResearchAccessError(403);

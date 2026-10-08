@@ -1,3 +1,5 @@
+import type { CanvasLayoutInput, CanvasMaterialReferenceDTO, CanvasObjectDTO } from "../../lib/contracts/canvas";
+export type { CanvasLayoutInput, CanvasMaterialReferenceDTO, CanvasObjectDTO } from "../../lib/contracts/canvas";
 import "server-only";
 
 import { db, type CanvasObjectType, type Prisma } from "@content-center/db";
@@ -9,52 +11,11 @@ const MAX_WIDTH = 1_200;
 const MIN_HEIGHT = 120;
 const MAX_HEIGHT = 1_600;
 
-export type CanvasLayoutInput = {
-  positionX: number;
-  positionY: number;
-  width: number;
-  height: number;
-  zIndex?: number;
-};
 
-export type CanvasMaterialReferenceDTO = {
-  id: string;
-  purpose: "PRIMARY" | "CONTEXT";
-  excerpt: string | null;
-  sourceTitleSnapshot: string;
-  sourceTypeSnapshot: string;
-  sourceUpdatedAtAtAttach: string | null;
-  sourceItem: {
-    id: string;
-    title: string | null;
-    description: string | null;
-    sourceType: string;
-    sourcePlatform: string;
-    status: string;
-    thumbnailUrl: string | null;
-    updatedAt: string;
-  };
-  sourceAsset: { id: string; assetType: string; status: string; mimeType: string | null } | null;
-};
 
-export type CanvasObjectDTO = {
-  id: string;
-  objectType: "TEXT" | "MATERIAL_REFERENCE" | "IMAGE_REFERENCE";
-  title: string | null;
-  textContent: string | null;
-  positionX: number;
-  positionY: number;
-  width: number;
-  height: number;
-  zIndex: number;
-  contentVersion: number;
-  layoutVersion: number;
-  createdAt: string;
-  updatedAt: string;
-  deletedAt: string | null;
-  materialReference: CanvasMaterialReferenceDTO | null;
-  generatedFrom: Array<{ sourceObjectId: string; sourceTitle: string; sourceDeleted: boolean; sourceSnapshotId: string }>;
-};
+
+
+
 
 export class CanvasServiceError extends Error {
   constructor(readonly code: "PROJECT_NOT_FOUND" | "CANVAS_FORBIDDEN" | "CANVAS_OBJECT_NOT_FOUND" | "CANVAS_OBJECT_INVALID" | "CANVAS_CONTENT_CONFLICT" | "CANVAS_LAYOUT_CONFLICT" | "CANVAS_SOURCE_NOT_FOUND" | "CANVAS_SOURCE_INVALID", message: string) {

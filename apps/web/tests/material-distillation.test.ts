@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 const enqueueMaterialDistillation = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "queued" }));
-vi.mock("@content-center/worker/queue", () => ({ enqueueMaterialDistillation }));
+vi.mock("@content-center/worker/queue-producer", () => ({ enqueueMaterialDistillation }));
 
 import { db } from "@content-center/db";
 import { createMethodFromDistillation, getMethod } from "../server/methods/service";

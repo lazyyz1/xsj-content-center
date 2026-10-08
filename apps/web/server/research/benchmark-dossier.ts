@@ -4,21 +4,26 @@ import { benchmarkCreatorProfileOutputV4Schema } from "@content-center/providers
 import type { ResearchSource } from "@content-center/core";
 import { researchBenchmarkDetail } from "./benchmarks";
 import { researchMember, ResearchError, type ResearchActor } from "./access";
-import { researchBlocksSchema } from "./contracts";
+import { researchBlocksSchema, researchScopeSchema } from "./contracts";
 import { getLegacyResearchResult } from "./legacy";
 import { getMaterialReadableContent } from "../material-detail/readable-content";
 import type { DossierWork } from "./benchmark-dossier-math";
 import { accountResearchOverview, accountResearchView } from "./account-research-service";
+import { deepResearchedWorkIds } from "./work-research-service";
+import { recommendWorkResearch } from "./work-research-recommendations";
+import { listAccountWorkDecisions } from "./work-research-assets";
+import { accountV2Overview } from "./account-v2-service";
 
 const signals: Record<string, string> = { SPECIFIC_PROBLEM: "具体问题切入", NUMBER_RESULT: "数字与结果", SURPRISING_CONTRAST: "反常识与对比", CASE_ENTRY: "案例切入", AUDIENCE_SCENARIO: "受众场景", RESULT_THEN_EXPLAIN: "先结果，再解释", PROBLEM_REASON_ACTION: "问题 → 原因 → 行动", STEP_BY_STEP: "分步骤展开", CASE_DATA_EVIDENCE: "案例与数据佐证", BEFORE_AFTER_COMPARE: "前后对照", EXPERIENCE_STORY: "经历与故事", QUESTION_DRIVEN: "提问推进" };
 
 export async function researchBenchmarkDossier(actor: ResearchActor, accountId: string, runId?: string, range: { from?: string; to?: string } = {}) {
   const detail = await researchBenchmarkDetail(actor, accountId, { runId, view: "dossier" });
-  const [latestRun, study, compareAccounts] = await Promise.all([
-    db.researchRun.findFirst({ where: { workspaceId: actor.workspaceId, requestedById: actor.userId, status: "COMPLETED", savedAt: { not: null }, inputScope: { path: ["benchmarkAccountIds"], array_contains: [accountId] }, session: { workspaceId: actor.workspaceId, createdById: actor.userId, entryTemplate: "BENCHMARK" } }, orderBy: { savedAt: "desc" }, select: { id: true, blocks: true, coverage: true, savedAt: true, sessionId: true } }),
+  const [savedResearchRuns, study, compareAccounts] = await Promise.all([
+    db.researchRun.findMany({ where: { workspaceId: actor.workspaceId, requestedById: actor.userId, status: "COMPLETED", savedAt: { not: null }, inputScope: { path: ["benchmarkAccountIds"], array_contains: [accountId] }, session: { workspaceId: actor.workspaceId, createdById: actor.userId, entryTemplate: "BENCHMARK" } }, orderBy: { savedAt: "desc" }, take: 100, select: { id: true, blocks: true, coverage: true, savedAt: true, sessionId: true, inputScope: true } }),
     db.benchmarkStudy.findFirst({ where: { workspaceId: actor.workspaceId, benchmarkAccountId: accountId, status: "COMPLETED" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, output: true, version: true, sampleCount: true, createdAt: true, samples: { select: { sourceItemId: true, sourceItem: { select: { workspaceId: true } } } } } }),
     db.benchmarkAccount.findMany({ where: { workspaceId: actor.workspaceId, enabled: true, id: { not: accountId } }, select: { id: true, name: true, platform: true }, orderBy: { updatedAt: "desc" }, take: 60 }),
   ]);
+  const latestRun = savedResearchRuns.find(run => { const parsed = researchScopeSchema.safeParse(run.inputScope); return parsed.success && parsed.data.researchProfile !== "WORK_DEEP"; }) ?? null;
   const safeStudy = study && study.samples.every(sample => sample.sourceItem.workspaceId === actor.workspaceId) ? study : null;
   const legacy = safeStudy ? await getLegacyResearchResult(actor, safeStudy.id) : null;
   const runBlocks = latestRun ? researchBlocksSchema.safeParse(latestRun.blocks) : null;
@@ -48,7 +53,10 @@ export async function researchBenchmarkDossier(actor: ResearchActor, accountId: 
     return [...grouped].map(([code, ids]) => ({ name: signals[code] || code, sourceItemIds: [...ids], count: ids.size })).sort((a, b) => b.count - a.count);
   };
   const works: DossierWork[] = detail.works.map(work => ({ ...work, readable: "readable" in work && Boolean(work.readable), timed: "timed" in work && Boolean(work.timed), openingSnippet: "openingSnippet" in work && typeof work.openingSnippet === "string" ? work.openingSnippet : null, topic: work.sourceItemId ? topicBySource.get(work.sourceItemId) ?? null : null }));
-  const living = await accountResearchOverview(actor, accountId, { collectionRunId: runId ?? detail.selected?.id ?? "history", ...range });
+  const [living, accountV2] = await Promise.all([
+    accountResearchOverview(actor, accountId, { collectionRunId: runId ?? detail.selected?.id ?? "history", ...range }),
+    accountV2Overview(actor, accountId),
+  ]);
   const researchView = accountResearchView(living);
   if (living.state?.answer) {
     const savedWorks = new Map(living.state.evidence.works.map(work => [work.id, work]));
@@ -60,9 +68,14 @@ export async function researchBenchmarkDossier(actor: ResearchActor, accountId: 
       work.researchStatus = !analysis ? "NOT_ANALYZED" : saved && now && (saved.bodyHash !== now.bodyHash || saved.metadataHash !== now.metadataHash) ? "OUTDATED" : analysis.basis === "TITLE" ? "TITLE_ONLY" : "CURRENT";
     }
   } else for (const work of works) { work.topicBasis = work.topic ? "TEXT" : null; work.researchStatus = work.topic ? "CURRENT" : "NOT_ANALYZED"; }
+  const deepIds = await deepResearchedWorkIds(actor, accountId, works.map(work => work.id));
+  for (const work of works) work.deepResearched = deepIds.has(work.id);
+  const v2Assets = living.currentSnapshot ? await listAccountWorkDecisions(actor, accountId, living.currentSnapshot.works) : [];
   const comments = detail.commentCount ? await db.benchmarkComment.findMany({ where: { snapshotId: { in: works.map(work => work.id) }, snapshot: { workspaceId: actor.workspaceId, benchmarkAccountId: accountId } }, orderBy: [{ likes: "desc" }, { id: "desc" }], take: 50, select: { id: true, text: true, likes: true, postedAt: true, snapshotId: true } }) : [];
   return {
-    account: detail.account, compareAccounts, accountResearch: researchView, works, total: detail.workCount, limited: detail.workCount > works.length,
+    account: detail.account, compareAccounts, accountResearch: researchView,
+    accountV2: { ...accountV2, currentWorkCount: v2Assets.filter(item => item.current).length, workIds: v2Assets.filter(item => item.current).map(item => item.workId) },
+    works, recommendations: recommendWorkResearch(works), total: detail.workCount, limited: detail.workCount > works.length,
     scope: detail.selected ? { id: detail.selected.id, status: detail.selected.status, from: detail.selected.rangeStart.toISOString(), to: detail.selected.rangeEnd.toISOString(), capturedAt: detail.selected.createdAt.toISOString(), note: detail.selected.stopReason, undated: detail.selected.undatedCount } : null,
     runs: detail.runs.map(run => ({ id: run.id, status: run.status, from: run.rangeStart.toISOString(), to: run.rangeEnd.toISOString(), count: run.inRangeCount })), activeRun: detail.activeRun ? { id: detail.activeRun.id, status: detail.activeRun.status } : null,
     analysis: latestRun && runBlocks?.success ? { kind: "run" as const, id: latestRun.id, date: latestRun.savedAt!.toISOString(), label: "我的已保存研究", sessionId: latestRun.sessionId } : safeStudy ? { kind: "study" as const, id: safeStudy.id, date: safeStudy.createdAt.toISOString(), label: `历史研究 · 第 ${safeStudy.version} 版`, sessionId: null } : null,

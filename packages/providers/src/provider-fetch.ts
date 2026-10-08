@@ -2,13 +2,15 @@ import { request as httpsRequest } from "node:https";
 import { request as httpRequest } from "node:http";
 import type { LookupFunction } from "node:net";
 import { resolvePublicAddress } from "./safe-url";
+import { assertReviewExternalAllowed, type ExternalCallPurpose } from "./review-policy";
 
 /** Credential-bearing requests: pinned DNS, no redirects, bounded response, no raw errors. */
-export const providerFetch: typeof fetch = async (input, init = {}) => {
+export async function providerFetch(input: Parameters<typeof fetch>[0], init: RequestInit = {}, purpose: ExternalCallPurpose = "GENERAL"): Promise<Response> {
+  assertReviewExternalAllowed(purpose);
   const target = new URL(input instanceof Request ? input.url : String(input));
   const testOrigin = process.env.ENVIRONMENT_ID === "LOCAL_TEST" ? process.env.PROVIDER_TEST_ORIGIN : undefined;
   if ((target.protocol !== "https:" && target.origin !== testOrigin) || target.username || target.password) throw new Error("PROVIDER_ADDRESS_INVALID");
-  const { addresses } = await resolvePublicAddress(target.href, undefined, testOrigin);
+  const { addresses } = await resolvePublicAddress(target.href, undefined, testOrigin, purpose);
   const address = addresses[0]!;
   return new Promise<Response>((resolve, reject) => {
     const lookup: LookupFunction = (_host, options, callback) => callback(null, options.all ? [address] : address.address, options.all ? undefined : address.family);
@@ -41,4 +43,4 @@ export const providerFetch: typeof fetch = async (input, init = {}) => {
     request.on("error", () => reject(init.signal?.aborted ? new DOMException("Request aborted", "AbortError") : new Error("PROVIDER_NETWORK_FAILED")));
     request.end(typeof init.body === "string" ? init.body : undefined);
   });
-};
+}

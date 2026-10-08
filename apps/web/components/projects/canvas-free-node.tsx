@@ -5,7 +5,7 @@ import { FileText, ImageIcon, Link2, RotateCcw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { createContext, memo, useContext, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { employeeSourceMeta } from "@/lib/content-labels";
-import type { CanvasObjectDTO } from "@/server/canvas/service";
+import type { CanvasObjectDTO } from "@/lib/contracts/canvas";
 
 export type CanvasSaveState = "idle" | "dirty" | "saving" | "saved" | "save_failed" | "conflict";
 export type FreeCanvasNodeData = {

@@ -1,16 +1,19 @@
+import type { ContextReference, SourceReference, ReferenceOption } from "../../lib/contracts/references";
+export type { ReferenceType, ContextReference, SourceReference, ReferenceOption } from "../../lib/contracts/references";
 import "server-only";
 import { db } from "@content-center/db";
 import { AIControlError, type ContextItem } from "../ai/control/contracts";
 import { getMaterialReadableContent } from "../material-detail/readable-content";
 import { ArtifactContextAdapter } from "../artifacts/context-adapter";
-import { getResearchResult, listResearchResults } from "../research/read-model";
+import { readableArtifactScope } from "../artifacts/service";
+import { getResearchResult, getSelectedResearch, listResearchResults } from "../research/read-model";
 import { researchMember } from "../research/access";
 import { trendStableKey } from "../research/trends";
 
-export type ReferenceType = "MATERIAL" | "RESEARCH" | "ARTIFACT" | "BENCHMARK" | "TREND" | "KNOWLEDGE";
-export type ContextReference = { sourceType: ReferenceType; sourceId: string };
-export type SourceReference = ContextReference & { title: string; href: string; generated: boolean; version?: string | number; updatedAt?: string; anchor?: string };
-export type ReferenceOption = SourceReference & { description: string };
+
+
+
+
 export type ReferenceActor = { workspaceId: string; userId: string; projectId: string };
 export interface KnowledgeContextAdapter {
   retrieve(input: ReferenceActor & { knowledgeBaseId: string; query: string }): Promise<{ status: "unsupported" | "ready"; items: ContextItem[] }>;
@@ -19,7 +22,7 @@ export const knowledgeContextAdapter: KnowledgeContextAdapter = { async retrieve
 
 export async function assertReferenceProject(actor: ReferenceActor) {
   await researchMember(actor);
-  const project = await db.contentProject.findFirst({ where: { id: actor.projectId, workspaceId: actor.workspaceId }, select: { id: true } });
+  const project = await db.contentProject.findFirst({ where: { id: actor.projectId, workspaceId: actor.workspaceId, status: { not: "ARCHIVED" } }, select: { id: true } });
   if (!project) throw new AIControlError("PERMISSION_DENIED");
 }
 
@@ -30,7 +33,7 @@ export async function searchContextReferences(actor: ReferenceActor, query: stri
   const [materials, research, artifacts, accounts, trends] = await Promise.all([
     db.sourceItem.findMany({ where: { workspaceId: actor.workspaceId, title }, select: { id: true, title: true, description: true, updatedAt: true }, orderBy: { updatedAt: "desc" }, take: 8 }),
     listResearchResults(actor, q),
-    db.artifact.findMany({ where: { workspaceId: actor.workspaceId, projectId: actor.projectId, title, draftBranch: { deletedAt: null } }, select: { id: true, title: true, updatedAt: true }, orderBy: { updatedAt: "desc" }, take: 8 }),
+    db.artifact.findMany({ where: { workspaceId: actor.workspaceId, projectId: actor.projectId, ...readableArtifactScope(actor.userId), title, draftBranch: { deletedAt: null } }, select: { id: true, title: true, updatedAt: true }, orderBy: { updatedAt: "desc" }, take: 8 }),
     db.benchmarkAccount.findMany({ where: { workspaceId: actor.workspaceId, enabled: true, name: title }, select: { id: true, name: true, platform: true, updatedAt: true }, orderBy: { updatedAt: "desc" }, take: 8 }),
     db.trendSnapshot.findMany({ where: { workspaceId: actor.workspaceId, title }, orderBy: { observedAt: "desc" }, take: 8 }),
   ]);
@@ -48,6 +51,7 @@ export async function resolveContextReferences(actor: ReferenceActor, references
   const items: ContextItem[] = [];
   const warnings: string[] = [];
   for (const ref of [...new Map(references.map(r => [`${r.sourceType}:${r.sourceId}`, r])).values()]) {
+    if (ref.researchSelection && ref.sourceType !== "RESEARCH") throw new AIControlError("PERMISSION_DENIED", "结论选择只能用于研究引用。");
     let source: SourceReference;
     let content: string;
     if (ref.sourceType === "KNOWLEDGE") {
@@ -65,11 +69,17 @@ export async function resolveContextReferences(actor: ReferenceActor, references
       source = { ...ref, title: row.title || "未命名资料", href: `/library/${row.id}`, generated: readable.contentSource === "SOURCE_UNDERSTANDING", version: readable.version, updatedAt: readable.updatedAt.toISOString() };
       content = readable.contentText;
     } else if (ref.sourceType === "RESEARCH") {
+      if (ref.researchSelection) {
+        const selected = await getSelectedResearch(actor, ref.researchSelection.kind, ref.sourceId, ref.researchSelection).catch(() => { throw new AIControlError("PERMISSION_DENIED", "选中的研究结论不存在、已变化或不可访问。"); });
+        source = { ...ref, title: selected.title, href: `/research/results/${ref.researchSelection.kind}/${ref.sourceId}`, generated: true, version: selected.version };
+        content = JSON.stringify({ blocks: selected.blocks, note: "用户为本次对话挑选/调整的结论；原研究保持不变" });
+      } else {
       const row = await getResearchResult(actor, ref.sourceId).catch(() => { throw new AIControlError("PERMISSION_DENIED", "研究成果不存在或不可访问。"); });
       source = { ...ref, title: row.resultTitle || row.question, href: `/research/results/run/${row.id}`, generated: true, version: row.version, updatedAt: row.createdAt.toISOString() };
       const coverage = row.coverage && typeof row.coverage === "object" && !Array.isArray(row.coverage) ? row.coverage as Record<string, unknown> : {};
       // Put the saved conclusions ahead of large evidence snapshots so the context budget cannot discard the Result.
       content = JSON.stringify({ question: row.question, blocks: row.blocks.filter(block => block.type !== "sources"), scope: row.inputScope, coverage: { observed: coverage.observed, readable: coverage.readable, aiSampleCount: coverage.aiSampleCount, gaps: coverage.gaps }, sourceRefs: row.sourceRefs });
+      }
     } else if (ref.sourceType === "ARTIFACT") {
       const resolved = await new ArtifactContextAdapter().resolve({ ...actor, artifactId: ref.sourceId });
       const body = JSON.parse(resolved.item.content) as { title: string; content: string };

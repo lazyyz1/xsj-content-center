@@ -1,3 +1,4 @@
+import { markDispatchPending } from "./job-recovery";
 import { reserveExperienceUsage } from "./experience-limits";
 import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -196,6 +197,8 @@ export async function requestSourceTranscription(input: {
   mediaAssetId?: string;
   videoAssetId?: string;
 }) {
+  const uncertain = await db.ingestJob.findFirst({ where: {workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, jobType: "TRANSCRIBE", errorCode: "ASR_RESULT_UNCERTAIN"}, select: {id:true} });
+  if(uncertain) throw new LocalAsrError("LOCAL_ASR_TRANSCRIPTION_FAILED", "上次转录结果尚未确认，请联系管理员核对后再发起，避免重复调用。", false);
   const plan = await resolveWorkspaceTranscriptionPlan(input.workspaceId);
   const mediaAssetId = input.mediaAssetId ?? input.videoAssetId;
   const mediaAsset = await db.sourceAsset.findFirst({
@@ -259,20 +262,8 @@ export async function requestSourceTranscription(input: {
       requestedById: input.requestedById,
     }, job.maxAttempts);
   } catch {
-    await db.$transaction([
-      db.ingestJob.update({ where: { id: job.id }, data: { status: "FAILED", errorCode: "QUEUE_UNAVAILABLE", errorMessage: "转写队列暂时不可用。", finishedAt: new Date() } }),
-      db.auditLog.create({
-        data: {
-          workspaceId: input.workspaceId,
-          userId: input.requestedById,
-          action: "transcription.enqueue_failed",
-          resourceType: "ingest_job",
-          resourceId: job.id,
-          metadata: { sourceItemId: input.sourceItemId, errorCode: "QUEUE_UNAVAILABLE" },
-        },
-      }),
-    ]);
-    throw new Error("QUEUE_UNAVAILABLE");
+    await markDispatchPending(job.id, input.workspaceId);
+
   }
   return { job, created: true as const };
 }
@@ -352,12 +343,12 @@ async function localAudioInput(input: { signedUrl: string; extractedPath?: strin
   return { audio: { mode: "BINARY_DATA", data: new Uint8Array(await response.arrayBuffer()) }, contentType: "audio/mpeg" };
 }
 
-async function doubaoAudioInput(input: { signedUrl: string; sizeBytes: number; extractedPath?: string }): Promise<TranscriptionInput> {
+async function doubaoAudioInput(input: { signedUrl: string; sizeBytes: number; extractedPath?: string; protocol?: "FLASH" | "RECORDING_FILE_2_0" }): Promise<TranscriptionInput> {
   try {
     await resolvePublicAddress(input.signedUrl);
     return { audio: { mode: "REMOTE_URL", url: input.signedUrl }, contentType: "audio/mpeg" };
   } catch {
-    if (input.sizeBytes > MAX_ASR_BINARY_DATA_BYTES) {
+    if (input.protocol === "RECORDING_FILE_2_0" || input.sizeBytes > MAX_ASR_BINARY_DATA_BYTES) {
       throw new DoubaoError("ASR_AUDIO_NOT_PUBLICLY_REACHABLE", "音频地址不可公网访问，且文件不适合二进制上传。", false);
     }
     return localAudioInput(input);
@@ -490,7 +481,7 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
 
   const mediaAssetId = job.data.mediaAssetId ?? job.data.videoAssetId;
   if (!mediaAssetId) throw new UnrecoverableError("Transcription media asset is missing");
-  const attempt = job.attemptsMade + 1;
+  const attempt = Math.max(job.attemptsMade + 1, record.attempt + 1);
   const plan = planFromRecord(record) ?? (record.provider === "DOUBAO_ASR"
     ? { provider: "DOUBAO_ASR" as const, qualityMode: "BALANCED" as const, fallbackToDoubao: false }
     : await resolveWorkspaceTranscriptionPlan(record.workspaceId));
@@ -533,7 +524,7 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
     const mediaIsAudio = media.assetType === "AUDIO";
     if (!mediaIsAudio || !durationFromMetadata(media.metadata)) await processor.checkAvailability();
     let audio = mediaIsAudio ? media : record.sourceItem.assets
-      .filter((asset) => asset.assetType === "AUDIO" && asset.status === "STORED" && asset.storageKey)
+      .filter((asset) => asset.assetType === "AUDIO" && asset.status === "STORED" && asset.storageKey && object(asset.metadata).derivedFromAssetId === media.id)
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
     let extractedPath: string | undefined;
     let durationMs = audio ? durationFromMetadata(audio.metadata) : undefined;
@@ -627,7 +618,7 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
     })).data.url;
     const providerInput = plan.provider === "LOCAL_FUNASR"
       ? await localAudioInput({ signedUrl, extractedPath })
-      : await doubaoAudioInput({ signedUrl, sizeBytes, extractedPath });
+      : await doubaoAudioInput({ signedUrl, sizeBytes, extractedPath, protocol: plan.protocol });
     await updateProgress(record.id, 65, "TRANSCRIBING", plan);
     const result = await transcribeWithProvider({ plan, providerInput, record, attempt, durationMs });
 
@@ -689,7 +680,9 @@ export async function processTranscribeSourceJob(job: Job<TranscribeSourcePayloa
     });
     return { status: "ok" as const, sourceItemId: record.sourceItemId };
   } catch (error) {
-    const failure = publicFailure(error);
+    const rawFailure = publicFailure(error);
+    const uncertain = ["DOUBAO_TIMEOUT", "DOUBAO_SERVER_ERROR", "LOCAL_ASR_TIMEOUT"].includes(rawFailure.code);
+    const failure = uncertain ? {code: "ASR_RESULT_UNCERTAIN", message: "转录请求结果尚未确认，请管理员核对后再发起，避免重复调用。", retryable:false} : rawFailure;
     const willRetry = failure.retryable && attempt < record.maxAttempts;
     await db.$transaction([
       db.ingestJob.update({

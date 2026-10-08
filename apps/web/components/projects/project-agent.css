@@ -76,7 +76,7 @@
 .agent-chat .studio-assistant-material-picker { margin-inline:32px;max-height:300px;flex-shrink:0; }
 .agent-chat .studio-assistant-material-picker > input { width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px; }
 .agent-scroll-latest { position:absolute;right:42px;bottom:154px;z-index:2;display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--border);border-radius:50%;background:var(--surface);color:var(--text-secondary);box-shadow:0 2px 8px rgb(0 0 0 / .06); }
-.agent-chat button:focus-visible,.agent-project-heading button:focus-visible,.agent-chat select:focus-visible,.agent-chat summary:focus-visible { outline:2px solid var(--accent);outline-offset:3px; }
+.agent-chat button:focus-visible,.agent-project-heading button:focus-visible,.agent-chat select:focus-visible,.agent-chat summary:focus-visible { outline:2px solid var(--accent,#6f52ed);outline-offset:3px; }
 @media(max-width:600px) {
  .dashboard-workbench .content-workbench.is-assistant-only .workbench-assistant > header { padding:10px 16px; }
  .dashboard-workbench .agent-chat .studio-assistant-stream { padding:20px 16px;scrollbar-gutter:auto; }
@@ -98,3 +98,5 @@
 
 /* Header remains outside the scroll viewport; keep a small clear reading edge. */
 .dashboard-workbench .agent-chat .studio-assistant-stream { margin-top:8px;overflow-anchor:none; }
+
+.agent-research-handoff{padding:16px;margin:12px;border:1px solid var(--border);border-radius:10px;background:var(--surface-secondary);font-size:13px;min-width:0}.agent-research-handoff h3{font-size:15px;margin:0 0 8px}.agent-research-handoff p{margin:8px 0;overflow-wrap:anywhere}.agent-research-handoff button{margin:8px 8px 0 0;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text-primary);font:inherit}.agent-research-handoff details{max-height:240px;overflow:auto;margin-top:10px}.agent-research-handoff button:focus-visible{outline:2px solid var(--accent,#6f52ed);outline-offset:2px}

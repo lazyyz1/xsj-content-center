@@ -5,6 +5,7 @@ import { sourceCapabilities, type SourceCapability } from "@content-center/core"
 import { IntegrationService, parseProviderConfig } from "@content-center/integrations";
 import { getStorageProvider, readSourceMetadataEnvelope, type SourceExternalMetrics } from "@content-center/providers";
 import { getSourceProcessingState, materialTranscriptionViewState, type MaterialTranscriptionViewState } from "../../lib/source-processing-state";
+import { transcriptionAvailable } from "@content-center/providers";
 import { getLocalAsrDisplay } from "../local-asr";
 import { getVisionRoute, understandingExpired } from "./understanding";
 
@@ -72,6 +73,7 @@ export type SourceWorkspaceModel = {
     updatedAt: string;
     transcriptUpdatedAt: string | null;
     transcriptionError: string | null;
+    transcriptionReviewJobId?: string | null;
     configured: boolean;
     busy: boolean;
     canRefresh: boolean;
@@ -121,7 +123,7 @@ export async function getSourceWorkspaceModel(input: { workspaceId: string; user
   const mediaSource = source.sourceType === "VIDEO" || source.sourceType === "AUDIO";
   const canManage = input.role !== "VIEWER";
   const integrations = new IntegrationService();
-  const [availableTags, availableCollections, availableProjects, relatedProjects, transcriptionIntegration, doubao, localAsr] = await Promise.all([
+  const [availableTags, availableCollections, availableProjects, relatedProjects, transcriptionIntegration, doubao, localAsr, uncertainTranscription] = await Promise.all([
     canManage ? db.contentTag.findMany({ where: { workspaceId: input.workspaceId }, orderBy: { name: "asc" }, select: { id: true, name: true } }) : [],
     canManage ? db.collection.findMany({ where: { workspaceId: input.workspaceId }, orderBy: { name: "asc" }, select: { id: true, name: true } }) : [],
     canManage ? db.contentProject.findMany({ where: { workspaceId: input.workspaceId, status: { not: "ARCHIVED" }, sources: { none: { sourceItemId: source.id } } }, select: { id: true, title: true }, orderBy: { updatedAt: "desc" }, take: 100 }) : [],
@@ -129,6 +131,7 @@ export async function getSourceWorkspaceModel(input: { workspaceId: string; user
     mediaSource ? integrations.getIntegrationStatus(input.workspaceId, "TRANSCRIPTION") : null,
     mediaSource ? integrations.getIntegrationStatus(input.workspaceId, "DOUBAO_ASR") : null,
     mediaSource ? getLocalAsrDisplay(input.workspaceId) : null,
+    mediaSource ? db.ingestJob.findFirst({where:{workspaceId:input.workspaceId,sourceItemId:source.id,jobType:"TRANSCRIBE",errorCode:"ASR_RESULT_UNCERTAIN"},orderBy:{createdAt:"desc"},select:{id:true}}) : null,
   ]);
 
   const external = readSourceMetadataEnvelope(source.metadata)?.external;
@@ -169,9 +172,8 @@ export async function getSourceWorkspaceModel(input: { workspaceId: string; user
   const materialJobs = source.ingestJobs.filter((job) => job.jobType in jobLabels);
   const latestTranscription = materialJobs.find((job) => job.jobType === "TRANSCRIBE");
   const readingJob = materialJobs.find((job) => job.jobType !== "TRANSCRIBE");
-  const transcriptionConfig = parseProviderConfig("TRANSCRIPTION", transcriptionIntegration?.publicConfig ?? {}) as { source: "LOCAL_FUNASR" | "DOUBAO"; qualityMode: "FAST" | "BALANCED" | "QUALITY" };
-  const selectedQuality = localAsr?.qualityModes[transcriptionConfig.qualityMode];
-  const configured = !mediaSource || (transcriptionConfig.source === "DOUBAO" ? doubao?.status === "CONFIGURED" : localAsr?.status === "NORMAL" && selectedQuality?.available === true && selectedQuality.installed);
+  const transcriptionConfig = parseProviderConfig("TRANSCRIPTION", transcriptionIntegration?.publicConfig ?? {}) as { source: "LOCAL_FUNASR" | "DOUBAO"; qualityMode: "FAST" | "BALANCED" | "QUALITY"; selectionMode: "AUTO" | "MANUAL"; manualModel?: "SENSEVOICE_SMALL" | "PARAFORMER_ZH" | "FUN_ASR_NANO"; fallbackToDoubao: boolean };
+  const configured = !mediaSource || transcriptionAvailable({ ...transcriptionConfig, disabled: transcriptionIntegration?.status === "DISABLED", doubaoConfigured: doubao?.status === "CONFIGURED", local: localAsr });
   const transcriptionBusy = latestTranscription?.status === "QUEUED" || latestTranscription?.status === "RUNNING";
   const contentBusy = readingJob?.status === "QUEUED" || readingJob?.status === "RUNNING";
   const busy = contentBusy || transcriptionBusy;
@@ -207,6 +209,7 @@ export async function getSourceWorkspaceModel(input: { workspaceId: string; user
       assetId: primaryAsset?.id ?? null, mimeType: primaryAsset?.mimeType ?? null, sizeLabel: bytesLabel(primaryAsset?.sizeBytes ?? null),
       createdAt: source.createdAt.toISOString(), updatedAt: source.updatedAt.toISOString(), transcriptUpdatedAt: source.transcript?.updatedAt.toISOString() ?? (text ? source.updatedAt.toISOString() : null),
       transcriptionError: latestTranscription?.status === "FAILED" ? latestTranscription.errorMessage?.slice(0, 200) ?? null : null,
+      transcriptionReviewJobId: uncertainTranscription?.id ?? null,
       configured: Boolean(configured), busy, canRefresh: Boolean(canRefresh), processingLabel: processing.currentLabel, metrics,
     },
     adminDetails: input.role === "OWNER" || input.role === "ADMIN" ? {

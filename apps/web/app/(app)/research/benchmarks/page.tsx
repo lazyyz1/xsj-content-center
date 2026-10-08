@@ -1,22 +1,25 @@
-import { canAddResearchAccount } from "@/server/experience-account";
-import Link from "next/link";
+import { isLocalReviewOffline } from "@content-center/providers";
 import { requireWorkspace } from "@/server/access";
-import { researchBenchmarkList } from "@/server/research/benchmarks";
-import { platformLabel } from "@/components/research/research-labels";
+import { canAddResearchAccount } from "@/server/experience-account";
+import { benchmarkWorkbench } from "@/server/research/benchmark-workbench";
+import { researchWorkInbox } from "@/server/research/read-model";
 import { BenchmarkAccountAdd } from "@/components/research/benchmark-account-add";
-
-import { BenchmarkAccountTable } from "@/components/research/benchmark-tables";
-
-type Query = { q?: string; platform?: string; category?: string; page?: string };
+import { BenchmarkAccountOverview } from "@/components/research/benchmark-account-overview";
+import { BenchmarkWorkList } from "@/components/research/benchmark-work-list";
+import "@/components/research/benchmark-workbench.css";
+type Query = { q?: string; platform?: string; period?: string; accountId?: string; threshold?: string; viral?: string; sort?: string; purpose?: string; workQuery?: string; readiness?: string; order?: string; view?: string; page?: string };
 export default async function ResearchBenchmarks({ searchParams }: { searchParams: Promise<Query> }) {
-  const { workspace, session, role } = await requireWorkspace();
-  const query = await searchParams;
-  const data = await researchBenchmarkList({ workspaceId: workspace.id, userId: session.user.id }, query);
-  const href = (page: number) => { const params = new URLSearchParams(Object.entries(query).filter((entry): entry is [string, string] => typeof entry[1] === "string")); params.set("page", String(page)); return `/research/benchmarks?${params}`; };
-  return <div><header className="research-page-heading"><div><span className="research-eyebrow">研究中心 / 对标账号</span><h1>看懂别人，找到自己的方向。</h1><p>把值得研究的账号放在一起，用真实作品理解选题、表达与可迁移的方法。</p></div></header><BenchmarkAccountAdd canManage={canAddResearchAccount(role, session.user)} />
-    <form className="research-toolbar research-filters"><label>查找账号<input type="search" name="q" defaultValue={query.q} placeholder="昵称或平台账号 ID" /></label><label>平台<select name="platform" defaultValue={query.platform || ""}><option value="">全部平台</option>{["DOUYIN", "XIAOHONGSHU", "WECHAT", "BILIBILI", "YOUTUBE", "TIKTOK", "GENERIC", "OTHER"].map(value => <option key={value} value={value}>{platformLabel[value] || value}</option>)}</select></label><label>分类<select name="category" defaultValue={query.category || ""}><option value="">全部分类</option>{data.categories.map(value => <option key={value} value={value}>{platformLabel[value] || value}</option>)}</select></label><button type="submit">筛选</button></form>
-    <p className="research-caption">共 {data.count} 个账号 · 已发现作品与已收录资料分别统计；缺少采集批次时仅展示历史快照。</p>
-    {data.items.length ? <BenchmarkAccountTable items={data.items} /> : <div className="research-center-empty"><h2>{query.q || query.platform || query.category ? "没有匹配的账号" : "还没有对标账号"}</h2><p>{query.q || query.platform || query.category ? "调整搜索或筛选条件，找回你想研究的对象。" : "用上方“添加对标账号”寻找一个对象，再主动采集作品。"}</p>{query.q || query.platform || query.category ? <Link className="research-button" href="/research/benchmarks">清除筛选</Link> : null}</div>}
-    {data.pages > 1 ? <nav className="research-pagination" aria-label="账号分页">{data.page > 1 ? <Link href={href(data.page - 1)}>上一页</Link> : null}<span>第 {data.page} / {data.pages} 页</span>{data.page < data.pages ? <Link href={href(data.page + 1)}>下一页</Link> : null}</nav> : null}
-  </div>;
+  const { workspace, session, role } = await requireWorkspace(), query = await searchParams, actor = { workspaceId: workspace.id, userId: session.user.id };
+  // Account statistics use the selected period; client filters never change the denominator.
+  const data = await benchmarkWorkbench(actor, { ...query, accountId: undefined, viral: "all" });
+  const inbox = await researchWorkInbox(actor, { includeDismissed: true, workIds: data.works.map(work => work.id) });
+  const canWrite = canAddResearchAccount(role, session.user), externalAvailable = !isLocalReviewOffline("RESEARCH_COLLECTION");
+  const filters = new URLSearchParams(Object.entries(query).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  const accounts = data.cards.map(card => ({ id: card.id, name: card.name, platform: card.platform, purpose: card.purpose, savedCount: card._count.contentSnapshots, lastSyncedAt: card.lastSyncedAt?.toISOString() ?? null, latestPublishedAt: card.works.filter(work => work.publishedAt).map(work => work.publishedAt!).sort().at(-1) ?? null, median: card.baseline.median, samples: card.baseline.samples, highCount: card.highCount, trend: card.trend, syncStatus: card.collectionRuns[0]?.status ?? null, originalUrl: card.originalUrl }));
+  return <article className="research-benchmark-desk">
+    <header className="research-desk-heading"><div><h1>对标与作品</h1><p>选择值得学的人，再挑值得研究的内容。</p></div><BenchmarkAccountAdd canManage={canWrite} externalAvailable={externalAvailable} /></header>
+    <BenchmarkAccountOverview accounts={accounts} canWrite={canWrite} externalAvailable={externalAvailable} selectedId={query.accountId}/>
+    <BenchmarkWorkList key={JSON.stringify(query)} works={data.works} statuses={inbox.items.map(item => ({ id: item.id, reportId: item.reportId, readable: item.readable, read: item.read, followed: item.followed, dismissed: item.dismissed }))} returnTo={"/research/benchmarks?" + filters + "#works"} initialView={query.view} initialAccountId={query.accountId} initialQuery={query.workQuery} initialFilter={query.readiness} initialSort={query.order || (query.sort === "heat" ? "likes" : query.sort === "time" ? "newest" : "multiple")} initialPeriod={data.days ? String(data.days) : "all"} initialViral={query.viral} threshold={data.threshold} initialPage={Number(query.page) || 1}/>
+    <details className="research-desk-data"><summary>数据范围与同步说明</summary><p>手动同步近期一页，按需继续获取。读取每账号最多最近 200 条、最多 100 个账号。{data.bounded ? "当前已达到读取上限。" : ""}曲线表示不同作品的已知点赞，非粉丝增长。供应商快照可能滞后，缺失数据不补算。</p></details>
+  </article>;
 }

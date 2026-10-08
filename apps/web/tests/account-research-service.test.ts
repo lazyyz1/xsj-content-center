@@ -47,6 +47,12 @@ describe("living account research versions", () => {
     expect(reservation).toMatchObject({ runId: firstRunId, created: false, unchanged: true });
     expect(calls).toBe(1); expect(await db.researchRun.count({ where: { sessionId } })).toBe(1);
   });
+  it("reuses the same evidence when the page makes the historical range explicit", async () => {
+    const reservation = await startAccountResearch(actor(), accountId, { requestKey: randomUUID(), collectionRunId: "history" });
+    expect(reservation).toMatchObject({ runId: firstRunId, created: false, unchanged: true });
+    expect(calls).toBe(1);
+    expect(await db.researchRun.count({ where: { sessionId } })).toBe(1);
+  });
   it("updates 5 to 13 bodies by analyzing only the 8 changed works and keeps history immutable", async () => {
     for (let i = 5; i < 13; i++) await db.sourceItem.create({ data: { workspaceId, createdById: owner, sourcePlatform: "DOUYIN", externalId: `${suffix}-${i}`, sourceType: "TEXT", rawText: "先记录真实问题，再用自己的案例解释，最后邀请读者检查证据。", status: "READY" } });
     const next = await startAccountResearch(actor(), accountId, { requestKey: randomUUID() });

@@ -1,14 +1,14 @@
 export type ResearchProvenance = "REAL_DATA" | "COMPUTED" | "AI_INTERPRETATION";
 export type ResearchSource = {
   ref: string;
-  kind: "MATERIAL" | "BENCHMARK_ACCOUNT" | "BENCHMARK_WORK" | "BENCHMARK_COMMENT" | "TREND" | "PROJECT_ARTIFACT" | "USER_INPUT" | "CREATOR_PROFILE";
+  kind: "MATERIAL" | "BENCHMARK_ACCOUNT" | "BENCHMARK_WORK" | "BENCHMARK_COMMENT" | "TREND" | "PROJECT_ARTIFACT" | "USER_INPUT" | "CREATOR_PROFILE" | "NEWS" | "RESEARCH_RESULT";
   objectId: string;
   title: string;
   href: string | null;
   capturedAt: string | null;
   publishedAt: string | null;
   eventAt: string | null;
-  contentOrigin: "ORIGINAL" | "MACHINE_TRANSCRIPT" | "AI_READING" | "USER_PROVIDED";
+  contentOrigin: "ORIGINAL" | "MACHINE_TRANSCRIPT" | "AI_READING" | "USER_PROVIDED" | "PUBLIC_SUMMARY";
   locator: string | null;
   excerpt: string;
   version: string | null;

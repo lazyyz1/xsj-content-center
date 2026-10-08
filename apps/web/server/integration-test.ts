@@ -37,7 +37,7 @@ export async function testIntegration(workspaceId: string, provider: Configurabl
       if (!chatCompletionResponseSchema.safeParse(await response.json()).success) return { ok: false, message: "接口可以访问，但未返回有效的模型响应，请核对兼容协议。" };
     } else if (provider === "REDFOX") {
       if (!sampleUrl) return { ok: false, message: "请输入一条公开作品链接，以验证真实解析能力。" };
-      await new RedFoxClient({ apiKey: String(config.apiKey), baseUrl: String(config.baseUrl), timeoutMs: 20_000, fetch: providerFetch }).parseWork(sampleUrl);
+      await new RedFoxClient({ apiKey: String(config.apiKey), baseUrl: String(config.baseUrl), timeoutMs: 20_000,purpose:"RESEARCH_COLLECTION" }).parseWork(sampleUrl);
     } else if (provider === "DOUBAO_ASR") {
       if (!sampleUrl) return { ok: false, message: "请输入一段短音频的公开链接，以验证真实转写能力。" };
       const parsed = doubaoRuntimeConfigSchema.parse(config);

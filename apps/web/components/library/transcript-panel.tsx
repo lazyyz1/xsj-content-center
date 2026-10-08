@@ -18,7 +18,7 @@ export function TranscriptPanel({ sourceId, status, method, quality, processingT
   async function save() {
     setSaving(true); setNotice("");
     try {
-      const response = await fetch(`/api/source-items/${sourceId}/transcript`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ fullText: draft }) });
+      const response = await fetch(`/api/source-items/${sourceId}/transcript`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ fullText: draft, expectedUpdatedAt: updatedAt }) });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.message || "保存失败");
       setEditing(false); setNotice("文字稿已保存，内容理解结果可能需要更新。"); router.refresh();

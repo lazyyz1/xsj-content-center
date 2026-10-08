@@ -17,7 +17,7 @@ export function buildBenchmarkPerformance(snapshots: PerformanceSnapshot[]) {
     const previewUrl = typeof preview.url === "string" && preview.url.startsWith("https://") ? preview.url : null;
     const latestLikes = latest ? object(latest.metrics).likes : null; const previousLikes = previous ? object(previous.metrics).likes : null;
     const likesDelta = typeof latestLikes === "number" && Number.isFinite(latestLikes) && typeof previousLikes === "number" && Number.isFinite(previousLikes) ? latestLikes - previousLikes : null;
-    return { id: snapshot.id, title: snapshot.title, url: snapshot.url, coverUrl: snapshot.coverUrl ?? previewUrl, publishedAt: snapshot.publishedAt?.toISOString() ?? null, observedAt: snapshot.observedAt.toISOString(), counts, views, durationMs, latestObservedAt: latest?.observedAt.toISOString() ?? null, previousObservedAt: previous?.observedAt.toISOString() ?? null, likesDelta };
+    return { id: snapshot.id, title: snapshot.title, url: snapshot.url, coverUrl: snapshot.coverUrl ?? previewUrl, publishedAt: snapshot.publishedAt?.toISOString() ?? null, observedAt: snapshot.observedAt.toISOString(), dataAsOf: typeof metadata.dataAsOf === "string" ? metadata.dataAsOf : null, counts, views, durationMs, latestObservedAt: latest?.observedAt.toISOString() ?? null, previousObservedAt: previous?.observedAt.toISOString() ?? null, likesDelta };
   });
   return { count: items.length, items, totals: metrics.map((metric) => {
     const values = items.flatMap((item) => item.counts[metric] === null ? [] : [item.counts[metric]!]);

@@ -16,6 +16,12 @@ function completion(content: string) {
 
 const priorProviderOrigin = process.env.PROVIDER_TEST_ORIGIN;
 const priorEnvironmentId = process.env.ENVIRONMENT_ID;
+const priorExternalDisabled = process.env.EXTERNAL_CALLS_DISABLED;
+const priorReviewOffline = process.env.LOCAL_REVIEW_OFFLINE;
+afterAll(() => {
+  if (priorExternalDisabled === undefined) delete process.env.EXTERNAL_CALLS_DISABLED; else process.env.EXTERNAL_CALLS_DISABLED = priorExternalDisabled;
+  if (priorReviewOffline === undefined) delete process.env.LOCAL_REVIEW_OFFLINE; else process.env.LOCAL_REVIEW_OFFLINE = priorReviewOffline;
+});
 afterAll(() => { if (priorProviderOrigin) process.env.PROVIDER_TEST_ORIGIN = priorProviderOrigin; else delete process.env.PROVIDER_TEST_ORIGIN; if (priorEnvironmentId) process.env.ENVIRONMENT_ID = priorEnvironmentId; else delete process.env.ENVIRONMENT_ID; });
 beforeAll(async () => {
   fixture = createServer((request, response) => {
@@ -28,6 +34,11 @@ beforeAll(async () => {
       const prompt = typeof content === "string" ? content : JSON.stringify(content);
       const send = (status: number, value: string) => { response.writeHead(status, { "content-type": "application/json", "x-request-id": "fixture-header-id" }); response.end(value); };
       if (request.headers.authorization !== "Bearer fixture-secret") return send(401, "{}");
+      if (prompt.includes("PLAIN_REPLY")) {
+        if (lastRequestBody.response_format) return send(400, JSON.stringify({ error: { code: "invalid_response_format" } }));
+        return send(200, completion("模型连接可用。"));
+      }
+      if (prompt.includes("TRUNCATED_STRUCTURED")) return send(200, completion(JSON.stringify({ ok: true, title: "Incomplete result" })).replace('"finish_reason":"stop"', '"finish_reason":"length"'));
       if (prompt.includes("STATUS_401")) return send(401, "{}");
       if (prompt.includes("STATUS_429")) return send(429, "{}");
       if (prompt.includes("STATUS_500")) return send(500, "{}");
@@ -60,6 +71,9 @@ beforeAll(async () => {
   origin = `http://127.0.0.1:${address.port}/v1`;
   process.env.ENVIRONMENT_ID = "LOCAL_TEST";
   process.env.PROVIDER_TEST_ORIGIN = new URL(origin).origin;
+  // This suite sends only to its own ephemeral loopback server.
+  process.env.EXTERNAL_CALLS_DISABLED = "false";
+  process.env.LOCAL_REVIEW_OFFLINE = "false";
 });
 
 afterAll(async () => new Promise<void>((resolve) => fixture.close(() => resolve())));
@@ -99,7 +113,8 @@ describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
 
   it("uses Kimi 2.6 compatible request parameters", async () => {
     await kimiProvider().generateText({ prompt: "KIMI_SUCCESS" });
-    expect(lastRequestBody).toMatchObject({ model: "kimi-k2.6", thinking: { type: "disabled" }, response_format: { type: "json_object" } });
+    expect(lastRequestBody).toMatchObject({ model: "kimi-k2.6", thinking: { type: "disabled" } });
+    expect(lastRequestBody).not.toHaveProperty("response_format");
     expect(lastRequestBody).not.toHaveProperty("temperature");
   });
 
@@ -151,8 +166,24 @@ describe("OpenAICompatibleLLMProvider HTTP fixture", () => {
 
   it("keeps the existing temperature behavior for other compatible providers", async () => {
     await provider().generateText({ prompt: "GENERIC_SUCCESS" });
-    expect(lastRequestBody).toMatchObject({ model: "fixture-model", temperature: 0.4, response_format: { type: "json_object" } });
+    expect(lastRequestBody).toMatchObject({ model: "fixture-model", temperature: 0.4 });
+    expect(lastRequestBody).not.toHaveProperty("response_format");
     expect(lastRequestBody).not.toHaveProperty("thinking");
+  });
+
+  it("allows a plain reply without forcing JSON and uses DeepSeek's token parameter", async () => {
+    const result = await deepSeekProvider("deepseek-flash").generateText({ prompt: "PLAIN_REPLY", maxCompletionTokens: 512 });
+    expect(result.data.text).toBe("模型连接可用。");
+    expect(lastRequestBody).toMatchObject({ max_tokens: 512 });
+    expect(lastRequestBody).not.toHaveProperty("max_completion_tokens");
+    expect(lastRequestBody).not.toHaveProperty("response_format");
+    await deepSeekProvider("deepseek-flash").streamText({ prompt: "STREAM_SUCCESS", maxCompletionTokens: 4000 }, { onDelta: () => undefined });
+    expect(lastRequestBody).toMatchObject({ max_tokens: 4000 });
+    expect(lastRequestBody).not.toHaveProperty("max_completion_tokens");
+  });
+
+  it("rejects a truncated structured result even if its partial JSON satisfies the schema", async () => {
+    await expect(provider().generateStructured({ prompt: "TRUNCATED_STRUCTURED" }, z.object({ ok: z.boolean(), title: z.string() }))).rejects.toMatchObject({ code: "LLM_INVALID_RESPONSE", details: { finishReason: "length" } });
   });
 
   it.each(["deepseek-v4-flash", "deepseek-v4-pro"] as const)("uses the DeepSeek Chat adapter for %s", async (model) => {

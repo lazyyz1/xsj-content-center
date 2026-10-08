@@ -45,7 +45,7 @@ export function AppShell({ userName, workspaceName, isSystemAdmin, initialPinned
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const currentProjectId = pathname === "/dashboard" ? searchParams.get("project") : null;
-  const activeNavigation = currentProjectId ? "项目" : pathname === "/dashboard" ? "开始工作" : pathname.startsWith("/projects") ? "项目" : pathname.startsWith("/library/methods") ? "Skill" : pathname.startsWith("/library") ? "资料" : pathname.startsWith("/discovery") || pathname.startsWith("/research") ? "研究" : null;
+  const activeNavigation = currentProjectId ? "项目" : pathname === "/dashboard" ? "开始工作" : pathname.startsWith("/content") ? "我的稿件" : pathname.startsWith("/projects") ? "项目" : pathname.startsWith("/library/methods") ? "Skill" : pathname.startsWith("/library") ? "资料" : pathname.startsWith("/discovery") || pathname.startsWith("/research") ? "研究" : null;
   const [machine, dispatch] = useReducer(sidebarMachineReducer, initialPinned, initialSidebarState);
   const [hoverCapable, setHoverCapable] = useState(true);
   const [menu, setMenu] = useState<string | null>(null);
@@ -155,6 +155,7 @@ export function AppShell({ userName, workspaceName, isSystemAdmin, initialPinned
     const protectEditing = (event: KeyboardEvent) => {
       const target = event.target instanceof Element ? event.target : document.activeElement;
       if (!target?.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox']")) return;
+      if (!event.isComposing && !event.altKey && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") return;
       if (event.isComposing || event.key.length === 1 || ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) event.stopImmediatePropagation();
     };
     document.addEventListener("keydown", protectEditing);

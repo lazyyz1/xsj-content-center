@@ -6,10 +6,16 @@ export const researchScopeSchema = z.object({
   materialIds: z.array(id).max(10).default([]),
   benchmarkAccountIds: z.array(id).max(3).default([]),
   trendKeys: z.array(z.string().trim().min(1).max(2000)).max(5).default([]),
+  newsItemIds: z.array(id).max(5).optional(),
+  researchRunIds: z.array(id).max(5).optional(),
   useOwnArtifacts: z.boolean().default(false),
   notes: z.string().trim().max(20000).default(""),
   useCreatorProfile: z.boolean().default(false),
-  researchProfile: z.literal("ACCOUNT_DOSSIER").optional(),
+  researchProfile: z.enum(["ACCOUNT_DOSSIER", "ACCOUNT_V2", "WORK_DEEP", "TOPIC_OPPORTUNITY_V2", "FOCUS_V2"]).optional(),
+  benchmarkWorkId: id.optional(),
+  focusWorkIds: z.array(id).max(30).optional(),
+  researchDepth: z.literal("DEEP").optional(),
+  forceReanalysis: z.boolean().optional(),
   benchmarkCollectionRunId: id.optional(),
   researchDateRange: z.object({ from: z.string().date().optional(), to: z.string().date().optional() }).strict().refine(value => !value.from || !value.to || value.from <= value.to, "Invalid date range").optional(),
 }).strict();
@@ -18,9 +24,9 @@ export const sessionInputSchema = z.object({ title: z.string().trim().min(1).max
 export const runInputSchema = z.object({ question: z.string().trim().min(1).max(10000), requestKey: z.string().uuid(), scope: researchScopeSchema.optional() }).strict();
 const refs = z.array(id).max(300);
 const sourceSchema: z.ZodType<ResearchSource> = z.object({
-  ref: id, kind: z.enum(["MATERIAL", "BENCHMARK_ACCOUNT", "BENCHMARK_WORK", "BENCHMARK_COMMENT", "TREND", "PROJECT_ARTIFACT", "USER_INPUT", "CREATOR_PROFILE"]), objectId: id,
+  ref: id, kind: z.enum(["MATERIAL", "BENCHMARK_ACCOUNT", "BENCHMARK_WORK", "BENCHMARK_COMMENT", "TREND", "PROJECT_ARTIFACT", "USER_INPUT", "CREATOR_PROFILE", "NEWS", "RESEARCH_RESULT"]), objectId: id,
   title: z.string().max(500), href: z.string().max(2000).nullable(), capturedAt: z.string().nullable(), publishedAt: z.string().nullable(), eventAt: z.string().nullable(),
-  contentOrigin: z.enum(["ORIGINAL", "MACHINE_TRANSCRIPT", "AI_READING", "USER_PROVIDED"]), locator: z.string().nullable(), excerpt: z.string().max(20000), version: z.string().nullable(),
+  contentOrigin: z.enum(["ORIGINAL", "MACHINE_TRANSCRIPT", "AI_READING", "USER_PROVIDED", "PUBLIC_SUMMARY"]), locator: z.string().nullable(), excerpt: z.string().max(20000), version: z.string().nullable(),
 }).strict();
 const base = { id, title: z.string().max(300), provenance: z.enum(["REAL_DATA", "COMPUTED", "AI_INTERPRETATION"]), sourceRefs: refs, limitation: z.string().max(2000).nullable() };
 export const researchBlockSchema: z.ZodType<ResearchBlock> = z.discriminatedUnion("type", [
@@ -63,3 +69,5 @@ export function validateResearchBlocks(value: unknown, sources: ResearchSource[]
   }
   return blocks;
 }
+
+export const researchSelectionSchema = z.object({ kind: z.enum(["run", "study"]), version: z.number().int().positive(), items: z.array(z.object({ id: z.string().min(1).max(200), text: z.string().trim().min(1).max(12000) }).strict()).min(1).max(30) }).strict().refine(value => new Set(value.items.map(item => item.id)).size === value.items.length, "不能重复选择结论").refine(value => value.items.reduce((sum,item) => sum + item.text.length,0) <= 30000, "本次结论过长，请缩小范围");

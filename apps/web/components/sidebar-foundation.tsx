@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Compass, FileText, Folder, PanelLeftClose, PanelLeftOpen, Plus, Zap } from "lucide-react";
+import { ChevronDown, Compass, FilePenLine, FileText, Folder, PanelLeftClose, PanelLeftOpen, Plus, Zap } from "lucide-react";
 import Link from "next/link";
 import { useState, type RefObject } from "react";
 import type { ProjectListView } from "@/server/sidebar/view-model";
@@ -12,6 +12,7 @@ import type { SidebarInteractionLock, SidebarVisualState } from "./sidebar-state
 
 const navigation = [
   { label: "开始工作", href: "/dashboard", icon: Plus },
+  { label: "我的稿件", href: "/content", icon: FilePenLine },
   { label: "项目", href: "/projects", icon: Folder },
   { label: "资料", href: "/library", icon: FileText },
   { label: "Skill", href: "/library/methods", icon: Zap },

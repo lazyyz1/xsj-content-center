@@ -1,13 +1,15 @@
 import { freeWorkerMode } from "./free-runtime";
 import { experienceLimitsEnabled } from "./experience-limits";
 import { Queue, type ConnectionOptions } from "bullmq";
-import { createRedisConnection } from "./redis-connection";
+import { deliveryKey } from "./queue-producer";
+import { createRedisConnection, queuePrefix } from "./redis-connection";
 
 export const TRANSCRIBE_SOURCE_QUEUE = "transcribe-source";
 export const TRANSCRIBE_SOURCE = "TRANSCRIBE_SOURCE";
 
 export type TranscribeSourcePayload = {
   jobId: string;
+  dispatchRevision?: number;
   workspaceId: string;
   sourceItemId: string;
   mediaAssetId?: string;
@@ -20,7 +22,9 @@ function connection(): ConnectionOptions {
 }
 
 export function createTranscribeSourceQueue() {
-  return new Queue<TranscribeSourcePayload>(TRANSCRIBE_SOURCE_QUEUE, { connection: connection() });
+  const queue = new Queue<TranscribeSourcePayload>(TRANSCRIBE_SOURCE_QUEUE, { connection: { ...connection(), maxRetriesPerRequest: 1, retryStrategy: () => null }, prefix: queuePrefix() });
+  queue.on("error", () => console.warn("QUEUE_CONNECTION_FAILED"));
+  return queue;
 }
 
 export async function enqueueTranscribeSource(payload: TranscribeSourcePayload, maxAttempts = 3) {
@@ -28,11 +32,11 @@ export async function enqueueTranscribeSource(payload: TranscribeSourcePayload, 
   try {
     if (experienceLimitsEnabled()) await queue.setGlobalConcurrency(freeWorkerMode() ? 1 : 2);
     return await queue.add(TRANSCRIBE_SOURCE, payload, {
-      jobId: `${payload.jobId}-${Date.now()}`,
+      jobId: deliveryKey(TRANSCRIBE_SOURCE, payload),
       attempts: maxAttempts,
       backoff: { type: "exponential", delay: 500 },
-      removeOnComplete: true,
-      removeOnFail: true,
+      removeOnComplete: { age: 86400, count: 10000 },
+      removeOnFail: { age: 604800, count: 10000 },
     });
   } finally {
     await queue.close();

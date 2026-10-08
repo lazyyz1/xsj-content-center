@@ -3,6 +3,7 @@ import type {
   LocalAsrBenchmarkProfile,
   LocalAsrHardwareCapabilities,
   LocalAsrInstalledModel,
+  LocalAsrModel,
   ResolvedTranscriptionQuality,
   TranscriptionQualityMode,
 } from "./types";
@@ -41,3 +42,18 @@ export class TranscriptionQualityResolver {
   }
 }
 
+
+/** Public readiness follows the configured worker route without enabling a fallback. */
+export function transcriptionAvailable(input: {
+ disabled: boolean; source: "LOCAL_FUNASR" | "DOUBAO"; qualityMode: TranscriptionQualityMode;
+ selectionMode: "AUTO" | "MANUAL"; manualModel?: LocalAsrModel; fallbackToDoubao: boolean; doubaoConfigured: boolean;
+ local: { status: string; models: Array<{key: LocalAsrModel; installed: boolean; supported: boolean}>;
+ qualityModes: Partial<Record<TranscriptionQualityMode,{available:boolean;installed:boolean}>> } | null;
+}) {
+ if(input.disabled) return false;
+ if(input.source==="DOUBAO") return input.doubaoConfigured;
+ const localReady=input.local?.status==="NORMAL" && (input.selectionMode==="MANUAL"
+ ? input.local.models.some(model=>model.key===input.manualModel&&model.installed&&model.supported)
+ : Boolean(input.local.qualityModes[input.qualityMode]?.available&&input.local.qualityModes[input.qualityMode]?.installed));
+ return Boolean(localReady || input.fallbackToDoubao&&input.doubaoConfigured);
+}

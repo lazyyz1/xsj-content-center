@@ -6,6 +6,8 @@ import { ResearchError, type ResearchActor } from "./access";
 import type { ResearchScope } from "./contracts";
 import { buildBenchmarkPerformance } from "../discovery/benchmark-performance";
 import { parseTrendStableKey, safeTrendMetrics } from "./trends";
+import { newsReadModel } from "./news/service";
+import { getResearchResult } from "./read-model";
 
 export async function resolveResearchInputs(actor: ResearchActor, question: string, scope: ResearchScope, mode: "DIRECT" | "BREAKDOWN" | "BENCHMARK" | "OPPORTUNITY" = "DIRECT") {
   const sourceRefs: ResearchSource[] = [{ ref: "U1", kind: "USER_INPUT", objectId: "question", title: "本次问题与用户补充", href: null, capturedAt: null, publishedAt: null, eventAt: null, contentOrigin: "USER_PROVIDED", locator: null, excerpt: [question, scope.notes].filter(Boolean).join("\n").slice(0, 20000), version: null }];
@@ -17,6 +19,26 @@ export async function resolveResearchInputs(actor: ResearchActor, question: stri
   const blocks: ResearchBlock[] = [];
   const readableWorkRefs: string[] = [];
   let remaining = 60000;
+  for (const resultId of [...new Set(scope.researchRunIds ?? [])]) {
+    const result = await getResearchResult(actor, resultId, { includeUnsaved: true });
+    const ref = `R${sourceRefs.length}`, title = result.resultTitle || result.question;
+    const text = result.blocks.filter(block => block.type === "text").map(block => block.type === "text" ? `${block.title}\n${block.text}` : "").join("\n\n").slice(0, Math.min(16000, remaining));
+    remaining -= text.length;
+    sourceRefs.push({ ref, kind: "RESEARCH_RESULT", objectId: result.id, title, href: `/research/results/run/${result.id}`, capturedAt: result.createdAt.toISOString(), publishedAt: null, eventAt: null, contentOrigin: "AI_READING", locator: "本人所选历史研究结论，不是原始证据", excerpt: text.slice(0, 1200), version: String(result.version) });
+    context.push({ ref, title, text, origin: "RESEARCH_RESULT" }); coverage.requested++; coverage.observed++; coverage.readable++; coverage.aiSampleCount++;
+    coverage.gaps.push("历史研究是待核对的分析，不作为已验证因果结论。");
+  }
+  if (scope.newsItemIds?.length) {
+    const news = await newsReadModel(actor);
+    for (const newsId of [...new Set(scope.newsItemIds)]) {
+      const item = news.items.find(value => value.id === newsId);
+      if (!item) throw new ResearchError("NEWS_NOT_FOUND", "所选资讯不在已有缓存中。", 404);
+      const ref = `N${sourceRefs.length}`, text = [item.title, item.summary || "来源未提供摘要", `来源：${item.source.name}`, `发布时间：${item.publishedAt || "未提供"}`].join("\n");
+      sourceRefs.push({ ref, kind: "NEWS", objectId: item.id, title: item.title, href: item.links.original || item.links.aihot, capturedAt: item.discoveredAt, publishedAt: item.publishedAt, eventAt: null, contentOrigin: "PUBLIC_SUMMARY", locator: "外部公开摘要，未读取完整报道", excerpt: text.slice(0, 1200), version: item.discoveredAt });
+      context.push({ ref, title: item.title, text, origin: "PUBLIC_SUMMARY" }); coverage.requested++; coverage.observed++; coverage.aiSampleCount++; if (item.summary) coverage.readable++;
+    }
+    coverage.gaps.push("资讯只使用公开摘要和来源日期，没有读取原始报道全文。");
+  }
   for (const source of metadata) {
     const readable = await getMaterialReadableContent({ ...actor, sourceItemId: source.id });
     const ref = `M${sourceRefs.length}`;
@@ -40,17 +62,17 @@ export async function resolveResearchInputs(actor: ResearchActor, question: stri
   for (const account of accounts) {
     const accountRef = `B${sourceRefs.length}`;
     sourceRefs.push({ ref: accountRef, kind: "BENCHMARK_ACCOUNT", objectId: account.id, title: account.name, href: `/research/benchmarks/${account.id}`, capturedAt: account.lastSyncedAt?.toISOString() ?? null, publishedAt: null, eventAt: null, contentOrigin: "ORIGINAL", locator: "已保存的对标账号记录", excerpt: `${account.name} · ${account.platform}`, version: account.lastSyncedAt?.toISOString() ?? null });
-    const batch = await db.benchmarkCollectionRun.findFirst({ where: { workspaceId: actor.workspaceId, benchmarkAccountId: account.id, status: { in: ["COMPLETED", "PARTIAL"] } }, orderBy: { createdAt: "desc" }, select: { id: true, status: true, rangeStart: true, rangeEnd: true, inRangeCount: true, seenCount: true } });
+    const batch = scope.benchmarkWorkId ? null : await db.benchmarkCollectionRun.findFirst({ where: { workspaceId: actor.workspaceId, benchmarkAccountId: account.id, status: { in: ["COMPLETED", "PARTIAL"] } }, orderBy: { createdAt: "desc" }, select: { id: true, status: true, rangeStart: true, rangeEnd: true, inRangeCount: true, seenCount: true } });
     accountSampleKinds[account.id] = batch ? "WINDOW" : "HISTORY";
     accountWindows.push(batch ? `${batch.rangeStart.toISOString()}/${batch.rangeEnd.toISOString()}` : "HISTORY_ONLY");
     const batchItems = batch ? await db.benchmarkCollectionRunItem.findMany({
       where: { collectionRunId: batch.id, inRange: true }, orderBy: [{ publishedAt: "desc" }, { id: "desc" }], take: 12,
       select: { snapshotId: true, titleSnapshot: true, urlSnapshot: true, publishedAt: true, createdAt: true,
-        snapshot: { select: { platform: true, externalId: true, observations: { where: { collectionRunId: batch.id }, orderBy: { observedAt: "desc" }, take: 1, select: { observedAt: true, metrics: true } } } } },
+        snapshot: { select: { platform: true, externalId: true, metadata: true, observations: { where: { collectionRunId: batch.id }, orderBy: { observedAt: "desc" }, take: 1, select: { observedAt: true, metrics: true } } } } },
     }) : null;
-    const sampled = batchItems ? batchItems.map(item => ({ id: item.snapshotId, title: item.titleSnapshot, url: item.urlSnapshot, publishedAt: item.publishedAt, observedAt: item.createdAt, platform: item.snapshot.platform, externalId: item.snapshot.externalId, observations: item.snapshot.observations }))
-      : await db.benchmarkContentSnapshot.findMany({ where: { workspaceId: actor.workspaceId, benchmarkAccountId: account.id }, orderBy: [{ publishedAt: "desc" }, { observedAt: "desc" }], take: 12, select: { id: true, title: true, url: true, publishedAt: true, observedAt: true, platform: true, externalId: true, observations: { orderBy: { observedAt: "desc" }, take: 1, select: { observedAt: true, metrics: true } } } });
-    const total = batch?.inRangeCount ?? await db.benchmarkContentSnapshot.count({ where: { workspaceId: actor.workspaceId, benchmarkAccountId: account.id } });
+    const sampled = batchItems ? batchItems.map(item => ({ id: item.snapshotId, title: item.titleSnapshot, url: item.urlSnapshot, publishedAt: item.publishedAt, observedAt: item.createdAt, platform: item.snapshot.platform, externalId: item.snapshot.externalId, metadata: item.snapshot.metadata, observations: item.snapshot.observations }))
+      : await db.benchmarkContentSnapshot.findMany({ where: { workspaceId: actor.workspaceId, benchmarkAccountId: account.id, ...(scope.benchmarkWorkId ? { id: scope.benchmarkWorkId } : {}) }, orderBy: [{ publishedAt: "desc" }, { observedAt: "desc" }], take: 12, select: { id: true, title: true, url: true, publishedAt: true, observedAt: true, platform: true, externalId: true, metadata: true, observations: { orderBy: { observedAt: "desc" }, take: 1, select: { observedAt: true, metrics: true } } } });
+    const total = scope.benchmarkWorkId ? 1 : batch?.inRangeCount ?? await db.benchmarkContentSnapshot.count({ where: { workspaceId: actor.workspaceId, benchmarkAccountId: account.id } });
     coverage.requested += total; coverage.observed += sampled.length;
     if (batch) { coverage.sampling = "WINDOW"; coverage.timeRange.from = !coverage.timeRange.from || batch.rangeStart.toISOString() < coverage.timeRange.from ? batch.rangeStart.toISOString() : coverage.timeRange.from; coverage.timeRange.to = !coverage.timeRange.to || batch.rangeEnd.toISOString() > coverage.timeRange.to ? batch.rangeEnd.toISOString() : coverage.timeRange.to; }
     else coverage.gaps.push(`${account.name} 没有完成的时间窗口采集，仅使用保存的历史作品快照，不能代表账号全量。`);
@@ -60,7 +82,7 @@ export async function resolveResearchInputs(actor: ResearchActor, question: stri
     const materialByWork = new Map(materialRows.map(item => [`${item.sourcePlatform}:${item.externalId}`, item.id]));
     const readableRows = await Promise.all(materialRows.map(row => getMaterialReadableContent({ ...actor, sourceItemId: row.id })));
     const readableById = new Map(readableRows.filter(Boolean).map(item => [item!.sourceItemId, item!]));
-    const performance = buildBenchmarkPerformance(sampled.map(work => ({ ...work, metadata: {}, observations: work.observations })));
+    const performance = buildBenchmarkPerformance(sampled);
     const accountWorkRefs: string[] = [];
     for (const work of sampled) {
       const ref = `B${sourceRefs.length}`; accountWorkRefs.push(ref);

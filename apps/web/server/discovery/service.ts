@@ -12,6 +12,8 @@ import {
   type DiscoveryPlatform,
   type ExternalAccount,
   type ExternalContent,
+  type ExternalResultPage,
+  type ExternalCallPurpose,
 } from "@content-center/providers";
 import { addProjectSource, createProject } from "../project-service";
 import { createSourceAndJob } from "../source-service";
@@ -52,7 +54,7 @@ function publicAccount(item: ExternalAccount): ExternalAccountInput {
   return safe;
 }
 
-async function providerFor(workspaceId: string) {
+async function providerFor(workspaceId: string, purpose: ExternalCallPurpose = "GENERAL") {
   const status = await integrations.getIntegrationStatus(workspaceId, "REDFOX");
   if (status.status === "DISABLED") throw new DiscoveryServiceError("REDFOX_DISABLED", "内容数据服务已停用，请联系管理员。");
   if (status.status !== "CONFIGURED") throw new DiscoveryServiceError("REDFOX_NOT_CONFIGURED", "内容数据服务尚未配置，请联系管理员。");
@@ -63,6 +65,7 @@ async function providerFor(workspaceId: string) {
   return new RedFoxDiscoveryProvider(new RedFoxClient({
     apiKey: config.apiKey,
     baseUrl: typeof config.baseUrl === "string" ? config.baseUrl : undefined,
+    purpose,
   }));
 }
 
@@ -97,13 +100,14 @@ async function cachedProviderCall<T extends { providerRequestId?: string }>(inpu
   userId: string;
   operation: string;
   cacheKey: string;
+  purpose?: ExternalCallPurpose;
   call: (provider: RedFoxDiscoveryProvider) => Promise<T>;
 }): Promise<T & { cached: boolean }> {
   const key = `${input.workspaceId}:${input.operation}:${input.cacheKey}`;
   const hit = cache.get(key);
   if (hit && hit.expiresAt > Date.now()) return { ...(hit.value as T), cached: true };
   if (hit) cache.delete(key);
-  const provider = await providerFor(input.workspaceId);
+  const provider = await providerFor(input.workspaceId, input.purpose);
   const startedAt = Date.now();
   const requestId = `discovery:${randomUUID()}`;
   try {
@@ -191,6 +195,7 @@ export async function getDiscoveryContentDetail(input: {
   userId: string;
   url: string;
   platform: DiscoveryPlatform;
+  purpose?:ExternalCallPurpose;
 }) {
   const result = await cachedProviderCall({
     ...input,
@@ -228,25 +233,40 @@ export async function getDiscoveryAccountDetail(input: {
   return { items: [publicAccount(result.item)], cached: result.cached };
 }
 
-export async function getBenchmarkWorks(input: { workspaceId: string; userId: string; benchmarkId: string; sort: "LATEST" | "POPULAR"; offset?: number }) {
+export async function getBenchmarkWorks(input: { workspaceId: string; userId: string; benchmarkId: string; sort: "LATEST" | "POPULAR"; offset?: number; purpose?: ExternalCallPurpose }) {
   const benchmark = await db.benchmarkAccount.findFirst({ where: { id: input.benchmarkId, workspaceId: input.workspaceId, enabled: true } });
   if (!benchmark) throw new DiscoveryServiceError("DISCOVERY_NOT_FOUND", "对标账号不存在。");
+  const identity = benchmark.identitySnapshot && typeof benchmark.identitySnapshot === "object" && !Array.isArray(benchmark.identitySnapshot) ? benchmark.identitySnapshot as Record<string, unknown> : {};
+  const accountId = typeof identity.worksAccountId === "string" ? identity.worksAccountId : benchmark.externalAccountId;
   const page = await cachedProviderCall({
     ...input,
     operation: `DISCOVERY_ACCOUNT_WORKS_${benchmark.platform}`,
-    cacheKey: JSON.stringify({ id: benchmark.externalAccountId, sort: input.sort, offset: input.offset ?? 0 }),
+    cacheKey: JSON.stringify({ id: accountId, sort: input.sort, offset: input.offset ?? 0 }),
     call: (provider) => provider.accountWorks.list({
       platform: benchmark.platform as DiscoveryPlatform,
-      accountId: benchmark.externalAccountId,
+      accountId,
       offset: input.offset ?? 0,
       sortType: input.sort === "LATEST" ? "2" : "4",
     }),
   });
-  if (!page.cached) await db.benchmarkAccount.update({ where: { id: benchmark.id }, data: { lastSyncedAt: new Date() } });
+
+  return saveBenchmarkWorksPage(input, benchmark, page, input.offset ?? 0);
+}
+
+/** Server-only identity preview. Raw provider fields never leave the account resolver. */
+export async function researchAccountWorksPreview(input: { workspaceId: string; userId: string; platform: DiscoveryPlatform; accountId: string }) {
+  return cachedProviderCall({ ...input, purpose: "RESEARCH_COLLECTION", operation: "DISCOVERY_ACCOUNT_WORKS_" + input.platform, cacheKey: JSON.stringify({ id: input.accountId, sort: "LATEST", offset: 0 }), call: provider => provider.accountWorks.list({ platform: input.platform, accountId: input.accountId, offset: 0, sortType: "2" }) });
+}
+export async function researchAccountIdentity(input: { workspaceId: string; userId: string; platform: DiscoveryPlatform; accountId: string }) {
+  return cachedProviderCall({ ...input, purpose: "RESEARCH_COLLECTION", operation: "DISCOVERY_ACCOUNT_DETAIL_" + input.platform, cacheKey: JSON.stringify({ accountId: input.accountId }), call: provider => provider.accountDetail.get({ platform: input.platform, accountId: input.accountId }) });
+}
+export async function saveBenchmarkWorksPage(input: { workspaceId: string; userId: string }, benchmark: { id: string }, page: ExternalResultPage<ExternalContent> & { cached: boolean }, offset: number) {
   const items = page.items.map(publicContent);
+  let added = 0, updated = 0;
   await db.$transaction(async (tx) => {
     for (const item of items) {
       const previous = await tx.benchmarkContentSnapshot.findUnique({ where: { workspaceId_platform_externalId: { workspaceId: input.workspaceId, platform: item.platform, externalId: item.externalId } }, select: { metadata: true } });
+      if (previous) updated++; else added++;
       const previousMetadata = previous?.metadata && typeof previous.metadata === "object" && !Array.isArray(previous.metadata) ? previous.metadata : {};
       const snapshot = await tx.benchmarkContentSnapshot.upsert({
     where: { workspaceId_platform_externalId: { workspaceId: input.workspaceId, platform: item.platform, externalId: item.externalId } },
@@ -259,7 +279,7 @@ export async function getBenchmarkWorks(input: { workspaceId: string; userId: st
       url: item.originalUrl,
       authorName: item.authorName,
       coverUrl: item.coverUrl,
-      metadata: inputJson({ contentType: item.contentType, description: item.description?.slice(0, 500) ?? null, metrics: item.metrics, durationMs: item.durationMs }),
+      metadata: inputJson({ contentType: item.contentType, description: item.description?.slice(0, 500) ?? null, metrics: item.metrics, durationMs: item.durationMs, provider: "REDFOX", dataAsOf: item.dataAsOf ?? null }),
       publishedAt: item.publishedAt ? new Date(item.publishedAt) : null,
     },
     update: {
@@ -267,7 +287,7 @@ export async function getBenchmarkWorks(input: { workspaceId: string; userId: st
       url: item.originalUrl,
       authorName: item.authorName,
       coverUrl: item.coverUrl,
-      metadata: inputJson({ ...previousMetadata, contentType: item.contentType, description: item.description?.slice(0, 500) ?? null, metrics: item.metrics, durationMs: item.durationMs }),
+      metadata: inputJson({ ...previousMetadata, contentType: item.contentType, description: item.description?.slice(0, 500) ?? null, metrics: item.metrics, durationMs: item.durationMs, provider: "REDFOX", dataAsOf: item.dataAsOf ?? null }),
       publishedAt: item.publishedAt ? new Date(item.publishedAt) : null,
       ...(page.cached ? {} : { observedAt: new Date() }),
     },
@@ -276,14 +296,15 @@ export async function getBenchmarkWorks(input: { workspaceId: string; userId: st
       if (!page.cached) await tx.benchmarkMetricObservation.create({ data: { snapshotId: snapshot.id, metrics: inputJson(item.metrics) } });
     }
   });
+  if (!page.cached) await db.benchmarkAccount.update({ where: { id: benchmark.id }, data: { lastSyncedAt: new Date() } });
   const [sources, ideaReferences] = await Promise.all([
     items.length ? db.sourceItem.findMany({ where: { workspaceId: input.workspaceId, OR: items.map((item) => ({ sourcePlatform: item.platform, externalId: item.externalId })) }, select: { id: true, sourcePlatform: true, externalId: true } }) : [],
     items.length ? db.contentIdeaReference.findMany({ where: { idea: { workspaceId: input.workspaceId }, OR: items.map((item) => ({ platform: item.platform, externalId: item.externalId })) }, select: { platform: true, externalId: true } }) : [],
   ]);
   const sourceIds = new Map(sources.map((item) => [`${item.sourcePlatform}:${item.externalId}`, item.id]));
   const ideaKeys = new Set(ideaReferences.map((item) => `${item.platform}:${item.externalId}`));
-  const nextOffset = page.hasMore !== false && page.nextOffset !== null && page.nextOffset !== undefined && page.nextOffset > (input.offset ?? 0) ? page.nextOffset : null;
-  return { items: items.map((item) => ({ ...item, sourceItemId: sourceIds.get(`${item.platform}:${item.externalId}`) ?? null, inIdea: ideaKeys.has(`${item.platform}:${item.externalId}`) })), cached: page.cached, hasMore: page.hasMore, nextOffset,
+  const nextOffset = page.hasMore !== false && page.nextOffset !== null && page.nextOffset !== undefined && page.nextOffset > offset ? page.nextOffset : null;
+  return { added, updated, items: items.map((item) => ({ ...item, sourceItemId: sourceIds.get(`${item.platform}:${item.externalId}`) ?? null, inIdea: ideaKeys.has(`${item.platform}:${item.externalId}`) })), cached: page.cached, hasMore: page.hasMore, providerRequestId: page.providerRequestId, nextOffset,
     coverage: nextOffset !== null ? "MORE_AVAILABLE" : page.hasMore === false ? "PROVIDER_EXHAUSTED" : "PAGINATION_UNAVAILABLE" };
 }
 
@@ -296,7 +317,7 @@ export function listBenchmarks(workspaceId: string, take = 12) {
   });
 }
 
-export async function addBenchmark(input: { workspaceId: string; userId: string; account: ExternalAccountInput }) {
+export async function addBenchmark(input: { workspaceId: string; userId: string; account: Omit<ExternalAccountInput, "sourceProvider">; purpose?: string }) {
   const creatorProfile = await db.creatorProfile.findUnique({ where: { workspaceId_userId: { workspaceId: input.workspaceId, userId: input.userId } }, select: { id: true } });
   try {
     return await db.$transaction(async (tx) => {
@@ -307,6 +328,7 @@ export async function addBenchmark(input: { workspaceId: string; userId: string;
           platform: input.account.platform,
           externalAccountId: input.account.externalId,
           name: input.account.name,
+          researchNotes: input.purpose?.trim() || null,
           avatarUrl: input.account.avatarUrl,
           bio: input.account.bio,
           originalUrl: input.account.originalUrl,
@@ -344,14 +366,20 @@ export function getIdea(workspaceId: string, ideaId: string) {
   return db.contentIdea.findFirst({ where: { id: ideaId, workspaceId }, include: { references: { orderBy: { createdAt: "desc" }, include: { trendSnapshot: true } }, project: { select: { id: true } } } });
 }
 
-export async function createIdea(input: { workspaceId: string; userId: string; title: string; description?: string; reference?: ExternalContentInput; sourceItemId?: string }) {
+export async function createIdea(input: { workspaceId: string; userId: string; title: string; description?: string; reference?: ExternalContentInput; sourceItemId?: string; deduplicateSource?: boolean }) {
   const creatorProfile = await db.creatorProfile.findUnique({ where: { workspaceId_userId: { workspaceId: input.workspaceId, userId: input.userId } }, select: { id: true } });
-  const source = input.sourceItemId ? await db.sourceItem.findFirst({ where: { id: input.sourceItemId, workspaceId: input.workspaceId }, select: { id: true } }) : null;
+  const source = input.sourceItemId ? await db.sourceItem.findFirst({ where: { id: input.sourceItemId, workspaceId: input.workspaceId }, select: { id: true, title: true, sourcePlatform: true, externalId: true, sourceUrl: true, updatedAt: true } }) : null;
   if (input.sourceItemId && !source) throw new DiscoveryServiceError("DISCOVERY_NOT_FOUND", "素材不存在。");
   return db.$transaction(async (tx) => {
+    if (input.deduplicateSource && source) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"research-topic:" + input.workspaceId + ":" + input.userId + ":" + source.id + ":" + input.title}))`;
+      const previous = await tx.contentIdea.findFirst({ where: { workspaceId: input.workspaceId, createdById: input.userId, title: input.title, status: { not: "ARCHIVED" }, references: { some: { sourceItemId: source.id } } } });
+      if (previous) return previous;
+    }
     const idea = await tx.contentIdea.create({ data: { workspaceId: input.workspaceId, creatorProfileId: creatorProfile?.id, title: input.title, description: input.description || null, createdById: input.userId } });
     if (input.reference) await tx.contentIdeaReference.create({ data: { ...referenceData(idea.id, input.reference), sourceItemId: source?.id } });
-    await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "discovery.idea_created", resourceType: "content_idea", resourceId: idea.id, metadata: { hasReference: Boolean(input.reference) } } });
+    if (source && !input.reference) await tx.contentIdeaReference.create({ data: { ideaId: idea.id, sourceItemId: source.id, platform: source.sourcePlatform, externalId: source.externalId || source.id, title: source.title || "来源资料", url: source.sourceUrl || "/library/" + source.id, metadataSnapshot: inputJson({ referenceType: "MATERIAL", sourceVersion: source.updatedAt.toISOString() }) } });
+    await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "discovery.idea_created", resourceType: "content_idea", resourceId: idea.id, metadata: { hasReference: Boolean(input.reference || source) } } });
     return idea;
   });
 }
@@ -388,13 +416,14 @@ export async function updateIdea(input: { workspaceId: string; userId: string; i
   return updated;
 }
 
-export async function collectExternalContent(input: { workspaceId: string; userId: string; content: ExternalContentInput }) {
+export async function collectExternalContent(input: { workspaceId: string; userId: string; content: ExternalContentInput; autoTranscribe?: boolean }) {
   const canonicalUrl = normalizeSourceUrl(input.content.originalUrl);
   const existing = await db.sourceItem.findFirst({ where: { workspaceId: input.workspaceId, OR: [{ sourcePlatform: input.content.platform, externalId: input.content.externalId }, { canonicalUrl }] } });
   if (existing) return { sourceItem: existing, created: false as const };
   const created = await createSourceAndJob({
     workspaceId: input.workspaceId,
     userId: input.userId,
+    autoTranscribe: input.autoTranscribe,
     source: {
       kind: "REDFOX",
       url: input.content.originalUrl,

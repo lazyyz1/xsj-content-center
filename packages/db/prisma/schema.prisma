@@ -118,6 +118,11 @@ enum ArtifactType {
   TEXT
 }
 
+enum ArtifactVisibility {
+  PRIVATE
+  WORKSPACE
+}
+
 enum AssetStatus {
   REMOTE
   DOWNLOADING
@@ -944,7 +949,7 @@ model UserProjectPreference {
 model DraftBranch {
   id                  String          @id @default(cuid())
   workspaceId         String
-  projectId           String
+  projectId           String?
   title               String
   workingTitle        String              @default("")
   workingBody         String              @default("") @db.Text
@@ -962,7 +967,7 @@ model DraftBranch {
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
   workspace           Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project             ContentProject  @relation("ProjectDraftBranches", fields: [projectId], references: [id], onDelete: Cascade)
+  project             ContentProject? @relation("ProjectDraftBranches", fields: [projectId], references: [id], onDelete: Cascade)
   primaryForProject   ContentProject? @relation("PrimaryDraftBranch")
   currentRevision     DraftRevision?  @relation("CurrentDraftRevision", fields: [currentRevisionId], references: [id], onDelete: SetNull)
   confirmedRevision   DraftRevision?  @relation("ConfirmedDraftRevision", fields: [confirmedRevisionId], references: [id], onDelete: SetNull)
@@ -982,7 +987,7 @@ model DraftBranch {
 model DraftRevision {
   id              String              @id @default(cuid())
   workspaceId     String
-  projectId       String
+  projectId       String?
   draftBranchId   String
   revision        Int
   title           String
@@ -995,7 +1000,7 @@ model DraftRevision {
   createdById     String
   createdAt       DateTime            @default(now())
   workspace       Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project         ContentProject      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project         ContentProject?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   draftBranch     DraftBranch         @relation("DraftBranchRevisions", fields: [draftBranchId], references: [id], onDelete: Cascade)
   currentFor      DraftBranch?        @relation("CurrentDraftRevision")
   confirmedFor    DraftBranch?        @relation("ConfirmedDraftRevision")
@@ -1130,6 +1135,7 @@ model BenchmarkAccount {
   platform          SourcePlatform
   externalAccountId String
   name              String
+  identitySnapshot  Json?
   avatarUrl         String?
   bio               String?
   originalUrl       String?
@@ -2086,13 +2092,17 @@ model AIRun {
 model AssistantThread {
   id          String             @id @default(cuid())
   workspaceId String
-  projectId   String
+  projectId   String?
+  artifactId  String?            @unique
+  contextSnapshot Json?
+  contextVersion Int            @default(1)
   canvasObjectId String?
   createdById String
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
   workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project     ContentProject     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     ContentProject?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  artifact    Artifact?          @relation("ArtifactConversation", fields: [artifactId], references: [id], onDelete: Cascade)
   canvasObject CanvasObject?     @relation(fields: [canvasObjectId], references: [id], onDelete: Cascade)
   createdBy   User               @relation("AssistantThreadCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   messages    AssistantMessage[]
@@ -2126,7 +2136,10 @@ model AssistantMessage {
 model Artifact {
   id            String       @id @default(cuid())
   workspaceId   String
-  projectId     String
+  projectId     String?
+  visibility    ArtifactVisibility @default(WORKSPACE)
+  clientRequestId String?
+  creationRequestHash String?
   draftBranchId String       @unique
   createdById   String
   sourceResearchRunId String?
@@ -2136,14 +2149,17 @@ model Artifact {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
   workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project       ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project       ContentProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   draftBranch   DraftBranch    @relation(fields: [draftBranchId], references: [id], onDelete: Cascade)
   createdBy     User           @relation("ArtifactCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   sourceResearchRun ResearchRun? @relation(fields: [sourceResearchRunId], references: [id], onDelete: SetNull)
   sourceBenchmarkStudy BenchmarkStudy? @relation(fields: [sourceBenchmarkStudyId], references: [id], onDelete: SetNull)
   messages      AssistantMessage[]
+  conversation  AssistantThread? @relation("ArtifactConversation")
 
   @@index([workspaceId, projectId, updatedAt])
+  @@index([workspaceId, createdById, visibility, updatedAt])
+  @@unique([workspaceId, createdById, clientRequestId])
   @@unique([projectId, sourceResearchRunId])
   @@unique([projectId, sourceBenchmarkStudyId])
 }

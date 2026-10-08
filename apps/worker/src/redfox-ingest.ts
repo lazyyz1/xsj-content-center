@@ -84,7 +84,7 @@ export async function processRedFoxIngestJob(
   job: Job<ContentIngestPayload>,
   startedAt: Date,
 ) {
-  const attempt = job.attemptsMade + 1;
+  const attempt = Math.max(job.attemptsMade + 1, record.attempt + 1);
   await db.$transaction([
     db.ingestJob.update({
       where: { id: record.id },

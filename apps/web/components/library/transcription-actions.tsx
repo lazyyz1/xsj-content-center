@@ -35,8 +35,8 @@ export function TranscriptionActions({
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.message || result.error || "无法开始转写");
       router.refresh();
-    } catch {
-      setMessage(unavailableMessage);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : unavailableMessage);
     } finally {
       setBusy(false);
     }

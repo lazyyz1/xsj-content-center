@@ -28,8 +28,9 @@ describe("account dossier real read boundary", () => {
   });
   it("does not expose a same-workspace member's private research", async () => {
     const session = await db.researchSession.create({ data: { workspaceId, createdById: owner, title: "Private", entryTemplate: "BENCHMARK", requestKey: randomUUID() } });
-    await db.researchRun.create({ data: { workspaceId, sessionId: session.id, requestedById: owner, requestKey: randomUUID(), requestHash: key, question: "Private", version: 1, status: "COMPLETED", savedAt: new Date(), inputScope: { benchmarkAccountIds: [accountId] }, blocks: [] } });
-    expect((await researchBenchmarkDossier(actor(), accountId)).analysis?.kind).toBe("run");
+    const accountRun = await db.researchRun.create({ data: { workspaceId, sessionId: session.id, requestedById: owner, requestKey: randomUUID(), requestHash: key, question: "Private", version: 1, status: "COMPLETED", savedAt: new Date(), inputScope: { benchmarkAccountIds: [accountId] }, blocks: [] } });
+    await db.researchRun.create({ data: { workspaceId, sessionId: session.id, requestedById: owner, requestKey: randomUUID(), requestHash: key, question: "Single work", version: 2, status: "COMPLETED", savedAt: new Date(Date.now() + 1000), inputScope: { benchmarkAccountIds: [accountId], benchmarkWorkId: workId, researchProfile: "WORK_DEEP", researchDepth: "DEEP" }, blocks: [] } });
+    expect((await researchBenchmarkDossier(actor(), accountId)).analysis).toMatchObject({ kind: "run", id: accountRun.id });
     expect((await researchBenchmarkDossier({ workspaceId, userId: other }, accountId)).analysis).toBeNull();
   });
   it("does not present an archived Material as readable in the dossier or drawer", async () => {

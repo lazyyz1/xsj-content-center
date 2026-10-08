@@ -38,5 +38,5 @@ export async function getLegacyResearchResult(actor: ResearchActor, studyId: str
   }
   if (!blocks.length) blocks.push({ id: "legacy-empty", type: "text", title: "历史记录保留", text: "这条旧研究没有可适配的结论正文。样本引用仍可核对，可基于这些资料重新开展研究。", provenance: "REAL_DATA", sourceRefs: [], limitation: "未将未知格式或输入清单冒充研究成果。" });
   blocks.push({ id: "sources", type: "sources", title: "当时的样本与来源", provenance: "REAL_DATA", sourceRefs: sources.map(source => source.ref), limitation: `保存的样本数：${study.sampleCount}；可追溯样本关系：${sources.length}。不代表账号全量。`, refs: sources });
-  return { id: study.id, title: `${study.benchmarkAccount.name} · 历史研究 ${study.version}`, createdAt: study.createdAt, accountId: study.benchmarkAccountId, sampleCount: study.sampleCount, traceableCount: sources.length, blocks: validateResearchBlocks(blocks, sources) };
+  return { id: study.id, version: study.version, title: `${study.benchmarkAccount.name} · 历史研究 ${study.version}`, createdAt: study.createdAt, accountId: study.benchmarkAccountId, sampleCount: study.sampleCount, traceableCount: sources.length, blocks: validateResearchBlocks(blocks, sources) };
 }

@@ -20,6 +20,7 @@ export const externalContentSchema = z.object({
   publishedAt: z.string().datetime().nullable(),
   metrics: z.object({ views: nullableNumber, likes: nullableNumber, comments: nullableNumber, shares: nullableNumber, favorites: nullableNumber }),
   durationMs: nullableNumber,
+  dataAsOf: z.string().datetime().nullable().optional(),
   sourceProvider: z.literal("REDFOX"),
 }).strict();
 
@@ -44,7 +45,7 @@ export const searchDiscoverySchema = z.object({
 
 export const collectExternalContentSchema = z.object({ content: externalContentSchema }).strict();
 export const createProjectFromContentSchema = z.object({ content: externalContentSchema }).strict();
-export const addBenchmarkSchema = z.object({ account: externalAccountSchema }).strict();
+export const addBenchmarkSchema = z.object({ account: z.union([externalAccountSchema, externalAccountSchema.extend({ sourceProvider: z.literal("MANUAL"), originalUrl: z.string().url().max(2000).refine(url => url.startsWith("https://"), "原主页请填写 HTTPS 地址。").nullable() })]), purpose: z.string().trim().max(2000).optional() }).strict();
 export const createIdeaSchema = z.object({
   title: z.string().trim().min(1).max(300),
   description: z.string().trim().max(2_000).optional(),

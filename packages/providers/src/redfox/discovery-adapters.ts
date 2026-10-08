@@ -34,7 +34,11 @@ export class AccountWorksAdapter {
 
   async list(input: { platform: DiscoveryPlatform; accountId: string; offset?: number; sortType?: string }): Promise<ExternalResultPage<ExternalContent>> {
     const response = await this.client.getAccountWorks(input);
-    return { ...normalizeContentPage(input.platform, response.data), providerRequestId: response.providerRequestId };
+    const page = normalizeContentPage(input.platform, response.data, input.platform === "DOUYIN" ? "SECONDS" : undefined);
+    // The Douyin queryWorkList contract explicitly documents offset += 20.
+    // Do not invent a cursor for endpoints without such a contract.
+    if (input.platform === "DOUYIN" && page.hasMore === true && page.items.length > 0 && page.nextOffset == null) page.nextOffset = (input.offset ?? 0) + 20;
+    return { ...page, providerRequestId: response.providerRequestId };
   }
 }
 

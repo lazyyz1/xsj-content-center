@@ -1,5 +1,5 @@
 import { db, findSourceForUser } from "@content-center/db";
-import { DoubaoError, LocalAsrError } from "@content-center/providers";
+import { isLocalReviewOffline, DoubaoError, LocalAsrError } from "@content-center/providers";
 import { requestSourceTranscription, TranscriptionAlreadyRunningError } from "@content-center/worker/transcription";
 import { NextResponse } from "next/server";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
@@ -15,6 +15,7 @@ export async function POST(_request: Request, route: { params: Promise<{ id: str
     sourceItemId: id,
   });
   if (!source) return apiError("NOT_FOUND", 404);
+  if (isLocalReviewOffline()) return apiError("LOCAL_REVIEW_OFFLINE", 409, "验收环境已关闭转写任务和语音服务调用。");
   if (source.status !== "READY") return apiError("SOURCE_NOT_READY", 409, "资料尚未保存完成。");
   const media = source.assets.find((asset) => (asset.assetType === "VIDEO" || asset.assetType === "AUDIO") && asset.status === "STORED" && asset.storageKey);
   if (!media) return apiError("ASR_MEDIA_NOT_AVAILABLE", 409, "没有可转写的已保存媒体。");

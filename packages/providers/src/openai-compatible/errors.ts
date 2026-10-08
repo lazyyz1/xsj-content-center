@@ -1,4 +1,5 @@
 export type LLMErrorCode =
+  | "LOCAL_REVIEW_OFFLINE"
   | "KIMI_NOT_CONFIGURED"
   | "KIMI_MODEL_ID_MISSING"
   | "KIMI_AUTH_FAILED"

@@ -126,8 +126,11 @@ export class DoubaoClient {
     }
 
     let raw: unknown;
+    let responseText: string;
+    try { responseText=await response.text(); }
+    catch { throw new DoubaoError("DOUBAO_SERVER_ERROR","豆包响应读取中断，结果尚未确认。",true); }
     try {
-      raw = JSON.parse(await response.text());
+      raw = JSON.parse(responseText);
     } catch {
       throw new DoubaoError("DOUBAO_INVALID_RESPONSE", "豆包返回了无效 JSON。", false, {
         httpStatus: response.status,

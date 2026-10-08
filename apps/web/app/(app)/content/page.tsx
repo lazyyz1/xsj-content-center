@@ -1,0 +1,11 @@
+import Link from "next/link";
+import { db } from "@content-center/db";
+import { requireWorkspace } from "@/server/access";
+import { listPersonalContents } from "@/server/artifacts/personal";
+import { PersonalContentStart } from "@/components/content/personal-content-start";
+import "@/components/content/content.css";
+export default async function MyContentPage({searchParams}:{searchParams:Promise<{q?:string;projectId?:string;view?:string}>}) {
+ const {workspace,session,role}=await requireWorkspace(),query=await searchParams,actor={workspaceId:workspace.id,userId:session.user.id};
+ const [items,projects]=await Promise.all([listPersonalContents(actor,{...query,unclassified:query.view==="unclassified"}),db.contentProject.findMany({where:{workspaceId:workspace.id,status:{not:"ARCHIVED"}},select:{id:true,title:true},orderBy:{updatedAt:"desc"},take:100})]);
+ return <article className="personal-content-library"><header><div><h1>我的稿件</h1><p>先写自己的内容，参考和项目都按需要选择。</p></div><PersonalContentStart canWrite={role!=="VIEWER"} label="开始新稿件"/></header><form className="personal-content-list-filters"><input name="q" type="search" aria-label="查找我的稿件" defaultValue={query.q} placeholder="按内容名称查找"/><select name="view" aria-label="稿件归类范围" defaultValue={query.view||"all"}><option value="all">全部自己的内容</option><option value="unclassified">未归类 · 个人日常</option></select><select name="projectId" aria-label="按项目整理" defaultValue={query.projectId||""}><option value="">全部项目</option>{projects.map(project=><option key={project.id} value={project.id}>{project.title}</option>)}</select><button type="submit">查看</button></form>{items.length?<ul className="personal-content-list">{items.map(item=><li key={item.artifactId}><Link href={"/content/"+item.artifactId}><small>{item.projectTitle||"未归类"} · 仅我可见</small><h2>{item.title}</h2><p>{item.excerpt||item.ownAngle||"这条内容已保存，随时回来继续写。"}</p><small>{new Date(item.updatedAt).toLocaleString("zh-CN",{timeZone:"Asia/Singapore"})} · {item.references.length} 份主动采用的参考</small></Link></li>)}</ul>:<div className="personal-content-list-empty"><p>{query.q||query.projectId?"没有匹配的稿件，可调整筛选。":"还没有自己的稿件。无需先建项目，也可以从一句日常表达开始。"}</p><Link href="/research">需要时去研究找参考 →</Link></div>}</article>;
+}

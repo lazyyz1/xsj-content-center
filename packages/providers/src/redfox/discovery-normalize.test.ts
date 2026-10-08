@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { normalizeAccountPage, normalizeContentPage } from "./discovery-normalize";
 
 describe("RedFox discovery normalization", () => {
+  it("uses the documented seconds unit and China time for account works", () => {
+    const item=normalizeContentPage("DOUYIN",{list:[{workId:"official",accountName:"真实作者",authorId:"uid",duration:600,publishTime:"2026-10-08 10:00:00",crawlTime:"2026-10-08 11:00:00",likeCount:10,collectCount:null}]},"SECONDS").items[0];
+    expect(item).toMatchObject({authorName:"真实作者",durationMs:600000,publishedAt:"2026-10-08T02:00:00.000Z",dataAsOf:"2026-10-08T03:00:00.000Z",metrics:{likes:10,favorites:null}});
+    expect(normalizeContentPage("DOUYIN",{list:[{workId:"ms",durationMs:500}]},"SECONDS").items[0]?.durationMs).toBe(500);
+  });
   it("preserves pagination cursors without inventing them", () => {
     expect(normalizeContentPage("DOUYIN", { data: { has_more: 1, max_cursor: "12345", aweme_list: [] } })).toMatchObject({ hasMore: true, nextOffset: 12345 });
     expect(normalizeContentPage("DOUYIN", { hasMore: true, list: [] }).nextOffset).toBeNull();

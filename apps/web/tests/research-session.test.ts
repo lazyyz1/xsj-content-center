@@ -55,7 +55,13 @@ describe("Research private session and durable result", () => {
     await expect(reserveResearchRun(actor(), created.id, { question: "Changed", scope: scope(), requestKey: key })).rejects.toMatchObject({ code: "REQUEST_CONFLICT" });
     await expect(reserveResearchRun(actor(), created.id, { question, scope: scope(), requestKey: randomUUID() })).rejects.toMatchObject({ code: "RUN_ACTIVE" });
     let calls = 0;
-    const runtime = { provider: new MockLLMProvider(() => { calls++; return { sections: [{ title: "可核对的观点", text: "团队先记录问题，再核对证据。", sourceRefs: ["M1"], limitation: "仅依据选定访谈正文，不代表全部团队。" }] }; }), providerName: "FIXTURE", model: "research-fixture", mode: "FIXTURE" as const };
+    const runtime = { provider: new MockLLMProvider(input => {
+      calls++;
+      expect(input.systemPrompt).toContain("JSON");
+      const prompt=JSON.parse(input.prompt);
+      expect(prompt.responseSchema.properties.sections.items.required).toEqual(expect.arrayContaining(["title","text","sourceRefs","limitation"]));
+      return { sections: [{ title: "可核对的观点", text: "团队先记录问题，再核对证据。", sourceRefs: ["M1"], limitation: "仅依据选定访谈正文，不代表全部团队。" }] };
+    }), providerName: "FIXTURE", model: "research-fixture", mode: "FIXTURE" as const };
     await Promise.all([1, 2].map(() => executeResearchRun(actor(), created.id, requests[0]!.run.id, { runtime })));
     expect(calls).toBe(1);
     const before = (await getResearchSession(actor(), created.id)).runs[0]!;

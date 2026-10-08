@@ -2,7 +2,7 @@ import { resolveLLMModelId } from "@content-center/integrations";
 import "server-only";
 
 import { classifyLLMConfig, getAIModel, IntegrationService, isAIProvider, type AIModelCapabilities, type AIProvider } from "@content-center/integrations";
-import { LLMError, MockLLMProvider, OpenAICompatibleLLMProvider, openAICompatibleConfigSchema, type LLMProvider } from "@content-center/providers";
+import { LLMError, MockLLMProvider, OpenAICompatibleLLMProvider, openAICompatibleConfigSchema, isLocalReviewOffline, type LLMProvider } from "@content-center/providers";
 
 export type LLMRuntime = {
   provider: LLMProvider;
@@ -47,6 +47,7 @@ function mockFixture(prompt: string) {
 }
 
 export async function loadLLMRuntime(workspaceId: string, service = new IntegrationService(), selection?: LLMModelSelection | null): Promise<LLMRuntime> {
+  if (isLocalReviewOffline("LLM")) throw new LLMError("LOCAL_REVIEW_OFFLINE", "当前环境未启用模型调用，已有稿件和研究仍可阅读。", false);
   const status = await service.getIntegrationStatus(workspaceId, "LLM");
   if (status.status === "DISABLED") throw new LLMError("LLM_DISABLED", "AI 模型已禁用。", false);
   if (status.status !== "CONFIGURED" && status.status !== "MOCK") {

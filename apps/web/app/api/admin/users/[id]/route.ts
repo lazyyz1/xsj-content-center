@@ -3,9 +3,12 @@ import { z } from "zod";
 import { apiError, getSystemAdminApiContext } from "@/server/api-access";
 import { setUserDisabled, UserLifecycleError } from "@/server/admin/user-lifecycle";
 
+import { rejectCrossOrigin } from "@/server/account-api";
+
 const schema = z.object({ disabled: z.boolean() });
 
 export async function PATCH(request: Request, route: { params: Promise<{ id: string }> }) {
+  const rejected = rejectCrossOrigin(request); if (rejected) return rejected;
   const context = await getSystemAdminApiContext();
   if ("response" in context) return context.response;
   const parsed = schema.safeParse(await request.json().catch(() => null));

@@ -1,4 +1,5 @@
 import type { TranscriptionInput } from "../types";
+import { isLocalReviewOffline } from "../review-policy";
 import { LocalAsrError, type LocalAsrErrorCode } from "./errors";
 import { localAsrHealthSchema, localAsrTranscriptSchema } from "./schemas";
 import type { LocalAsrDevice, LocalAsrModel } from "./types";
@@ -28,14 +29,19 @@ function endpoint(base: string, path: string) {
 }
 
 async function responseError(response: Response) {
-  const raw = await response.json().catch(() => null) as { detail?: { code?: string; message?: string } } | null;
+  const raw = await readJson(response) as { detail?: { code?: string; message?: string } } | null;
   const code = raw?.detail?.code;
   const known = typeof code === "string" && KNOWN_CODES.has(code as LocalAsrErrorCode)
     ? code as LocalAsrErrorCode
     : "LOCAL_ASR_TRANSCRIPTION_FAILED";
-  return new LocalAsrError(known, raw?.detail?.message || "本地语音识别服务返回错误。", response.status >= 500);
+  return new LocalAsrError(known, "本地语音识别服务返回错误，请按错误类型检查服务或原件。", response.status >= 500);
 }
 
+async function readJson(response:Response) {
+ try{return await response.json();}
+ catch(error){if(error instanceof Error&&["TimeoutError","AbortError"].includes(error.name))throw new LocalAsrError("LOCAL_ASR_TIMEOUT","本地语音识别响应读取超时。",true);
+ throw new LocalAsrError("LOCAL_ASR_INVALID_RESPONSE","本地服务没有返回完整有效结果。",false);}
+}
 export class LocalAsrClient {
   private readonly fetcher: typeof fetch;
   private readonly timeoutMs: number;
@@ -53,7 +59,7 @@ export class LocalAsrClient {
   async health() {
     const response = await this.request(endpoint(this.config.endpoint, "/health"), { method: "GET" }, 10_000);
     if (!response.ok) throw await responseError(response);
-    const parsed = localAsrHealthSchema.safeParse(await response.json().catch(() => null));
+    const parsed = localAsrHealthSchema.safeParse(await readJson(response));
     if (!parsed.success) throw new LocalAsrError("LOCAL_ASR_INVALID_RESPONSE", "本地服务健康检查返回无效数据。", false);
     return parsed.data;
   }
@@ -81,7 +87,7 @@ export class LocalAsrClient {
     body.append("speakerDiarization", "false");
     const response = await this.request(endpoint(this.config.endpoint, "/transcribe"), { method: "POST", body }, this.timeoutMs);
     if (!response.ok) throw await responseError(response);
-    const parsed = localAsrTranscriptSchema.safeParse(await response.json().catch(() => null));
+    const parsed = localAsrTranscriptSchema.safeParse(await readJson(response));
     if (!parsed.success) throw new LocalAsrError("LOCAL_ASR_INVALID_RESPONSE", "本地服务返回结构不符合协议。", false);
     this.lastMetadata = {
       model: parsed.data.model,
@@ -94,6 +100,7 @@ export class LocalAsrClient {
   }
 
   private async request(url: URL, init: RequestInit, timeoutMs: number) {
+    if (isLocalReviewOffline()) throw new LocalAsrError("LOCAL_REVIEW_OFFLINE", "验收环境已关闭语音服务调用。", false);
     try {
       return await this.fetcher(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
     } catch (error) {

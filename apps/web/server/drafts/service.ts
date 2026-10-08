@@ -129,12 +129,13 @@ async function ensurePrimaryBranch(input: { workspaceId: string; userId: string;
 async function writeRevision(tx: Prisma.TransactionClient, input: {
   workspaceId: string;
   userId: string;
-  projectId: string;
+  projectId: string | null;
   branch: BranchRow;
   primaryDraftBranchId: string | null;
   data: { title: string; body: string; outline: string[]; origin: DraftRevisionOrigin; originNote?: string | null; generateRunId?: string | null; warningSnapshot?: unknown };
   expectedBranchVersion: number;
 }) {
+  if (input.primaryDraftBranchId && !input.projectId) throw new DraftServiceError("DRAFT_INVALID");
   if (input.branch.version !== input.expectedBranchVersion) throw new DraftServiceError("DRAFT_VERSION_CONFLICT");
   const content = { title: input.data.title.trim(), body: input.data.body, outline: input.data.outline };
   const sameAsCheckpoint = Boolean(input.branch.currentRevision
@@ -143,7 +144,7 @@ async function writeRevision(tx: Prisma.TransactionClient, input: {
     && JSON.stringify(strings(input.branch.currentRevision.outline)) === JSON.stringify(content.outline));
   if (sameAsCheckpoint) {
     const branch = await tx.draftBranch.findUniqueOrThrow({ where: { id: input.branch.id }, include: branchInclude });
-    const legacyContent = input.branch.id === input.primaryDraftBranchId ? await tx.motherContent.findUnique({ where: { projectId: input.projectId } }) : null;
+    const legacyContent = input.branch.id === input.primaryDraftBranchId ? await tx.motherContent.findUnique({ where: { projectId: input.projectId! } }) : null;
     return { branch: branchDTO(branch, input.primaryDraftBranchId), revision: revisionDTO(input.branch.currentRevision!, input.branch.currentRevisionId), legacyContent, checkpointCreated: false };
   }
   if (!content.title && !content.body.trim() && content.outline.length === 0) {
@@ -174,10 +175,10 @@ async function writeRevision(tx: Prisma.TransactionClient, input: {
   if (changed.count !== 1) throw new DraftServiceError("DRAFT_VERSION_CONFLICT");
   let legacyContent = null;
   if (input.branch.id === input.primaryDraftBranchId) {
-    const existing = await tx.motherContent.findUnique({ where: { projectId: input.projectId } });
+    const existing = await tx.motherContent.findUnique({ where: { projectId: input.projectId! } });
     legacyContent = existing
       ? await tx.motherContent.update({ where: { id: existing.id }, data: { title: revision.title, body: revision.body, outline: revision.outline as Prisma.InputJsonValue, origin: motherOrigin(revision.origin), originNote: revision.originNote, confirmedVersion: null, confirmedWarnings: { set: null }, ...(input.branch.currentRevision ? { version: { increment: 1 } } : {}) } })
-      : await tx.motherContent.create({ data: { workspaceId: input.workspaceId, projectId: input.projectId, title: revision.title, body: revision.body, outline: revision.outline as Prisma.InputJsonValue, origin: motherOrigin(revision.origin), originNote: revision.originNote, createdById: input.userId } });
+      : await tx.motherContent.create({ data: { workspaceId: input.workspaceId, projectId: input.projectId!, title: revision.title, body: revision.body, outline: revision.outline as Prisma.InputJsonValue, origin: motherOrigin(revision.origin), originNote: revision.originNote, createdById: input.userId } });
   }
   await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "draft_revision.created", resourceType: "draft_revision", resourceId: revision.id, metadata: json({ projectId: input.projectId, draftBranchId: input.branch.id, revision: revision.revision, origin: revision.origin, primary: input.branch.id === input.primaryDraftBranchId }) } });
   const branch = await tx.draftBranch.findUniqueOrThrow({ where: { id: input.branch.id }, include: branchInclude });
@@ -188,7 +189,7 @@ async function writeRevision(tx: Prisma.TransactionClient, input: {
 export async function writeDraftRevisionInTransaction(tx: Prisma.TransactionClient, input: {
   workspaceId: string;
   userId: string;
-  projectId: string;
+  projectId: string | null;
   branchId: string;
   primaryDraftBranchId: string | null;
   expectedVersion: number;

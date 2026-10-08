@@ -139,13 +139,13 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
 
   constructor(config: OpenAICompatibleConfig, options: OpenAICompatibleOptions = {}) {
     this.config = openAICompatibleConfigSchema.parse(config);
-    this.fetcher = options.fetch ?? providerFetch;
+    this.fetcher = options.fetch ?? ((input, init) => providerFetch(input, init, "LLM"));
     this.timeoutMs = options.timeoutMs ?? resolveRequestCapabilities(this.config).timeoutMs;
     this.maxRetries = options.maxRetries ?? 1;
   }
 
   async generateText(input: LLMGenerateInput): Promise<ProviderResult<LLMTextResult>> {
-    return this.requestWithRetries(input, { type: "json_object" });
+    return this.requestWithRetries(input);
   }
 
   async streamText(input: LLMGenerateInput, options: LLMStreamOptions): Promise<ProviderResult<LLMTextResult>> {
@@ -166,7 +166,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
           ...(capabilities.supportsTemperature ? { temperature: input.temperature ?? 0.4 } : {}),
           ...(capabilities.thinking ? { thinking: capabilities.thinking } : {}),
           ...(capabilities.reasoningEffort ? { reasoning_effort: capabilities.reasoningEffort } : {}),
-          ...(input.maxCompletionTokens ? { max_completion_tokens: input.maxCompletionTokens } : {}),
+          ...(input.maxCompletionTokens ? { [this.config.provider.toUpperCase() === "DEEPSEEK" ? "max_tokens" : "max_completion_tokens"]: input.maxCompletionTokens } : {}),
           stream: true,
           stream_options: { include_usage: true },
         }),
@@ -213,7 +213,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
     return { providerMode: "REAL", data: { text, model, providerRequestId, finishReason, usage } };
   }
 
-  private async requestWithRetries(input: LLMGenerateInput, responseFormat: ResponseFormat): Promise<ProviderResult<LLMTextResult>> {
+  private async requestWithRetries(input: LLMGenerateInput, responseFormat?: ResponseFormat): Promise<ProviderResult<LLMTextResult>> {
     let lastError: unknown;
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
       try {
@@ -232,6 +232,9 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
       ? jsonSchemaResponseFormat(schema, input.structuredOutput.schemaName ?? "structured_response")
       : { type: "json_object" } as const;
     const result = await this.requestWithRetries(input, responseFormat);
+    if (result.data.finishReason === "length") {
+      throw new LLMError("LLM_INVALID_RESPONSE", "AI 模型返回的结构内容未完成，请缩小范围后重试。", false, { providerRequestId: result.data.providerRequestId, actualModel: result.data.model, finishReason: result.data.finishReason });
+    }
     let raw: unknown;
     try {
       raw = parseStructuredJson(result.data.text);
@@ -257,7 +260,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
   async classify(input: { prompt: string }) { const result = await this.generateText(input); return { providerMode: result.providerMode, data: { labels: [result.data.text] } }; }
   async adapt(input: { prompt: string; platform: string }) { return this.generate({ prompt: input.prompt }); }
 
-  private async request(input: LLMGenerateInput, responseFormat: ResponseFormat): Promise<ProviderResult<LLMTextResult>> {
+  private async request(input: LLMGenerateInput, responseFormat?: ResponseFormat): Promise<ProviderResult<LLMTextResult>> {
     let response: Response;
     const capabilities = resolveRequestCapabilities(this.config);
     if (input.content?.some((block) => block.type === "image") && !capabilities.supportsImage) {
@@ -277,8 +280,8 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
           ...(capabilities.supportsTemperature ? { temperature: input.temperature ?? 0.4 } : {}),
           ...(capabilities.thinking ? { thinking: capabilities.thinking } : {}),
           ...(capabilities.reasoningEffort ? { reasoning_effort: capabilities.reasoningEffort } : {}),
-          ...(input.maxCompletionTokens ? { max_completion_tokens: input.maxCompletionTokens } : {}),
-          response_format: responseFormat,
+          ...(input.maxCompletionTokens ? { [this.config.provider.toUpperCase() === "DEEPSEEK" ? "max_tokens" : "max_completion_tokens"]: input.maxCompletionTokens } : {}),
+          ...(responseFormat ? { response_format: responseFormat } : {}),
         }),
         signal: AbortSignal.timeout(this.timeoutMs),
       });

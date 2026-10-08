@@ -1,5 +1,6 @@
 import { db, type Prisma } from "@content-center/db";
-import type { ContentIngestPayload } from "./queue";
+import type { ContentIngestPayload } from "./queue-producer";
+import { markDispatchPending } from "./job-recovery";
 import { getSourceContent } from "./source-content";
 
 export class MaterialAnalysisRequestError extends Error {
@@ -38,11 +39,11 @@ export async function requestMaterialAnalysisJob(input: { workspaceId: string; s
     throw error;
   }
   try {
-    const enqueue = dependencies.enqueue ?? (async (payload: ContentIngestPayload, maxAttempts: number) => (await import("./queue")).enqueueMaterialAnalysis(payload, maxAttempts));
+    const enqueue = dependencies.enqueue ?? (async (payload: ContentIngestPayload, maxAttempts: number) => (await import("./queue-producer")).enqueueMaterialAnalysis(payload, maxAttempts));
     await enqueue({ jobId: reserved.job.id, workspaceId: input.workspaceId, sourceItemId: input.sourceItemId, requestedById: input.requestedById }, reserved.job.maxAttempts);
     return { ...reserved, created: true as const };
   } catch {
-    await db.$transaction([db.materialAnalysis.update({ where: { id: reserved.analysis.id }, data: { status: "FAILED", errorCode: "QUEUE_UNAVAILABLE", errorMessage: "内容整理暂时无法开始。" } }), db.ingestJob.update({ where: { id: reserved.job.id }, data: { status: "FAILED", errorCode: "QUEUE_UNAVAILABLE", errorMessage: "内容整理暂时无法开始。", finishedAt: new Date() } })]);
-    throw new MaterialAnalysisRequestError("QUEUE_UNAVAILABLE", "内容整理暂时无法开始。");
+    await markDispatchPending(reserved.job.id, input.workspaceId);
+    return { ...reserved, created: true as const };
   }
 }

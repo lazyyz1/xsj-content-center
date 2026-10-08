@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
+import { markDispatchPending } from "@content-center/worker/job-recovery";
 import { reserveExperienceUsage } from "@content-center/worker/experience-limits";
 import "server-only";
 
 import { detectSourcePlatform, normalizeSourceUrl } from "@content-center/core";
 import { db } from "@content-center/db";
-import { enqueueContentIngest } from "@content-center/worker/queue";
+import { enqueueContentIngest } from "@content-center/worker/queue-producer";
 import { IntegrationService } from "@content-center/integrations";
 import {
   createSourceMetadataEnvelope,
@@ -29,7 +31,7 @@ export type CreateSourceInput =
     };
 
 export class SourceServiceError extends Error {
-  constructor(readonly code: "REDFOX_NOT_CONFIGURED" | "REDFOX_DISABLED") {
+  constructor(readonly code: "REDFOX_NOT_CONFIGURED" | "REDFOX_DISABLED" | "IDEMPOTENCY_KEY_REUSED") {
     super(code);
     this.name = "SourceServiceError";
   }
@@ -42,7 +44,8 @@ export async function createSourceAndJob(input: {
   userId: string;
   source: CreateSourceInput;
   autoTranscribe?: boolean;
-}) {
+  clientRequestId?: string;
+}, dependencies: { enqueue?: typeof enqueueContentIngest } = {}) {
   const redFoxSource = input.source.kind === "DOUYIN" || input.source.kind === "REDFOX";
   if (redFoxSource) {
     const integration = await integrationService.getIntegrationStatus(input.workspaceId, "REDFOX");
@@ -80,8 +83,19 @@ export async function createSourceAndJob(input: {
       ? input.source.description?.trim() || null
       : null;
 
-  if (redFoxSource) { const release = await reserveExperienceUsage({ ...input, operation: "SEARCH" }); await release(); }
+  const requestDigest=createHash("sha256").update(JSON.stringify({source:input.source,autoTranscribe:input.autoTranscribe ?? false})).digest("hex");
   const created = await db.$transaction(async (tx) => {
+    if(input.clientRequestId) {
+      const key=JSON.stringify(["source-request",input.workspaceId,input.userId,input.clientRequestId]);
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",key);
+      const existing=await tx.ingestJob.findFirst({where:{workspaceId:input.workspaceId,requestedById:input.userId,metadata:{path:["clientRequestId"],equals:input.clientRequestId}},include:{sourceItem:true}});
+      if(existing) {
+        const metadata=existing.metadata && typeof existing.metadata==="object" && !Array.isArray(existing.metadata)?existing.metadata:{};
+        if(!("requestDigest" in metadata) || metadata.requestDigest!==requestDigest)throw new SourceServiceError("IDEMPOTENCY_KEY_REUSED");
+        return {sourceItem:existing.sourceItem,ingestJob:existing};
+      }
+    }
+    if (redFoxSource) { const release = await reserveExperienceUsage({ ...input, operation: "SEARCH" }); await release(); }
     const sourceItem = await tx.sourceItem.create({
       data: {
         workspaceId: input.workspaceId,
@@ -113,7 +127,7 @@ export async function createSourceAndJob(input: {
         providerMode,
         status: "QUEUED",
         maxAttempts: 3,
-        metadata: input.autoTranscribe ? { autoTranscribe: true } : undefined,
+        metadata: input.clientRequestId ? {clientRequestId:input.clientRequestId,requestDigest,...(input.autoTranscribe?{autoTranscribe:true}:{})} : input.autoTranscribe ? {autoTranscribe:true} : undefined,
       },
     });
     await tx.auditLog.create({
@@ -130,7 +144,8 @@ export async function createSourceAndJob(input: {
   });
 
   try {
-    await enqueueContentIngest(
+    if (created.ingestJob.status !== "QUEUED") return created;
+    await (dependencies.enqueue ?? enqueueContentIngest)(
       {
         jobId: created.ingestJob.id,
         workspaceId: input.workspaceId,
@@ -145,24 +160,8 @@ export async function createSourceAndJob(input: {
       workspaceId: input.workspaceId,
       sourceItemId: created.sourceItem.id,
     });
-    await db.$transaction([
-      db.ingestJob.update({
-        where: { id: created.ingestJob.id },
-        data: { status: "FAILED", errorCode: "QUEUE_UNAVAILABLE", errorMessage: "采集队列暂时不可用。", finishedAt: new Date() },
-      }),
-      db.sourceItem.update({ where: { id: created.sourceItem.id }, data: { status: "FAILED" } }),
-      db.auditLog.create({
-        data: {
-          workspaceId: input.workspaceId,
-          userId: input.userId,
-          action: "ingest.failed",
-          resourceType: "ingest_job",
-          resourceId: created.ingestJob.id,
-          metadata: { sourceItemId: created.sourceItem.id, errorCode: "QUEUE_UNAVAILABLE" },
-        },
-      }),
-    ]);
-    throw new Error("QUEUE_UNAVAILABLE");
+    await markDispatchPending(created.ingestJob.id, input.workspaceId);
+
   }
   return created;
 }

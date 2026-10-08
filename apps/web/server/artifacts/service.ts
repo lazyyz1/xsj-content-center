@@ -6,6 +6,10 @@ import { artifactSummaryView, artifactView, type ArtifactSummaryView, type Artif
 
 type WorkspaceRole = "OWNER" | "ADMIN" | "EDITOR" | "VIEWER";
 
+export function readableArtifactScope(userId: string): Prisma.ArtifactWhereInput {
+  return { OR: [{ visibility: "WORKSPACE" }, { visibility: "PRIVATE", createdById: userId }] };
+}
+
 export type ArtifactServiceErrorCode = "ARTIFACT_INVALID_INPUT" | "ARTIFACT_RESULT_NOT_APPLICABLE" | "ARTIFACT_MESSAGE_MISMATCH" | "ARTIFACT_FORBIDDEN" | "ARTIFACT_NOT_FOUND" | "ARTIFACT_VERSION_CONFLICT";
 
 export class ArtifactServiceError extends Error {
@@ -44,7 +48,7 @@ function requireWrite(role: WorkspaceRole | undefined) {
 
 async function scopedArtifact(input: { workspaceId: string; userId: string; projectId: string; artifactId: string }) {
   await projectForUser(input);
-  const artifact = await db.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId, projectId: input.projectId, draftBranch: { deletedAt: null } }, include: artifactInclude });
+  const artifact = await db.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId, projectId: input.projectId, ...readableArtifactScope(input.userId), draftBranch: { deletedAt: null } }, include: artifactInclude });
   if (!artifact) throw new ArtifactServiceError("ARTIFACT_NOT_FOUND", "产出不存在。");
   return artifact;
 }
@@ -65,7 +69,7 @@ function rewriteFromCompletedMessage(message: { metadata: unknown }) {
 
 export async function listArtifacts(input: { workspaceId: string; userId: string; projectId: string }): Promise<ArtifactSummaryView[]> {
   await projectForUser(input);
-  const rows = await db.artifact.findMany({ where: { workspaceId: input.workspaceId, projectId: input.projectId, draftBranch: { deletedAt: null } }, include: artifactInclude, orderBy: { updatedAt: "desc" } });
+  const rows = await db.artifact.findMany({ where: { workspaceId: input.workspaceId, projectId: input.projectId, visibility: "WORKSPACE", draftBranch: { deletedAt: null } }, include: artifactInclude, orderBy: { updatedAt: "desc" } });
   return rows.map(artifactSummaryView);
 }
 
@@ -114,7 +118,7 @@ export async function applyTextArtifactRevision(input: { workspaceId: string; us
 
   try {
     await db.$transaction(async (tx) => {
-      const artifact = await tx.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId, projectId: input.projectId, draftBranch: { deletedAt: null } }, include: { draftBranch: { include: { currentRevision: true } } } });
+      const artifact = await tx.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId, projectId: input.projectId, ...readableArtifactScope(input.userId), draftBranch: { deletedAt: null } }, include: { draftBranch: { include: { currentRevision: true } } } });
       if (!artifact) throw new ArtifactServiceError("ARTIFACT_NOT_FOUND", "产出不存在。");
       if (artifact.draftBranchId === project.primaryDraftBranchId) throw new ArtifactServiceError("ARTIFACT_INVALID_INPUT", "当前产出不能使用 legacy primary draft。");
       if (artifact.draftBranch.version !== input.expectedVersion) throw new ArtifactServiceError("ARTIFACT_VERSION_CONFLICT", "产出已经在其他位置更新，请刷新后重试。");
@@ -126,6 +130,29 @@ export async function applyTextArtifactRevision(input: { workspaceId: string; us
     if (error instanceof ArtifactServiceError) throw error;
     if (error instanceof DraftServiceError && error.code === "DRAFT_VERSION_CONFLICT") throw new ArtifactServiceError("ARTIFACT_VERSION_CONFLICT", "产出已经在其他位置更新，请刷新后重试。");
     if (error && typeof error === "object" && "code" in error && error.code === "P2034") throw new ArtifactServiceError("ARTIFACT_VERSION_CONFLICT", "产出已经在其他位置更新，请刷新后重试。");
+    throw error;
+  }
+  return getArtifactForUser(input);
+}
+
+/** Manual editing reuses the same versioned branch primitive as AI revisions. */
+export async function saveTextArtifact(input: { workspaceId: string; userId: string; projectId: string; artifactId: string; expectedVersion: number; title: string; body: string }): Promise<ArtifactView> {
+  const title = input.title.trim();
+  if (!title || title.length > 200 || input.body.length > 1_000_000 || !Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 1) throw new ArtifactServiceError("ARTIFACT_INVALID_INPUT", "请检查成果标题、正文和版本。");
+  const project = await projectForUser(input); requireWrite(project.role);
+  try {
+    await db.$transaction(async tx => {
+      const artifact = await tx.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId, projectId: input.projectId, ...readableArtifactScope(input.userId), draftBranch: { deletedAt: null } }, include: { draftBranch: true } });
+      if (!artifact) throw new ArtifactServiceError("ARTIFACT_NOT_FOUND", "成果不存在或不可访问。");
+      if (artifact.draftBranchId === project.primaryDraftBranchId) throw new ArtifactServiceError("ARTIFACT_INVALID_INPUT", "请在项目稿件中修改当前主稿。");
+      if (artifact.draftBranch.version !== input.expectedVersion) throw new ArtifactServiceError("ARTIFACT_VERSION_CONFLICT", "成果已经更新，请重新打开后再保存；当前编辑内容仍保留。");
+      await writeDraftRevisionInTransaction(tx, { workspaceId: input.workspaceId, userId: input.userId, projectId: input.projectId, branchId: artifact.draftBranchId, primaryDraftBranchId: project.primaryDraftBranchId, expectedVersion: input.expectedVersion, title, body: input.body, outline: strings(artifact.draftBranch.workingOutline), origin: "HUMAN", originNote: "手动修改通用文本成果" });
+      await tx.artifact.update({ where: { id: artifact.id }, data: { title, updatedAt: new Date() } });
+      await tx.auditLog.create({ data: { workspaceId: input.workspaceId, userId: input.userId, action: "artifact.manually_saved", resourceType: "artifact", resourceId: artifact.id, metadata: json({ projectId: input.projectId, previousVersion: input.expectedVersion }) } });
+    }, { isolationLevel: "Serializable" });
+  } catch (error) {
+    if (error instanceof ArtifactServiceError) throw error;
+    if (error instanceof DraftServiceError && error.code === "DRAFT_VERSION_CONFLICT" || error && typeof error === "object" && "code" in error && error.code === "P2034") throw new ArtifactServiceError("ARTIFACT_VERSION_CONFLICT", "成果已经更新，请重新打开后再保存；当前编辑内容仍保留。");
     throw error;
   }
   return getArtifactForUser(input);

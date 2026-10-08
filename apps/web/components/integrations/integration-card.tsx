@@ -52,9 +52,11 @@ class IntegrationClientError extends Error {
 }
 
 function friendlyError(error: IntegrationClientError) {
+  if (error.code === "EXTERNAL_CALLS_DISABLED") return "当前本机已暂停外部服务调用；配置仍可查看和保存，恢复真实调用需先确认。";
   if (error.code === "INTEGRATION_ENCRYPTION_NOT_CONFIGURED" || error.code === "INVALID_INTEGRATION_ENCRYPTION_KEY") {
     return "密钥加密服务尚未配置，请联系系统管理员。";
   }
+  if (error.code === "INTEGRATION_SECRET_DECRYPT_FAILED") return "已保存配置暂时无法解密，请联系管理员核对原加密配置；不要直接删除或重填密钥。";
   if (error.code === "INTEGRATION_SECRET_REQUIRED") return "请填写 API 密钥；更换服务或接口地址时，需要重新输入密钥。";
   if (error.code === "KIMI_NOT_CONFIGURED") return "AI 模型尚未配置，请联系管理员完成设置。";
   if (error.code === "KIMI_MODEL_ID_MISSING") return "请选择一个可用的 AI 模型。";
@@ -259,7 +261,7 @@ export function IntegrationCard({ integration, canManage, encryptionConfigured }
           <Button type="button" variant="secondary" disabled={busy || !integration.configured} onClick={async () => {
             setBusy(true); setTestResult("正在连接，请稍候…");
             try { const result = await call(`/api/integrations/${integration.provider}/test`, "POST", sampleUrl ? { sampleUrl } : {}); setTestResult(result.message || "测试完成。"); }
-            catch { setTestResult("测试未完成，请检查权限和网络后重试。"); } finally { setBusy(false); }
+            catch (cause) { setTestResult(cause instanceof IntegrationClientError ? friendlyError(cause) : "测试未完成，请稍后重试。"); } finally { setBusy(false); }
           }}>测试连接</Button>
           {testResult ? <p role="status" className="text-sm">{testResult}</p> : null}
           <div className="flex flex-wrap gap-2 pt-1">

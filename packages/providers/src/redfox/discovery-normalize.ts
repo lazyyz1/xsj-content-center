@@ -58,7 +58,7 @@ function isoDate(value: unknown): string | null {
   const numeric = Number(raw);
   const date = Number.isFinite(numeric)
     ? new Date(numeric < 10_000_000_000 ? numeric * 1000 : numeric)
-    : new Date(raw.replace(" ", "T"));
+    : new Date(/^\d{4}-\d\d-\d\d[ T]\d\d:\d\d/.test(raw) && !/(Z|[+-]\d\d:\d\d)$/.test(raw) ? raw.replace(" ", "T") + "+08:00" : raw.replace(" ", "T"));
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
@@ -105,7 +105,7 @@ function contentType(item: JsonRecord): ExternalContentType {
   return "UNKNOWN";
 }
 
-export function normalizeExternalContent(platform: DiscoveryPlatform, item: unknown): ExternalContent {
+export function normalizeExternalContent(platform: DiscoveryPlatform, item: unknown, durationUnit?: "SECONDS" | "MILLISECONDS"): ExternalContent {
   const source = record(item);
   if (!source) throw new RedFoxError("REDFOX_INVALID_RESPONSE", "RedFox 内容数据结构无效。", false);
   const author = nested(source, ["author", "user", "account", "authorInfo", "userInfo"]) ?? {};
@@ -120,9 +120,9 @@ export function normalizeExternalContent(platform: DiscoveryPlatform, item: unkn
     contentType: contentType(source),
     title: text(valueAt(source, ["title", "noteTitle", "name"])) ?? text(valueAt(source, ["desc", "description", "content"])),
     description: text(valueAt(source, ["description", "desc", "content", "noteDesc"])),
-    authorId: text(valueAt(author, ["secUid", "sec_uid", "userId", "uid", "accountId", "redId", "id"])) ?? text(valueAt(source, ["authorId", "userId"])),
-    authorName: text(valueAt(author, ["nickname", "name", "accountName"])) ?? text(valueAt(source, ["authorName", "nickname", "author"])),
-    authorAvatarUrl: imageUrl(valueAt(author, ["avatarUrl", "avatar", "avatarThumb", "image"])),
+    authorId: text(valueAt(author, ["secUid", "sec_uid", "userId", "uid", "accountId", "redId", "id"])) ?? text(valueAt(source, ["authorSecUid", "secUid", "authorUid", "authorId", "userId"])),
+    authorName: text(valueAt(author, ["nickname", "name", "accountName"])) ?? text(valueAt(source, ["accountName", "authorName", "nickname", "author"])),
+    authorAvatarUrl: imageUrl(valueAt(author, ["avatarUrl", "avatar", "avatarThumb", "image"])) ?? imageUrl(valueAt(source, ["avatarUrl", "authorAvatarUrl"])),
     coverUrl: imageUrl(valueAt(source, ["coverUrl", "cover", "dynamicCover", "imageUrl", "noteCover", "images"])),
     originalUrl,
     publishedAt: isoDate(valueAt(source, ["publishedAt", "publishTime", "createTime", "create_time", "time"])),
@@ -133,7 +133,8 @@ export function normalizeExternalContent(platform: DiscoveryPlatform, item: unkn
       shares: number(valueAt(stats, ["shares", "shareCount", "share_count"])),
       favorites: number(valueAt(stats, ["favorites", "favoriteCount", "collectCount", "collect_count"])),
     },
-    durationMs: duration === null ? null : duration < 10_000 ? duration * 1000 : duration,
+    durationMs: duration === null ? null : source.durationMs !== undefined || durationUnit === "MILLISECONDS" ? duration : durationUnit === "SECONDS" ? duration * 1000 : duration < 10_000 ? duration * 1000 : duration,
+    dataAsOf: isoDate(valueAt(source, ["crawlTime", "dataAsOf"])),
     sourceProvider: "REDFOX",
     rawProviderMetadata: source,
   };
@@ -142,7 +143,7 @@ export function normalizeExternalContent(platform: DiscoveryPlatform, item: unkn
 export function normalizeExternalAccount(platform: DiscoveryPlatform, item: unknown): ExternalAccount {
   const source = record(item);
   if (!source) throw new RedFoxError("REDFOX_INVALID_RESPONSE", "RedFox 账号数据结构无效。", false);
-  const externalId = text(valueAt(source, ["accountId", "uniqueId", "unique_id", "redId", "userId", "userid", "secUid", "sec_uid", "uid", "id"]));
+  const externalId = text(valueAt(source, ["accountId", "uniqueId", "unique_id", "displayId", "redId", "userId", "userid", "secUid", "sec_uid", "uid", "id"]));
   const name = text(valueAt(source, ["nickname", "name", "accountName", "userName"]));
   if (!externalId || !name) throw new RedFoxError("REDFOX_INVALID_RESPONSE", "RedFox 账号缺少稳定标识或名称。", false);
   const originalUrl = url(valueAt(source, ["originalUrl", "authorUrl", "profileUrl", "url", "link"]));
@@ -160,9 +161,9 @@ export function normalizeExternalAccount(platform: DiscoveryPlatform, item: unkn
   };
 }
 
-export function normalizeContentPage(platform: DiscoveryPlatform, value: unknown): ExternalResultPage<ExternalContent> {
+export function normalizeContentPage(platform: DiscoveryPlatform, value: unknown, durationUnit?: "SECONDS" | "MILLISECONDS"): ExternalResultPage<ExternalContent> {
   const meta = pageMeta(value);
-  const items = itemList(value).map((item) => normalizeExternalContent(platform, item));
+  const items = itemList(value).map((item) => normalizeExternalContent(platform, item, durationUnit));
   return { items, ...meta };
 }
 

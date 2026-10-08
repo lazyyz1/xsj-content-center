@@ -1,3 +1,4 @@
+import { isLocalReviewOffline } from "@content-center/providers";
 import { systemManagedProvidersEnabled } from "@content-center/integrations";
 import { z } from "zod";
 import { apiError, getApiWorkspaceContext } from "@/server/api-access";
@@ -12,6 +13,8 @@ export async function POST(request: Request, route: { params: Promise<{ provider
   if (systemManagedProvidersEnabled() || !["OWNER", "ADMIN"].includes(context.role)) return apiError("FORBIDDEN", 403, "你没有权限测试公司 API。");
   const parsed = configurableProviderOrResponse((await route.params).provider);
   if ("response" in parsed) return parsed.response;
+  if (parsed.provider === "LLM" && isLocalReviewOffline()) return apiError("EXTERNAL_CALLS_DISABLED", 403, "当前本机已暂停外部服务调用；模型配置仍可查看和保存，连接测试需先明确恢复外部调用，可能产生服务费用。");
+  if(parsed.provider==="REDFOX"&&isLocalReviewOffline("RESEARCH_COLLECTION"))return apiError("EXTERNAL_CALLS_DISABLED",403,"当前环境未开放研究采集调用；红狐配置可以保存，真实连接测试暂未开放。");
   const body = z.object({ sampleUrl: z.string().url().max(2000).refine(value => { const url = new URL(value); return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password; }).optional() }).strict().safeParse(await request.json().catch(() => ({})));
   if (!body.success) return apiError("INVALID_INPUT", 400, "请填写有效的公开测试链接。");
   const key = `${context.workspace.id}:${parsed.provider}`;

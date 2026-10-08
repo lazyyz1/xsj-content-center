@@ -5,6 +5,7 @@ import { isIP } from "node:net";
 import type { LookupFunction } from "node:net";
 import { normalizeSourceUrl } from "@content-center/core";
 import { IngestProviderError } from "./ingest-error";
+import { assertReviewExternalAllowed, type ExternalCallPurpose } from "./review-policy";
 
 export type ResolvedAddress = { address: string; family: 4 | 6 };
 export type AddressResolver = (hostname: string) => Promise<ResolvedAddress[]>;
@@ -61,7 +62,9 @@ export async function resolvePublicAddress(
   input: string,
   resolver: AddressResolver = defaultResolver,
   allowedTestOrigin?: string,
+  purpose: ExternalCallPurpose = "GENERAL",
 ): Promise<{ url: URL; addresses: ResolvedAddress[] }> {
+  assertReviewExternalAllowed(purpose);
   let url: URL;
   try {
     url = new URL(normalizeSourceUrl(input));
@@ -156,6 +159,7 @@ const defaultTransport: SafeTransport = (url, address, options) =>
   });
 
 export async function fetchPublicText(input: string, options: SafeFetchOptions = {}) {
+  assertReviewExternalAllowed();
   const resolver = options.resolver ?? defaultResolver;
   const transport = options.transport ?? defaultTransport;
   const maxRedirects = options.maxRedirects ?? 4;

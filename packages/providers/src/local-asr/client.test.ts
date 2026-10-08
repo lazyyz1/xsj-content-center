@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+// Every client below injects a fake fetch; no network transport is used.
+vi.mock("../review-policy",()=>({isLocalReviewOffline:()=>false}));
 import { LocalAsrClient } from "./client";
 import { LocalFunASRTranscriptionProvider } from "./provider";
 
@@ -43,3 +45,15 @@ describe("LocalAsrClient", () => {
   });
 });
 
+
+describe("ASR response safety",()=>{
+ it("classifies body timeouts and does not turn them into schema errors",async()=>{
+ const client=new LocalAsrClient(config,{fetch:vi.fn(async()=>({ok:true,json:async()=>{throw new DOMException("private fixture details","TimeoutError");}})) as unknown as typeof fetch});
+ await expect(client.transcribe({audio:{mode:"BINARY_DATA",data:new Uint8Array([1])}})).rejects.toMatchObject({code:"LOCAL_ASR_TIMEOUT"});
+ });
+ it("does not echo arbitrary provider error text",async()=>{
+ const client=new LocalAsrClient(config,{fetch:vi.fn(async()=>new Response(JSON.stringify({detail:{code:"LOCAL_ASR_TRANSCRIPTION_FAILED",message:"SECRET-fixture-token"}}),{status:500})) as typeof fetch});
+ const error=await client.transcribe({audio:{mode:"BINARY_DATA",data:new Uint8Array([1])}}).catch(e=>e);
+ expect(error.message).not.toContain("SECRET");expect(error.code).toBe("LOCAL_ASR_TRANSCRIPTION_FAILED");
+ });
+});

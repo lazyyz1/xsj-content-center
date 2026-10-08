@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { db } from "@content-center/db";
 import { Card } from "@content-center/ui";
 import { CreateUserForm } from "@/components/admin/create-user-form";
@@ -12,7 +13,8 @@ export default async function AdminUsersPage() {
     orderBy: { createdAt: "desc" },
   });
   return <>
-    <PageHeader title="用户管理" description="创建内部账号并查看每位用户的个人内容空间。" />
+    <PageHeader title="平台账号" description="查看登录账号状态。客户成员权限在各自公司空间管理；开通客户请选择“客户空间”。" />
+    <nav aria-label="平台账号与空间" className="mb-5 flex flex-wrap gap-4 text-sm"><Link className="underline" href="/platform/accounts">平台账号</Link><Link className="underline" href="/platform/spaces">客户空间与负责人邀请</Link></nav>
     <Card className="mb-6 p-5"><CreateUserForm /></Card>
     <Card className="overflow-x-auto p-0">
       <table className="w-full min-w-[860px] text-left text-sm">
